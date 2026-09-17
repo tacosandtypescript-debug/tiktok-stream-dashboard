@@ -185,8 +185,9 @@ El objetivo del proyecto es no molestar al juego, así que la parte pesada (WebV
 
 ## Limitaciones conocidas
 
-- **Selección de dispositivo de audio**: el TTS usa siempre el dispositivo por defecto. Enrutarlo a Voicemeeter/OBS está pendiente (D3).
+- **Selección de dispositivo de audio**: la página de TTS lista las salidas disponibles y permite cambiar de sink de forma segura; si un dispositivo deja de existir, conserva el anterior y muestra el diagnóstico.
 - **Catálogo de voces curado**: la interfaz ofrece una lista seleccionada de voces es/en; el listado completo del servicio se puede consultar con `--tts-voices`, pero no se ha volcado a la interfaz.
+- **Persistencia del TTS**: el perfil predeterminado se carga desde SQLite antes de arrancar el gestor y guarda el snapshot completo de ajustes, incluidos voz, volumen, velocidad, tono, dispositivo, fuentes, filtros y capacidad de cola.
 - **Filtros del TTS no configurables**: las listas de palabras y usuarios bloqueados existen y funcionan, pero se editan en código, no desde la interfaz.
 - **Las entradas a la sala se cuentan, no se listan**: es el mensaje más frecuente de TikTok y una fila por entrada taparía el chat.
 - **`metrics.subscribers` solo crece**: es un contador acumulado, no un valor vivo.
