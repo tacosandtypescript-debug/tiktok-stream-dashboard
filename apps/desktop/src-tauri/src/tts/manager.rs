@@ -33,7 +33,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use crate::core::event::{Event, EventKind};
@@ -89,7 +89,8 @@ const CACHE_PRUNE_EVERY: u64 = 100;
 
 /// Configuracion del TTS tal como la ve la interfaz. Es el contrato que
 /// persistira SQLite por perfil (docs/milestone-2.md §4).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TtsSettings {
     pub enabled: bool,
     pub voice_es: String,
@@ -98,6 +99,9 @@ pub struct TtsSettings {
     pub volume: f32,
     pub rate: String,
     pub pitch: String,
+    /// Nombre del dispositivo seleccionado. `None` usa el predeterminado del
+    /// sistema.
+    pub audio_device: Option<String>,
     /// Leer en voz alta los regalos que cierran su racha.
     pub read_gifts: bool,
     /// Leer los follows. Apagado por defecto: una sala media genera decenas por
@@ -117,6 +121,7 @@ impl Default for TtsSettings {
             volume: 1.0,
             rate: "+0%".to_string(),
             pitch: "+0Hz".to_string(),
+            audio_device: None,
             read_gifts: true,
             read_follows: false,
             filters: FilterConfig::default(),
@@ -171,6 +176,8 @@ pub struct TtsStatus {
     /// Fallo actual de la salida de audio.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_degraded: Option<String>,
+    /// Nombre real del dispositivo activo; `None` indica el sink de reserva.
+    pub audio_device: Option<String>,
 }
 
 /// Contadores propios del gestor.
@@ -288,7 +295,9 @@ pub struct TtsManager {
     /// Se clona en `consumer_future`; el propio gestor publica avisos de
     /// diagnostico en el.
     bus: Arc<EventBus>,
-    sink: Arc<dyn AudioSink>,
+    sink: RwLock<Arc<dyn AudioSink>>,
+    /// Estado efectivo, separado del dispositivo solicitado en los ajustes.
+    audio_device: RwLock<Option<String>>,
     /// Cambio de estado que puede producir trabajo. El bucle lo espera: es lo
     /// que sustituye a sondear la cola.
     wake_tx: watch::Sender<u64>,
@@ -318,6 +327,8 @@ impl TtsManager {
         let filters = Filters::new(settings.filters.clone(), Instant::now());
         let (wake_tx, wake_rx) = watch::channel(0u64);
         let volume = settings.volume;
+        let audio_device = sink.device_name();
+        let audio_error = sink.last_error();
 
         let manager = Self {
             settings: RwLock::new(settings),
@@ -330,18 +341,19 @@ impl TtsManager {
             paused: Mutex::new(false),
             provider,
             bus,
-            sink,
+            sink: RwLock::new(sink),
+            audio_device: RwLock::new(audio_device),
             wake_tx,
             wake_rx: Mutex::new(Some(wake_rx)),
             started: Mutex::new(false),
             loop_task: Mutex::new(None),
             current_cancel: Mutex::new(None),
             provider_degraded: Mutex::new(None),
-            audio_degraded: Mutex::new(None),
+            audio_degraded: Mutex::new(audio_error),
         };
         // El volumen del dispositivo no es un detalle de cada frase: se aplica
         // una vez y sobrevive a todas las reproducciones.
-        manager.sink.set_volume(volume);
+        manager.sink().set_volume(volume);
         manager
     }
 
@@ -576,7 +588,7 @@ impl TtsManager {
             // audio, sin esperar a que termine la frase en curso.
             self.cancel_current_synthesis();
             self.clear();
-            self.sink.stop();
+            self.sink().stop();
             self.set_playing(None);
         }
         self.wake();
@@ -585,7 +597,7 @@ impl TtsManager {
     pub fn set_volume(&self, volume: f32) {
         let volume = super::player::clamp_volume(volume);
         self.write_settings().volume = volume;
-        self.sink.set_volume(volume);
+        self.sink().set_volume(volume);
     }
 
     pub fn set_rate(&self, rate: &str) {
@@ -619,6 +631,47 @@ impl TtsManager {
         self.write_settings().say_author = value;
     }
 
+    /// Abre primero el nuevo dispositivo y solo entonces corta y sustituye el
+    /// anterior. Si la apertura falla, el sink vigente sigue funcionando y el
+    /// error queda visible en `TtsStatus`.
+    pub fn select_device(&self, device: Option<&str>) -> anyhow::Result<String> {
+        let requested = device.map(str::trim).filter(|name| !name.is_empty());
+        let replacement = match super::player::RodioSink::with_device(requested) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                let detail = format!("no se pudo seleccionar el dispositivo: {error:#}");
+                *self
+                    .audio_degraded
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(detail.clone());
+                self.notify(&detail);
+                return Err(anyhow::anyhow!(detail));
+            }
+        };
+        let name = replacement.device().to_string();
+        let volume = self.settings.read().unwrap_or_else(|e| e.into_inner()).volume;
+        replacement.set_volume(volume);
+
+        let replacement: Arc<dyn AudioSink> = Arc::new(replacement);
+        let previous = {
+            let mut current = self.sink.write().unwrap_or_else(|e| e.into_inner());
+            std::mem::replace(&mut *current, replacement)
+        };
+        previous.stop();
+        *self.audio_device.write().unwrap_or_else(|e| e.into_inner()) = Some(name.clone());
+        *self
+            .audio_degraded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        {
+            let mut settings = self.write_settings();
+            settings.audio_device = requested.map(str::to_string);
+        }
+        self.wake();
+        tracing::info!(device = %name, "salida de audio cambiada");
+        Ok(name)
+    }
+
     // -----------------------------------------------------------------------
     // Control
     // -----------------------------------------------------------------------
@@ -628,7 +681,7 @@ impl TtsManager {
         *self.lock_paused() = true;
         self.cancel_current_synthesis();
         // Silenciar de inmediato: una pausa que sigue sonando no es una pausa.
-        self.sink.stop();
+        self.sink().stop();
         self.set_playing(None);
         self.wake();
     }
@@ -641,7 +694,7 @@ impl TtsManager {
     /// "Saltar": corta la frase en curso y la descarta.
     pub fn skip(&self) {
         self.cancel_current_synthesis();
-        self.sink.stop();
+        self.sink().stop();
         self.set_playing(None);
         self.wake();
     }
@@ -727,7 +780,7 @@ impl TtsManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-            .or_else(|| self.sink.last_error());
+            .or_else(|| self.sink().last_error());
         let (degraded_kind, degraded) = match (&audio_degraded, &provider_degraded) {
             (Some(detail), _) => (Some("audio"), Some(detail.clone())),
             (None, Some(detail)) => (Some("provider"), Some(detail.clone())),
@@ -752,6 +805,11 @@ impl TtsManager {
             degraded_kind,
             provider_degraded,
             audio_degraded,
+            audio_device: self
+                .audio_device
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
         }
     }
 
@@ -927,17 +985,26 @@ impl TtsManager {
         tracing::debug!(id = item.id, bytes = audio.bytes, "leyendo frase");
 
         let volume = self.settings.read().unwrap_or_else(|e| e.into_inner()).volume;
-        if let Err(error) = self.sink.play(&audio.path, volume) {
-            tracing::warn!(%error, id = item.id, "no se pudo reproducir");
-            self.lock_counters().synth_failures += 1;
-            *self
-                .audio_degraded
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = Some(error.to_string());
-            self.set_playing(None);
-            return Dispatch::Failed;
-        }
-        if self.sink.last_error().is_none() {
+        // El read lock cubre la llamada a `play`: una seleccion concurrente no
+        // puede sustituir el sink entre tomar la referencia y encolar el audio.
+        // Si la seleccion ocurre justo despues, detiene este sink viejo antes
+        // de que se publique la siguiente frase.
+        let sink = {
+            let current = self.sink.read().unwrap_or_else(|e| e.into_inner());
+            let sink = current.clone();
+            if let Err(error) = sink.play(&audio.path, volume) {
+                tracing::warn!(%error, id = item.id, "no se pudo reproducir");
+                self.lock_counters().synth_failures += 1;
+                *self
+                    .audio_degraded
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(error.to_string());
+                self.set_playing(None);
+                return Dispatch::Failed;
+            }
+            sink
+        };
+        if sink.last_error().is_none() {
             *self
                 .audio_degraded
                 .lock()
@@ -953,8 +1020,7 @@ impl TtsManager {
         // secuestrado por frase. Va a la piscina de bloqueo, que es el sitio
         // previsto para esperas de este tipo; el bucle, mientras tanto, sigue sin
         // sacar la frase siguiente hasta que esta termina o alguien la corta.
-        if self.sink.is_playing() {
-            let sink = self.sink.clone();
+        if sink.is_playing() {
             let _ = tokio::task::spawn_blocking(move || sink.wait()).await;
         }
         if self.take_playing(item.id) {
@@ -1048,6 +1114,13 @@ impl TtsManager {
         self.settings.read().unwrap_or_else(|e| e.into_inner()).enabled
     }
 
+    fn sink(&self) -> Arc<dyn AudioSink> {
+        self.sink
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     fn say_author(&self) -> bool {
         self.settings
             .read()
@@ -1099,7 +1172,7 @@ impl TtsManager {
     /// Cierre ordenado: corta el audio, detiene el bucle y apaga el sidecar.
     pub async fn shutdown(&self) {
         self.cancel_current_synthesis();
-        self.sink.stop();
+        self.sink().stop();
         self.set_playing(None);
         let task = self
             .loop_task
@@ -1142,7 +1215,7 @@ impl TtsManager {
 impl Drop for TtsManager {
     fn drop(&mut self) {
         self.cancel_current_synthesis();
-        self.sink.stop();
+        self.sink().stop();
         // Sin esto, la tarea del bucle seguiria viva hasta que se apagara el
         // runtime (los tests lo notarian).
         if let Some(task) = self

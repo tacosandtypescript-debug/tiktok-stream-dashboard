@@ -76,6 +76,10 @@ pub trait AudioSink: Send + Sync {
     fn last_error(&self) -> Option<String> {
         None
     }
+    /// Nombre del dispositivo que el sink consiguió abrir.
+    fn device_name(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Recorta el volumen al rango util. `NaN` se trata como 1.0: un valor
@@ -580,6 +584,10 @@ impl AudioSink for RodioSink {
     fn last_error(&self) -> Option<String> {
         lock(&self.error).clone()
     }
+
+    fn device_name(&self) -> Option<String> {
+        Some(self.name.clone())
+    }
 }
 
 impl Drop for RodioSink {
@@ -676,6 +684,10 @@ impl AudioSink for NullSink {
     fn wait(&self) {
         *lock(&self.playing) = false;
     }
+
+    fn device_name(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Envuelve la salida elegida y **degrada** en lugar de fallar.
@@ -768,6 +780,10 @@ impl AudioSink for FallbackSink {
             Some(problem) => Some(problem.clone()),
             None => self.inner.last_error(),
         }
+    }
+
+    fn device_name(&self) -> Option<String> {
+        self.inner.device_name()
     }
 }
 

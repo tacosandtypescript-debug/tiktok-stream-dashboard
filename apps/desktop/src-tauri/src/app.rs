@@ -99,6 +99,20 @@ impl AppState {
         let database = Database::open(&db_path)?;
         let schema_version = database.migrate()?;
         database.mark_crashed_streams()?;
+        // La configuracion se lee antes de construir `TtsManager`: el primer
+        // evento que llegue al bus debe usar el perfil real, no un instante de
+        // valores de fabrica. `#[serde(default)]` permite que el perfil v4
+        // inicial `{}` evolucione sin romper instalaciones existentes.
+        let tts_settings = match database.default_tts_profile()? {
+            Some(json) => match serde_json::from_str::<TtsSettings>(&json) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    tracing::warn!(%error, "perfil TTS invalido; se usan valores predeterminados");
+                    TtsSettings::default()
+                }
+            },
+            None => TtsSettings::default(),
+        };
         let writer = DbWriter::start(database, DB_QUEUE);
 
         let native = Arc::new(NativeProvider::new(
@@ -112,9 +126,11 @@ impl AppState {
         // degrada a silencio si no hay tarjeta de sonido en lugar de impedir
         // arrancar la aplicacion.
         let tts_provider: SharedTtsProvider = Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
-        let sink: Arc<dyn AudioSink> = Arc::new(FallbackSink::new());
+        let sink: Arc<dyn AudioSink> = Arc::new(FallbackSink::with_device(
+            tts_settings.audio_device.as_deref(),
+        ));
         let tts = Arc::new(TtsManager::new(
-            TtsSettings::default(),
+            tts_settings,
             tts_provider.clone(),
             bus.clone(),
             sink,
@@ -951,6 +967,34 @@ impl AppState {
     pub fn tts_settings(&self) -> TtsSettings {
         self.tts.settings()
     }
+
+    /// Persiste un snapshot completo del perfil TTS. Se usa el mismo escritor
+    /// dedicado que el resto de SQLite para mantener una sola secuencia de
+    /// commits y no abrir una segunda conexion concurrente.
+    pub fn persist_tts_settings(&self) -> anyhow::Result<()> {
+        let settings_json = serde_json::to_string(&self.tts.settings())?;
+        let writer = self
+            .writer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("cerrojo del escritor de base envenenado"))?;
+        let Some(writer) = writer.as_ref() else {
+            anyhow::bail!("el escritor de base de datos ya esta cerrado");
+        };
+        if !writer.send_critical(
+            WriteJob::TtsProfile { settings_json },
+            WRITER_BLOCK_TIMEOUT,
+        ) {
+            anyhow::bail!("no se pudo encolar el perfil TTS para persistirlo");
+        }
+        Ok(())
+    }
+
+    /// Cambia la salida solo después de abrir correctamente el nuevo sink.
+    pub fn select_tts_device(&self, device: Option<&str>) -> anyhow::Result<String> {
+        let name = self.tts.select_device(device)?;
+        self.persist_tts_settings()?;
+        Ok(name)
+    }
 }
 
 /// Progreso de la sesion que vive en la fila de `streams` y no en una tabla de
@@ -1107,6 +1151,38 @@ mod tests {
         assert_eq!(snapshot.status, "stopped");
         assert!(snapshot.chat.is_empty());
         assert_eq!(snapshot.schema_version, crate::database::SCHEMA_VERSION);
+        state.shutdown();
+        cleanup(&path);
+    }
+
+    #[test]
+    fn el_estado_carga_el_perfil_tts_antes_de_construir_el_gestor() {
+        let path = temp_db_path("tts-profile");
+        let mut database = Database::open(&path).expect("base");
+        database.migrate().expect("migraciones");
+        let mut settings = TtsSettings::default();
+        settings.enabled = false;
+        settings.voice_es = "es-MX-DaliaNeural".into();
+        settings.rate = "+25%".into();
+        settings.pitch = "-4Hz".into();
+        settings.audio_device = Some("Cable Input".into());
+        settings.filters.max_chars = 99;
+        let json = serde_json::to_string(&settings).expect("json");
+        database
+            .write_batch(&[WriteJob::TtsProfile {
+                settings_json: json,
+            }])
+            .expect("perfil");
+        drop(database);
+
+        let state = AppState::open(path.clone(), 0).expect("estado");
+        let loaded = state.tts_settings();
+        assert!(!loaded.enabled);
+        assert_eq!(loaded.voice_es, "es-MX-DaliaNeural");
+        assert_eq!(loaded.rate, "+25%");
+        assert_eq!(loaded.pitch, "-4Hz");
+        assert_eq!(loaded.audio_device.as_deref(), Some("Cable Input"));
+        assert_eq!(loaded.filters.max_chars, 99);
         state.shutdown();
         cleanup(&path);
     }
