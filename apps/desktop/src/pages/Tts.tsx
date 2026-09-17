@@ -81,7 +81,11 @@ export function Tts({ initial }: Props) {
     <div className="grid-panel">
       {error ? <div className="error">{error}</div> : null}
       {status.degraded ? (
-        <div className="error">{t.tts.degraded(status.degraded)}</div>
+        <div className="error">
+          {t.tts.degraded(
+            `${status.degraded_kind === "provider" ? "Proveedor" : "Audio"}: ${status.degraded}`,
+          )}
+        </div>
       ) : null}
 
       <Card

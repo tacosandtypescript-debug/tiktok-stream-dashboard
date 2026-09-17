@@ -267,6 +267,9 @@ export interface TtsStatus {
   muted_users: number;
   rejections: Array<[string, number]>;
   degraded: string | null;
+  degraded_kind: "audio" | "provider" | null;
+  provider_degraded: string | null;
+  audio_degraded: string | null;
 }
 
 export const api = {
