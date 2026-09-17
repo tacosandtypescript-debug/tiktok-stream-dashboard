@@ -236,6 +236,26 @@ export interface TtsNowPlaying {
   priority: number;
 }
 
+export interface TtsDuration {
+  secs: number;
+  nanos: number;
+}
+
+export interface TtsFilters {
+  enabled: boolean;
+  max_chars: number;
+  min_chars: number;
+  user_cooldown: TtsDuration;
+  global_interval: TtsDuration;
+  global_burst: number;
+  filter_urls: boolean;
+  max_repeated_chars: number;
+  duplicate_window: TtsDuration;
+  spam_window: TtsDuration;
+  blocked_words: string[];
+  blocked_users: string[];
+}
+
 export interface TtsSettings {
   enabled: boolean;
   voice_es: string;
@@ -244,10 +264,12 @@ export interface TtsSettings {
   volume: number;
   rate: string;
   pitch: string;
+  audio_device: string | null;
   /** Leer en voz alta los regalos que cierran su racha. */
   read_gifts: boolean;
   /** Leer los follows (apagado por defecto: son muchos). */
   read_follows: boolean;
+  filters: TtsFilters;
   queue_capacity: number;
 }
 
@@ -270,6 +292,7 @@ export interface TtsStatus {
   degraded_kind: "audio" | "provider" | null;
   provider_degraded: string | null;
   audio_degraded: string | null;
+  audio_device: string | null;
 }
 
 export const api = {
@@ -314,6 +337,9 @@ export const api = {
   ttsAction: (action: string, value?: string) =>
     invoke<void>("tts_action", { action, value: value ?? null }),
   ttsVoices: () => invoke<TtsVoice[]>("tts_voices"),
+  ttsDevices: () => invoke<string[]>("tts_devices"),
+  ttsSelectDevice: (device: string | null) =>
+    invoke<TtsStatus>("tts_select_device", { device }),
 };
 
 export function onDashEvent(handler: (event: WireEvent) => void): Promise<UnlistenFn> {

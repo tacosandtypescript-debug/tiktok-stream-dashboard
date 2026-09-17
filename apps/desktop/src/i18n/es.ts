@@ -115,6 +115,13 @@ export const t = {
     resume: "Reanudar",
     volume: "Volumen",
     rate: "Velocidad",
+    pitch: "Tono",
+    device: "Dispositivo de audio",
+    deviceDefault: "Dispositivo predeterminado",
+    deviceActive: (name: string) => `Activo: ${name}`,
+    deviceUnavailable: "No hay una salida de audio activa",
+    deviceLoadError: "No se pudieron cargar los dispositivos de audio.",
+    deviceSelectError: "No se pudo cambiar el dispositivo de audio.",
     sources: "Qué se lee",
     sourcesHint:
       "Además del chat. Un regalo se lee una sola vez, al cerrar su racha, para no repetir la misma ráfaga.",

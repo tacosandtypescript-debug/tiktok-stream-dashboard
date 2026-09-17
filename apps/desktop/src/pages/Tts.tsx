@@ -13,6 +13,7 @@ import { t } from "../i18n/es";
 
 /** Ritmos que entiende edge-tts. */
 const RATES = ["-50%", "-25%", "+0%", "+25%", "+50%", "+100%"];
+const PITCHES = ["-12Hz", "-8Hz", "-4Hz", "+0Hz", "+4Hz", "+8Hz", "+12Hz"];
 
 interface Props {
   initial: TtsStatus | null;
@@ -21,6 +22,7 @@ interface Props {
 export function Tts({ initial }: Props) {
   const [status, setStatus] = useState<TtsStatus | null>(initial);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
+  const [devices, setDevices] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,6 +33,21 @@ export function Tts({ initial }: Props) {
         if (active) setVoices(lista);
       })
       .catch((cause: unknown) => setError(String(cause)));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .ttsDevices()
+      .then((lista) => {
+        if (active) setDevices(lista);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(`${t.tts.deviceLoadError} ${String(cause)}`);
+      });
     return () => {
       active = false;
     };
@@ -221,6 +238,21 @@ export function Tts({ initial }: Props) {
             </div>
             <div className="control">
               <label>
+                {t.tts.pitch}
+                <select
+                  value={status.settings.pitch}
+                  onChange={(event) => update({ pitch: event.target.value })}
+                >
+                  {PITCHES.map((pitch) => (
+                    <option key={pitch} value={pitch}>
+                      {pitch}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="control">
+              <label>
                 {t.tts.voiceEs}
                 <select
                   value={status.settings.voice_es}
@@ -257,6 +289,43 @@ export function Tts({ initial }: Props) {
               />
               <span>{t.tts.sayAuthor}</span>
             </label>
+          </Card>
+
+          <Card title={t.tts.device}>
+            <p className="hint">
+              {status.audio_device
+                ? t.tts.deviceActive(status.audio_device)
+                : t.tts.deviceUnavailable}
+            </p>
+            <div className="control">
+              <label>
+                {t.tts.device}
+                <select
+                  value={status.settings.audio_device ?? ""}
+                  onChange={(event) => {
+                    void api
+                      .ttsSelectDevice(event.target.value || null)
+                      .then(setStatus)
+                      .catch((cause: unknown) =>
+                        setError(`${t.tts.deviceSelectError} ${String(cause)}`),
+                      );
+                  }}
+                >
+                  <option value="">{t.tts.deviceDefault}</option>
+                  {status.settings.audio_device &&
+                  !devices.includes(status.settings.audio_device) ? (
+                    <option value={status.settings.audio_device}>
+                      {status.settings.audio_device} (no disponible)
+                    </option>
+                  ) : null}
+                  {devices.map((device) => (
+                    <option key={device} value={device}>
+                      {device}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </Card>
 
           <Card title={t.tts.rejected}>
