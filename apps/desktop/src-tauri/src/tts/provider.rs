@@ -23,7 +23,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio::time::timeout;
 
 use crate::providers::BoxFuture;
@@ -76,6 +76,60 @@ pub struct TtsRequest {
     pub pitch: String,
 }
 
+/// Señal cooperativa para cancelar una síntesis en vuelo.
+///
+/// Se comparte por valor entre el gestor y el proveedor. La rama del proveedor
+/// no solo abandona el futuro: `EdgeTtsSidecar` mata el proceso que está ocupado
+/// con `edge-tts`, de modo que no queda una respuesta atrasada ni un fichero
+/// parcial para la siguiente frase.
+#[derive(Clone, Default)]
+pub struct TtsCancellation {
+    state: Arc<CancellationState>,
+}
+
+#[derive(Default)]
+struct CancellationState {
+    cancelled: std::sync::atomic::AtomicBool,
+    notify: Notify,
+}
+
+impl TtsCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        if !self
+            .state
+            .cancelled
+            .swap(true, std::sync::atomic::Ordering::Release)
+        {
+            self.state.notify.notify_waiters();
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.state
+            .cancelled
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
+    pub async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        let notified = self.state.notify.notified();
+        if self.is_cancelled() {
+            return;
+        }
+        notified.await;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TtsAudio {
     pub path: PathBuf,
@@ -88,6 +142,23 @@ pub struct TtsAudio {
 pub trait TtsProvider: Send + Sync {
     fn name(&self) -> &'static str;
     fn synthesize<'a>(&'a self, request: &'a TtsRequest) -> BoxFuture<'a, Result<TtsAudio>>;
+    /// Variante cancelable para el camino interactivo del gestor.
+    ///
+    /// El método antiguo se conserva como contrato mínimo para providers
+    /// sencillos y dobles de prueba. Los providers que tienen una operación
+    /// realmente abortable deben sobrescribir esta variante.
+    fn synthesize_with_cancel<'a>(
+        &'a self,
+        request: &'a TtsRequest,
+        cancel: TtsCancellation,
+    ) -> BoxFuture<'a, Result<TtsAudio>> {
+        Box::pin(async move {
+            tokio::select! {
+                result = self.synthesize(request) => result,
+                _ = cancel.cancelled() => bail!("síntesis cancelada"),
+            }
+        })
+    }
     fn health<'a>(&'a self) -> BoxFuture<'a, bool>;
     fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>>;
     fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()>;
@@ -148,6 +219,89 @@ struct Sidecar {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+}
+
+async fn stop_sidecar(sidecar: &mut Option<Sidecar>) {
+    if let Some(mut sidecar) = sidecar.take() {
+        let _ = sidecar.stdin.shutdown().await;
+        let _ = sidecar.child.start_kill();
+        let _ = sidecar.child.wait().await;
+    }
+}
+
+/// Salida temporal que se borra incluso si la tarea de síntesis es abortada.
+/// Solo se conserva después de que `rename` haya publicado el MP3 completo.
+struct TempOutput {
+    path: PathBuf,
+    keep: std::sync::atomic::AtomicBool,
+}
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+impl TempOutput {
+    fn new(final_path: &Path, request_id: u64) -> Self {
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let unique = format!(
+            ".{}.{}.{}.{}.tmp.mp3",
+            final_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("tts"),
+            std::process::id(),
+            request_id,
+            sequence
+        );
+        Self {
+            path: final_path.with_file_name(unique),
+            keep: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn keep(&self) {
+        self.keep.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for TempOutput {
+    fn drop(&mut self) {
+        if !self.keep.load(Ordering::Acquire) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn valid_audio_file(path: &Path) -> Option<u64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    (metadata.is_file() && metadata.len() > 0).then_some(metadata.len())
+}
+
+fn validate_output(response: &SidecarResponse, expected: &Path) -> Result<()> {
+    if let Some(reported) = response.path.as_deref() {
+        let reported = PathBuf::from(reported);
+        let expected = std::fs::canonicalize(expected)
+            .with_context(|| format!("validando la salida temporal {}", expected.display()))?;
+        let reported = std::fs::canonicalize(&reported).with_context(|| {
+            format!(
+                "validando la ruta declarada por el sidecar {}",
+                reported.display()
+            )
+        })?;
+        if reported != expected {
+            bail!(
+                "el sidecar declaro una salida distinta a la temporal: {}",
+                reported.display()
+            );
+        }
+    }
+
+    let actual = valid_audio_file(expected)
+        .ok_or_else(|| anyhow!("el sidecar produjo un fichero de audio vacio o ausente"))?;
+    if let Some(declared) = response.bytes {
+        if declared != actual {
+            bail!("tamano de audio inconsistente: el sidecar declaro {declared}, hay {actual}");
+        }
+    }
+    Ok(())
 }
 
 pub struct EdgeTtsSidecar {
@@ -244,9 +398,9 @@ impl EdgeTtsSidecar {
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let mut child = command
-            .spawn()
-            .with_context(|| format!("arrancando el sidecar con {}", self.config.python.display()))?;
+        let mut child = command.spawn().with_context(|| {
+            format!("arrancando el sidecar con {}", self.config.python.display())
+        })?;
 
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("sin stdin"))?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("sin stdout"))?;
@@ -275,15 +429,15 @@ impl EdgeTtsSidecar {
     /// Detiene el sidecar si esta vivo. Es idempotente.
     pub async fn stop(&self) {
         let mut guard = self.inner.lock().await;
-        if let Some(mut sidecar) = guard.take() {
-            let _ = sidecar.stdin.shutdown().await;
-            let _ = sidecar.child.start_kill();
-            let _ = sidecar.child.wait().await;
-        }
+        stop_sidecar(&mut *guard).await;
     }
 
     /// Envia una peticion y espera su respuesta.
-    async fn request(&self, request: SidecarRequest<'_>) -> Result<SidecarResponse> {
+    async fn request(
+        &self,
+        request: SidecarRequest<'_>,
+        cancel: TtsCancellation,
+    ) -> Result<SidecarResponse> {
         let mut guard = self.inner.lock().await;
         if guard.is_none() {
             *guard = Some(self.start().await?);
@@ -294,7 +448,8 @@ impl EdgeTtsSidecar {
         line.push('\n');
         self.requests.fetch_add(1, Ordering::Relaxed);
 
-        let result = timeout(self.config.timeout, async {
+        let result = tokio::select! {
+            result = timeout(self.config.timeout, async {
             sidecar
                 .stdin
                 .write_all(line.as_bytes())
@@ -321,12 +476,20 @@ impl EdgeTtsSidecar {
                     return Ok(parsed);
                 }
                 tracing::debug!(id = ?parsed.id, "respuesta de otra peticion; se ignora");
+                }
+            }) => result,
+            _ = cancel.cancelled() => {
+                stop_sidecar(&mut *guard).await;
+                Ok(Err(anyhow!("síntesis cancelada")))
             }
-        })
-        .await;
+        };
 
         match result {
             Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) if cancel.is_cancelled() => {
+                stop_sidecar(&mut *guard).await;
+                Err(error)
+            }
             Ok(Err(error)) => {
                 // Un fallo de E/S deja el sidecar en estado dudoso: se descarta.
                 self.failures.fetch_add(1, Ordering::Relaxed);
@@ -352,30 +515,51 @@ impl EdgeTtsSidecar {
 
     /// Sintetiza a un fichero, reutilizando la cache si la frase ya se dijo.
     pub async fn synthesize_to_file(&self, request: &TtsRequest) -> Result<TtsAudio> {
+        self.synthesize_to_file_with_cancel(request, TtsCancellation::new())
+            .await
+    }
+
+    /// Variante cancelable usada por el gestor interactivo.
+    pub async fn synthesize_to_file_with_cancel(
+        &self,
+        request: &TtsRequest,
+        cancel: TtsCancellation,
+    ) -> Result<TtsAudio> {
         let path = self.cache_path(request);
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            if metadata.len() > 0 {
-                self.cache_hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(TtsAudio {
-                    path,
-                    bytes: metadata.len(),
-                    ms: 0,
-                    cached: true,
-                });
-            }
+        if let Some(bytes) = valid_audio_file(&path) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(TtsAudio {
+                path,
+                bytes,
+                ms: 0,
+                cached: true,
+            });
         }
 
+        let temporary = TempOutput::new(&path, request.id);
+        // Un intento cancelado anterior puede haber dejado un `.tmp.mp3` con
+        // el mismo id tras un reinicio del gestor; nunca se valida como salida
+        // de esta petición.
+        let _ = std::fs::remove_file(&temporary.path);
         let response = self
-            .request(SidecarRequest {
-                id: request.id,
-                cmd: "synthesize",
-                text: Some(&request.text),
-                voice: Some(&request.voice),
-                rate: Some(&request.rate),
-                pitch: Some(&request.pitch),
-                out: Some(path.to_string_lossy().to_string()),
-            })
-            .await?;
+            .request(
+                SidecarRequest {
+                    id: request.id,
+                    cmd: "synthesize",
+                    text: Some(&request.text),
+                    voice: Some(&request.voice),
+                    rate: Some(&request.rate),
+                    pitch: Some(&request.pitch),
+                    out: Some(temporary.path.to_string_lossy().to_string()),
+                },
+                cancel.clone(),
+            )
+            .await;
+
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => return Err(error),
+        };
 
         if !response.ok {
             bail!(
@@ -384,16 +568,43 @@ impl EdgeTtsSidecar {
             );
         }
 
-        // Se respeta la ruta que confirma el sidecar si la devuelve: es la
-        // prueba de que escribio exactamente donde se le pidio.
-        let path = response
-            .path
-            .map(PathBuf::from)
-            .unwrap_or(path);
+        if cancel.is_cancelled() {
+            bail!("síntesis cancelada");
+        }
+
+        validate_output(&response, &temporary.path)?;
+        let bytes = valid_audio_file(&temporary.path)
+            .ok_or_else(|| anyhow!("el sidecar produjo un audio invalido"))?;
+
+        // `rename` es la publicación atómica: los lectores solo ven un MP3
+        // completo. En Windows no reemplaza un destino existente; si otro
+        // proceso ganó la carrera y dejó un fichero válido, se reutiliza.
+        match std::fs::rename(&temporary.path, &path) {
+            Ok(()) => temporary.keep(),
+            Err(error) if valid_audio_file(&path).is_some() => {
+                tracing::debug!(%error, file = %path.display(), "otra síntesis publicó la misma caché");
+            }
+            Err(error) => {
+                // Un fichero final inválido no se puede reemplazar en Windows
+                // con `rename`; al ser una entrada de cache fallida, se elimina
+                // antes de volver a publicar el temporal validado.
+                if valid_audio_file(&path).is_none() {
+                    let _ = std::fs::remove_file(&path);
+                    std::fs::rename(&temporary.path, &path).with_context(|| {
+                        format!("publicando la cache atomica en {}", path.display())
+                    })?;
+                    temporary.keep();
+                } else {
+                    return Err(error).with_context(|| {
+                        format!("publicando la cache atomica en {}", path.display())
+                    });
+                }
+            }
+        }
 
         Ok(TtsAudio {
             path,
-            bytes: response.bytes.unwrap_or(0),
+            bytes,
             ms: response.ms.unwrap_or(0),
             cached: false,
         })
@@ -409,18 +620,29 @@ impl TtsProvider for EdgeTtsSidecar {
         Box::pin(async move { self.synthesize_to_file(request).await })
     }
 
+    fn synthesize_with_cancel<'a>(
+        &'a self,
+        request: &'a TtsRequest,
+        cancel: TtsCancellation,
+    ) -> BoxFuture<'a, Result<TtsAudio>> {
+        Box::pin(async move { self.synthesize_to_file_with_cancel(request, cancel).await })
+    }
+
     fn health<'a>(&'a self) -> BoxFuture<'a, bool> {
         Box::pin(async move {
             match self
-                .request(SidecarRequest {
-                    id: 0,
-                    cmd: "ping",
-                    text: None,
-                    voice: None,
-                    rate: None,
-                    pitch: None,
-                    out: None,
-                })
+                .request(
+                    SidecarRequest {
+                        id: 0,
+                        cmd: "ping",
+                        text: None,
+                        voice: None,
+                        rate: None,
+                        pitch: None,
+                        out: None,
+                    },
+                    TtsCancellation::new(),
+                )
                 .await
             {
                 Ok(response) => response.ok,
@@ -435,15 +657,18 @@ impl TtsProvider for EdgeTtsSidecar {
     fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>> {
         Box::pin(async move {
             let response = self
-                .request(SidecarRequest {
-                    id: 0,
-                    cmd: "voices",
-                    text: None,
-                    voice: None,
-                    rate: None,
-                    pitch: None,
-                    out: None,
-                })
+                .request(
+                    SidecarRequest {
+                        id: 0,
+                        cmd: "voices",
+                        text: None,
+                        voice: None,
+                        rate: None,
+                        pitch: None,
+                        out: None,
+                    },
+                    TtsCancellation::new(),
+                )
                 .await?;
             if !response.ok {
                 bail!("el sidecar no devolvio voces");
@@ -591,6 +816,13 @@ mod tests {
     }
 
     #[test]
+    fn la_cache_conserva_los_limites_de_produccion() {
+        let config = TtsConfig::default();
+        assert_eq!(config.cache_max_bytes, 200 * 1024 * 1024);
+        assert_eq!(config.cache_max_age, Duration::from_secs(7 * 24 * 60 * 60));
+    }
+
+    #[test]
     fn la_cache_se_poda_por_caducidad_y_por_tamano() {
         let dir = std::env::temp_dir().join(format!("ttdash-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -625,6 +857,55 @@ mod tests {
         assert!(removed >= 1);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn la_salida_temporal_se_valida_y_se_publica_atomica() {
+        let dir = std::env::temp_dir().join(format!(
+            "ttdash-atomic-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let final_path = dir.join("answer.mp3");
+        let temporary = TempOutput::new(&final_path, 17);
+        std::fs::write(&temporary.path, [1u8, 2, 3, 4]).unwrap();
+        let response = SidecarResponse {
+            id: Some(17),
+            ok: true,
+            path: Some(temporary.path.to_string_lossy().into_owned()),
+            bytes: Some(4),
+            ms: Some(12),
+            error: None,
+            voices: None,
+        };
+
+        validate_output(&response, &temporary.path).unwrap();
+        std::fs::rename(&temporary.path, &final_path).unwrap();
+        temporary.keep();
+        assert_eq!(valid_audio_file(&final_path), Some(4));
+
+        // Un fichero vacio nunca se puede publicar como cache valida.
+        let empty = dir.join("empty.mp3");
+        std::fs::write(&empty, []).unwrap();
+        let error = validate_output(
+            &SidecarResponse {
+                id: Some(18),
+                ok: true,
+                path: Some(empty.to_string_lossy().into_owned()),
+                bytes: Some(0),
+                ms: Some(0),
+                error: None,
+                voices: None,
+            },
+            &empty,
+        )
+        .expect_err("un audio vacio no es una salida valida");
+        assert!(error.to_string().contains("vacio o ausente"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
