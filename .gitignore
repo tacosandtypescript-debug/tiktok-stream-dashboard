@@ -18,6 +18,10 @@ dist-ssr/
 # Salidas de Tauri (un patron con barra ancla a la raiz: hace falta **/)
 **/src-tauri/target/
 **/src-tauri/gen/
+# Tauri externalBin: se genera con scripts/build-tts-sidecar.ps1 y no se
+# versiona el ejecutable congelado.
+**/src-tauri/binaries/*
+!**/src-tauri/binaries/.gitkeep
 
 # Datos y logs en tiempo de ejecución (nunca versionar)
 data/

@@ -34,6 +34,9 @@ const MAX_LINE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct TtsConfig {
+    /// Ejecutable congelado por PyInstaller. Cuando existe, se usa sin Python
+    /// ni script: es el modo de distribución de Tauri.
+    pub executable: Option<PathBuf>,
     /// Interprete de Python. En desarrollo, el del venv del proyecto.
     pub python: PathBuf,
     /// Script del sidecar.
@@ -50,6 +53,7 @@ pub struct TtsConfig {
 impl Default for TtsConfig {
     fn default() -> Self {
         Self {
+            executable: None,
             python: PathBuf::from("python"),
             script: PathBuf::from("services/tts-provider/src/main.py"),
             cache_dir: crate::database::data_dir().join("cache").join("tts"),
@@ -373,18 +377,29 @@ impl EdgeTtsSidecar {
     }
 
     async fn start(&self) -> Result<Sidecar> {
-        if !self.config.script.exists() {
-            bail!(
-                "no se encuentra el sidecar de TTS en {}",
-                self.config.script.display()
-            );
-        }
         std::fs::create_dir_all(&self.config.cache_dir)
             .with_context(|| format!("creando {}", self.config.cache_dir.display()))?;
 
-        let mut command = Command::new(&self.config.python);
+        let mut command = if let Some(executable) = &self.config.executable {
+            if !executable.is_file() {
+                bail!(
+                    "el ejecutable del sidecar no existe: {} (override TTSDASH_TTS_SIDECAR o artefacto Tauri)",
+                    executable.display()
+                );
+            }
+            Command::new(executable)
+        } else {
+            if !self.config.script.exists() {
+                bail!(
+                    "no se encuentra el script del sidecar de TTS en {} y no hay ejecutable congelado; ejecuta scripts/setup.ps1 y scripts/build-tts-sidecar.ps1",
+                    self.config.script.display()
+                );
+            }
+            let mut command = Command::new(&self.config.python);
+            command.arg(&self.config.script);
+            command
+        };
         command
-            .arg(&self.config.script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -398,9 +413,14 @@ impl EdgeTtsSidecar {
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let mut child = command.spawn().with_context(|| {
-            format!("arrancando el sidecar con {}", self.config.python.display())
-        })?;
+        let launch_path = self
+            .config
+            .executable
+            .as_ref()
+            .unwrap_or(&self.config.python);
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("arrancando el sidecar con {}", launch_path.display()))?;
 
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("sin stdin"))?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("sin stdout"))?;
@@ -418,7 +438,7 @@ impl EdgeTtsSidecar {
         }
 
         self.starts.fetch_add(1, Ordering::Relaxed);
-        tracing::info!(script = %self.config.script.display(), "sidecar de TTS arrancado");
+        tracing::info!(runtime = %launch_path.display(), "sidecar de TTS arrancado");
         Ok(Sidecar {
             child,
             stdin,
