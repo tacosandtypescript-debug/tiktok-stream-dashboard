@@ -6,7 +6,7 @@
 //! Correcciones de la revision incorporadas aqui:
 //!   * `event_id` y `seq` (deduplicacion y deteccion de huecos)
 //!   * `source_id`: identificador del mensaje en origen (TikTok `msg_id`), que
-//!     permite descartar duplicados tras una reconexion
+//!     permite descartar duplicados dentro de una sala tras una reconexion
 //!   * el provider envia `room_id`, no un `stream_id` propio de Rust
 //!   * los regalos llevan `group_id` (identifica el streak real), `is_final`
 //!     (`repeat_end != 0`) y `streakable` (`type == 1`)

@@ -44,6 +44,7 @@ impl StatusReporter {
         self.metrics
             .provider_state
             .store(status.code(), Ordering::Relaxed);
+        self.metrics.set_provider_detail(detail.clone());
         tracing::info!(status = status.as_str(), detail = ?detail, "provider");
         self.bus.publish(
             None,

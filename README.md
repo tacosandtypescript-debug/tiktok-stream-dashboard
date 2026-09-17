@@ -17,7 +17,7 @@ Todo lo de abajo está verificado contra directos reales y con la suite en verde
 |---|---|
 | Provider nativo (sala, firma anónima, WebSocket, `im_enter_room`, gzip, ACK, heartbeat, reconexión con backoff) | ✅ verificado en vivo |
 | Normalizador de eventos (protocolo v1, plano y versionado) | ✅ |
-| Event bus: `seq` monótono, deduplicación por `source_id`, colas acotadas, contador de eventos perdidos | ✅ |
+| Event bus: `seq` monótono, deduplicación por `(room_id, source_id)`, colas acotadas, contador de eventos perdidos | ✅ |
 | Chat en tiempo real | ✅ |
 | Regalos con rachas, diamantes, icono y ranking | ✅ |
 | Likes, espectadores (pico y acumulado), follows, shares y suscripciones | ✅ |
@@ -152,7 +152,7 @@ providers/simulated.rs ───────────────────
 
 - El **provider** habla el protocolo de TikTok y no sabe nada del resto. Sustituirlo no toca el núcleo.
 - El **normalizador** (`core/event.rs`) convierte cada mensaje en un evento plano con `type`, versionado (`protocol_version`): la interfaz reconoce por nombre y hay un test de contrato que lo congela.
-- El **bus** (`core/bus.rs`) asigna `seq`, deduplica por `source_id` y cuenta lo que descarta. Tiene tres consumidores y **ninguno se realimenta**.
+- El **bus** (`core/bus.rs`) asigna `seq`, deduplica por `(room_id, source_id)` y cuenta lo que descarta. Tiene tres consumidores y **ninguno se realimenta**.
 - La **interfaz** pide un snapshot al abrirse y luego recibe eventos; **no guarda historial**. La foto del motor se fusiona por `seq` con lo que ya llegó en vivo, para no perder mensajes en la carrera del arranque.
 - El canal hacia la interfaz es el **IPC de Tauri** (eventos `dash://event`). El WebSocket para *Browser Source* de OBS llegará con los overlays.
 

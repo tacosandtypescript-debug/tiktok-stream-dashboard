@@ -557,6 +557,10 @@ impl AppState {
             }
 
             EventKind::ProviderStatus { status, detail } => {
+                // El evento actualiza tambien la copia persistente para que los
+                // snapshots pedidos despues de una transicion no pierdan el
+                // motivo aunque ya no haya otro evento en vuelo.
+                self.metrics.set_provider_detail(detail.clone());
                 // Solo los problemas merecen aparecer en la actividad.
                 if status == "error" {
                     self.push_feed(FeedItem::info(
@@ -887,6 +891,7 @@ impl AppState {
             protocol_version: PROTOCOL_VERSION,
             provider: provider.name().to_string(),
             status: provider.status().as_str().to_string(),
+            status_detail: self.metrics.provider_detail(),
             handle: self.handle.read().map(|g| g.clone()).unwrap_or_default(),
             room_id: self.bus.room_id(),
             stream_id: self.stream_id.read().ok().and_then(|g| g.clone()),
@@ -1025,6 +1030,8 @@ pub struct Snapshot {
     pub protocol_version: u32,
     pub provider: String,
     pub status: String,
+    /// Ultimo detalle del estado del proveedor; no desaparece al pedir otra foto.
+    pub status_detail: Option<String>,
     pub handle: String,
     pub room_id: String,
     pub stream_id: Option<String>,
@@ -1088,6 +1095,29 @@ mod tests {
         assert_eq!(snapshot.status, "stopped");
         assert!(snapshot.chat.is_empty());
         assert_eq!(snapshot.schema_version, crate::database::SCHEMA_VERSION);
+        state.shutdown();
+        cleanup(&path);
+    }
+
+    #[test]
+    fn el_snapshot_conserva_el_detalle_del_estado_del_proveedor() {
+        let path = temp_db_path("status-detail");
+        let state = AppState::open(path.clone(), 0).expect("estado");
+        state.on_event(&Event::new(
+            1,
+            "sala".into(),
+            None,
+            EventKind::ProviderStatus {
+                status: "error".into(),
+                detail: Some("cuota agotada".into()),
+            },
+        ));
+
+        let first = state.snapshot();
+        let second = state.snapshot();
+        assert_eq!(first.status_detail.as_deref(), Some("cuota agotada"));
+        assert_eq!(second.status_detail.as_deref(), Some("cuota agotada"));
+
         state.shutdown();
         cleanup(&path);
     }

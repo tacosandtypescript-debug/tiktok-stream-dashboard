@@ -170,6 +170,7 @@ export interface Snapshot {
   protocol_version: number;
   provider: string;
   status: string;
+  status_detail: string | null;
   handle: string;
   room_id: string;
   stream_id: string | null;

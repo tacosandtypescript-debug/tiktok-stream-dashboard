@@ -226,6 +226,22 @@ fn el_regalo_llega_con_usuario_regalo_cantidad_diamantes_y_racha() {
     assert_eq!(usuario["nickname"], "Carlos");
 }
 
+/// El contrato conserva separados el incremento de una rafaga y el total
+/// absoluto del directo: la interfaz muestra el segundo y el feed puede usar el
+/// primero para decidir si la rafaga es notable.
+#[test]
+fn el_contrato_de_likes_separa_incremento_y_total_absoluto() {
+    let json = serialized(EventKind::LikeUpdated {
+        user: Some(user()),
+        count: 8,
+        total: 1_008,
+    });
+
+    assert_eq!(json["count"], 8);
+    assert_eq!(json["total"], 1_008);
+    assert_ne!(json["count"], json["total"]);
+}
+
 /// Los campos opcionales ausentes no deben aparecer como `null`.
 #[test]
 fn los_opcionales_ausentes_no_se_serializan() {
