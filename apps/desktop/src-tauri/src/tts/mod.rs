@@ -17,8 +17,8 @@ pub use filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
 pub use manager::{TtsManager, TtsNowPlaying, TtsSettings, TtsStatus};
 pub use player::{AudioSink, FallbackSink, NullSink, RodioSink};
 pub use provider::{
-    cache_key, prune_cache, EdgeTtsSidecar, SharedTtsProvider, TtsAudio, TtsConfig, TtsProvider,
-    TtsRequest,
+    cache_key, prune_cache, EdgeTtsSidecar, SharedTtsProvider, TtsAudio, TtsCancellation,
+    TtsConfig, TtsProvider, TtsRequest,
 };
 pub use queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
 pub use voices::{catalog, detect_language, Language, Voice, DEFAULT_VOICE};

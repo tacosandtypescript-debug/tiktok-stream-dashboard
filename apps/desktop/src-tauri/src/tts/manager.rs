@@ -41,7 +41,7 @@ use crate::core::EventBus;
 
 use super::filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
 use super::player::AudioSink;
-use super::provider::{SharedTtsProvider, TtsRequest};
+use super::provider::{SharedTtsProvider, TtsCancellation, TtsRequest};
 use super::queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
 use super::voices::{self, Language};
 use super::{chat_line, voice_for};
@@ -161,6 +161,16 @@ pub struct TtsStatus {
     /// chat (docs/decisions.md D3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded: Option<String>,
+    /// Clase del estado degradado: evita confundir un dispositivo de audio
+    /// ausente con un proveedor de sintesis caido.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_kind: Option<&'static str>,
+    /// Ultimo fallo del proveedor, limpiado al recuperar una sintesis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_degraded: Option<String>,
+    /// Fallo actual de la salida de audio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_degraded: Option<String>,
 }
 
 /// Contadores propios del gestor.
@@ -288,6 +298,13 @@ pub struct TtsManager {
     /// Serializa `start()`: dos llamadas simultaneas no pueden crear dos bucles.
     started: Mutex<bool>,
     loop_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Cancelacion de la síntesis que el bucle esta esperando, si la hay.
+    current_cancel: Mutex<Option<TtsCancellation>>,
+    /// Estado del proveedor separado del fallo de dispositivo de audio.
+    provider_degraded: Mutex<Option<String>>,
+    /// Fallo de reproducción detectado en el camino caliente. El error de
+    /// apertura inicial sigue viniendo de `AudioSink::last_error()`.
+    audio_degraded: Mutex<Option<String>>,
 }
 
 impl TtsManager {
@@ -318,6 +335,9 @@ impl TtsManager {
             wake_rx: Mutex::new(Some(wake_rx)),
             started: Mutex::new(false),
             loop_task: Mutex::new(None),
+            current_cancel: Mutex::new(None),
+            provider_degraded: Mutex::new(None),
+            audio_degraded: Mutex::new(None),
         };
         // El volumen del dispositivo no es un detalle de cada frase: se aplica
         // una vez y sobrevive a todas las reproducciones.
@@ -554,6 +574,7 @@ impl TtsManager {
         if !enabled {
             // Desactivar debe notarse ya: lo encolado se descarta y se corta el
             // audio, sin esperar a que termine la frase en curso.
+            self.cancel_current_synthesis();
             self.clear();
             self.sink.stop();
             self.set_playing(None);
@@ -605,6 +626,7 @@ impl TtsManager {
     /// Pausa el TTS: silencia lo que suena y deja de sacar frases de la cola.
     pub fn pause(&self) {
         *self.lock_paused() = true;
+        self.cancel_current_synthesis();
         // Silenciar de inmediato: una pausa que sigue sonando no es una pausa.
         self.sink.stop();
         self.set_playing(None);
@@ -618,6 +640,7 @@ impl TtsManager {
 
     /// "Saltar": corta la frase en curso y la descarta.
     pub fn skip(&self) {
+        self.cancel_current_synthesis();
         self.sink.stop();
         self.set_playing(None);
         self.wake();
@@ -694,6 +717,23 @@ impl TtsManager {
         let mut rejections: Vec<(&'static str, u64)> = rejections.into_iter().collect();
         rejections.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
 
+        let provider_degraded = self
+            .provider_degraded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let audio_degraded = self
+            .audio_degraded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .or_else(|| self.sink.last_error());
+        let (degraded_kind, degraded) = match (&audio_degraded, &provider_degraded) {
+            (Some(detail), _) => (Some("audio"), Some(detail.clone())),
+            (None, Some(detail)) => (Some("provider"), Some(detail.clone())),
+            (None, None) => (None, None),
+        };
+
         TtsStatus {
             enabled: settings.enabled,
             paused,
@@ -708,7 +748,10 @@ impl TtsManager {
             synth_failures: counters.synth_failures,
             muted_users: self.lock_muted().len(),
             rejections,
-            degraded: self.sink.last_error(),
+            degraded,
+            degraded_kind,
+            provider_degraded,
+            audio_degraded,
         }
     }
 
@@ -825,17 +868,46 @@ impl TtsManager {
             rate,
             pitch,
         };
-        let audio = match self.provider.synthesize(&request).await {
+        let cancel = TtsCancellation::new();
+        *self
+            .current_cancel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(cancel.clone());
+        let audio = self
+            .provider
+            .synthesize_with_cancel(&request, cancel.clone())
+            .await;
+        self.clear_current_synthesis(&cancel);
+
+        let audio = match audio {
             Ok(audio) => audio,
             Err(error) => {
+                if cancel.is_cancelled() {
+                    return Dispatch::Skipped;
+                }
                 // Sin sidecar no se cae nada: se cuenta y se sigue. Es el modo
                 // degradado que exige docs/decisions.md D3.
                 tracing::warn!(%error, id = item.id, "sintesis fallida");
                 self.lock_counters().synth_failures += 1;
+                *self
+                    .provider_degraded
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(error.to_string());
                 self.notify(&format!("sintesis fallida: {error}"));
                 return Dispatch::Failed;
             }
         };
+
+        // Una cancelacion concurrente puede haber ocurrido justo cuando el
+        // proveedor devolvio el audio; no se debe publicar ni reproducir esa
+        // frase despues de skip/pause.
+        if cancel.is_cancelled() {
+            return Dispatch::Skipped;
+        }
+        *self
+            .provider_degraded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
 
         {
             let mut counters = self.lock_counters();
@@ -858,8 +930,18 @@ impl TtsManager {
         if let Err(error) = self.sink.play(&audio.path, volume) {
             tracing::warn!(%error, id = item.id, "no se pudo reproducir");
             self.lock_counters().synth_failures += 1;
+            *self
+                .audio_degraded
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(error.to_string());
             self.set_playing(None);
             return Dispatch::Failed;
+        }
+        if self.sink.last_error().is_none() {
+            *self
+                .audio_degraded
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         }
         self.lock_counters().played += 1;
 
@@ -913,6 +995,31 @@ impl TtsManager {
         // receptor.
         self.wake_tx
             .send_modify(|tick| *tick = tick.wrapping_add(1));
+    }
+
+    fn cancel_current_synthesis(&self) {
+        if let Some(cancel) = self
+            .current_cancel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .cloned()
+        {
+            cancel.cancel();
+        }
+    }
+
+    fn clear_current_synthesis(&self, cancel: &TtsCancellation) {
+        let mut current = self
+            .current_cancel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if current
+            .as_ref()
+            .is_some_and(|active| active.is_same(cancel))
+        {
+            *current = None;
+        }
     }
 
     fn set_playing(&self, playing: Option<TtsNowPlaying>) {
@@ -991,6 +1098,7 @@ impl TtsManager {
 
     /// Cierre ordenado: corta el audio, detiene el bucle y apaga el sidecar.
     pub async fn shutdown(&self) {
+        self.cancel_current_synthesis();
         self.sink.stop();
         self.set_playing(None);
         let task = self
@@ -1033,6 +1141,7 @@ impl TtsManager {
 
 impl Drop for TtsManager {
     fn drop(&mut self) {
+        self.cancel_current_synthesis();
         self.sink.stop();
         // Sin esto, la tarea del bucle seguiria viva hasta que se apagara el
         // runtime (los tests lo notarian).
@@ -1070,6 +1179,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Condvar;
+    use tokio::sync::Notify;
 
     // -----------------------------------------------------------------------
     // Dobles de prueba
@@ -1170,6 +1280,79 @@ mod tests {
             self.prunes.fetch_add(1, Ordering::Relaxed);
             1
         }
+    }
+
+    /// Provider que permanece en síntesis hasta que recibe la cancelación. Es
+    /// deliberadamente independiente del sidecar: prueba el contrato del
+    /// gestor y evita que un `sleep` haga pasar una cancelación falsa.
+    struct CancelAwareProvider {
+        started: AtomicU64,
+        cancelled: AtomicU64,
+        wake: Notify,
+    }
+
+    impl CancelAwareProvider {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                started: AtomicU64::new(0),
+                cancelled: AtomicU64::new(0),
+                wake: Notify::new(),
+            })
+        }
+    }
+
+    impl TtsProvider for CancelAwareProvider {
+        fn name(&self) -> &'static str {
+            "cancel-aware"
+        }
+
+        fn synthesize<'a>(&'a self, _: &'a TtsRequest) -> BoxFuture<'a, Result<TtsAudio>> {
+            Box::pin(std::future::pending())
+        }
+
+        fn synthesize_with_cancel<'a>(
+            &'a self,
+            _: &'a TtsRequest,
+            cancel: TtsCancellation,
+        ) -> BoxFuture<'a, Result<TtsAudio>> {
+            self.started.fetch_add(1, Ordering::Relaxed);
+            self.wake.notify_waiters();
+            Box::pin(async move {
+                cancel.cancelled().await;
+                self.cancelled.fetch_add(1, Ordering::Relaxed);
+                anyhow::bail!("síntesis cancelada por la prueba")
+            })
+        }
+
+        fn health<'a>(&'a self) -> BoxFuture<'a, bool> {
+            Box::pin(async move { true })
+        }
+
+        fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>> {
+            Box::pin(async move { Ok(vec![]) })
+        }
+
+        fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
+            Box::pin(async move {})
+        }
+    }
+
+    struct BrokenAudioSink;
+
+    impl AudioSink for BrokenAudioSink {
+        fn play(&self, _: &Path, _: f32) -> anyhow::Result<()> {
+            anyhow::bail!("dispositivo de prueba no disponible")
+        }
+
+        fn stop(&self) {}
+
+        fn set_volume(&self, _: f32) {}
+
+        fn is_playing(&self) -> bool {
+            false
+        }
+
+        fn wait(&self) {}
     }
 
     /// Salida que ya ha "terminado" cuando `play` regresa.
@@ -1931,6 +2114,13 @@ mod tests {
             manager.status().synth_failures
         );
         assert_eq!(manager.status().played, 0);
+        let degraded = manager.status();
+        assert_eq!(degraded.degraded_kind, Some("provider"));
+        assert!(degraded
+            .provider_degraded
+            .as_deref()
+            .is_some_and(|detail| detail.contains("sidecar caido")));
+        assert_eq!(degraded.audio_degraded, None);
         // El gestor sigue vivo y acepta mas eventos.
         manager.handle_event(&chat(9, "9", "otra frase"));
     }
@@ -2096,6 +2286,82 @@ mod tests {
         );
         assert_eq!(sink.cut_waits(), 2, "la pausa tambien corta");
         assert_eq!(manager.status().played, 2, "las dos frases llegaron a sonar");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn saltar_cancela_la_sintesis_en_vuelo_y_no_la_cuenta_como_fallo() {
+        let provider = CancelAwareProvider::new();
+        let sink = Arc::new(NullSink::default());
+        let bus = Arc::new(EventBus::new(32, Arc::new(Metrics::default())));
+        let manager = Arc::new(TtsManager::new(
+            settings(),
+            provider.clone() as SharedTtsProvider,
+            bus,
+            sink.clone() as Arc<dyn AudioSink>,
+        ));
+        manager.start();
+        manager.handle_event(&chat(1, "cancel-user", "frase que tarda"));
+        assert!(wait_for(|| provider.started.load(Ordering::Relaxed) == 1).await);
+
+        manager.skip();
+        assert!(
+            wait_for(|| provider.cancelled.load(Ordering::Relaxed) == 1).await,
+            "skip debe llegar al proveedor, no solo al reproductor"
+        );
+        let status = manager.status();
+        assert_eq!(status.synth_failures, 0, "cancelar no es un fallo del proveedor");
+        assert_eq!(status.played, 0);
+        assert_eq!(status.playing, None);
+        manager.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pausar_y_cerrar_cancelan_una_sintesis_en_vuelo() {
+        let provider = CancelAwareProvider::new();
+        let sink = Arc::new(NullSink::default());
+        let bus = Arc::new(EventBus::new(32, Arc::new(Metrics::default())));
+        let manager = Arc::new(TtsManager::new(
+            settings(),
+            provider.clone() as SharedTtsProvider,
+            bus,
+            sink as Arc<dyn AudioSink>,
+        ));
+        manager.start();
+        manager.handle_event(&chat(1, "cancel-user", "otra frase que tarda"));
+        assert!(wait_for(|| provider.started.load(Ordering::Relaxed) == 1).await);
+
+        manager.pause();
+        assert!(wait_for(|| provider.cancelled.load(Ordering::Relaxed) == 1).await);
+        assert_eq!(manager.status().synth_failures, 0);
+
+        // `shutdown` repite la señal de forma idempotente y deja el proveedor
+        // sin una operación en vuelo.
+        manager.shutdown().await;
+        assert_eq!(provider.cancelled.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn el_estado_degradado_distingue_audio_de_proveedor() {
+        let provider = FakeProvider::new();
+        let bus = Arc::new(EventBus::new(32, Arc::new(Metrics::default())));
+        let manager = Arc::new(TtsManager::new(
+            settings(),
+            provider as SharedTtsProvider,
+            bus,
+            Arc::new(BrokenAudioSink),
+        ));
+        manager.start();
+        manager.handle_event(&chat(1, "audio-user", "la sintesis si funciona"));
+        assert!(wait_for(|| manager.status().synth_failures >= 1).await);
+
+        let status = manager.status();
+        assert_eq!(status.degraded_kind, Some("audio"));
+        assert!(status
+            .audio_degraded
+            .as_deref()
+            .is_some_and(|detail| detail.contains("dispositivo de prueba")));
+        assert_eq!(status.provider_degraded, None);
+        manager.shutdown().await;
     }
 
     /// F2: la espera del audio no puede secuestrar un hilo del runtime.

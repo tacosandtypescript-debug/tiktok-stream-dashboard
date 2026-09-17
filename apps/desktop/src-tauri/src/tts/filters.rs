@@ -138,6 +138,11 @@ pub struct Filters {
 /// Capacidad de la memoria de mensajes recientes.
 const RECENT_CAPACITY: usize = 256;
 
+/// Los cooldowns solo necesitan recordar usuarios que siguen dentro de su
+/// ventana. El tope adicional protege el proceso frente a una sala con miles
+/// de usuarios distintos en poco tiempo.
+pub const LAST_USER_CAPACITY: usize = 1024;
+
 impl Filters {
     pub fn new(config: FilterConfig, now: Instant) -> Self {
         Self {
@@ -228,6 +233,19 @@ impl Filters {
 
     /// Registra que una frase se ha aceptado y va a leerse.
     pub fn commit(&mut self, user_id: &str, text: &str, now: Instant) {
+        self.prune_last_users(now);
+        if !self.last_user.contains_key(user_id)
+            && self.last_user.len() >= LAST_USER_CAPACITY
+        {
+            if let Some((oldest, _)) = self
+                .last_user
+                .iter()
+                .min_by_key(|(_, at)| **at)
+                .map(|(user, at)| (user.clone(), *at))
+            {
+                self.last_user.remove(&oldest);
+            }
+        }
         self.last_user.insert(user_id.to_string(), now);
         if self.recent.len() >= RECENT_CAPACITY {
             self.recent.pop_front();
@@ -348,12 +366,22 @@ impl Filters {
     }
 
     fn check_cooldown(&mut self, user_id: &str, now: Instant) -> Option<RejectReason> {
+        self.prune_last_users(now);
         if let Some(last) = self.last_user.get(user_id) {
             if now.duration_since(*last) < self.config.user_cooldown {
                 return self.reject(RejectReason::UserCooldown);
             }
         }
         None
+    }
+
+    fn prune_last_users(&mut self, now: Instant) {
+        if self.config.user_cooldown.is_zero() {
+            self.last_user.clear();
+            return;
+        }
+        self.last_user
+            .retain(|_, last| now.duration_since(*last) < self.config.user_cooldown);
     }
 
     /// Consume un token global. Devuelve `false` si no habia.
@@ -518,6 +546,28 @@ mod tests {
             filters.evaluate("u1", "ya pasó el rato", inicio + Duration::from_secs(25)),
             FilterOutcome::Accept { .. }
         ));
+    }
+
+    #[test]
+    fn el_cooldown_por_usuario_no_crece_sin_limite() {
+        let mut filters = filters();
+        let inicio = now();
+        for index in 0..(LAST_USER_CAPACITY * 3) {
+            filters.commit(&format!("usuario-{index}"), "mensaje distinto", inicio);
+        }
+
+        assert_eq!(
+            filters.last_user.len(),
+            LAST_USER_CAPACITY,
+            "la memoria de cooldown debe tener un tope duro"
+        );
+
+        // La antigüedad también poda entradas aunque todavía no se haya
+        // alcanzado la capacidad: un usuario fuera del cooldown no necesita
+        // ocupar memoria.
+        let despues = inicio + filters.config.user_cooldown;
+        let _ = filters.evaluate("usuario-nuevo", "otro mensaje", despues);
+        assert!(filters.last_user.is_empty());
     }
 
     #[test]
