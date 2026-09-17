@@ -42,7 +42,7 @@ Todo lo de abajo está verificado contra directos reales y con la suite en verde
 - **Windows 10/11** con WebView2 (de serie en Windows 11 y en Windows 10 actualizado).
 - **Rust** estable con toolchain `x86_64-pc-windows-msvc` y **Visual Studio Build Tools** (enlazador de MSVC).
 - **Node.js 22+** (solo para compilar la interfaz).
-- **Python 3.12 con `uv`** y `edge-tts` (solo para el sidecar de voz; el proyecto crea su propio venv en `.tooling/venv`).
+- **Python 3.12 con `uv`** para desarrollo y **PyInstaller** para el sidecar de voz. El instalador no necesita Python: Tauri empaqueta `tiktok-tts-provider` como `externalBin`.
 
 ## Puesta en marcha
 
@@ -50,25 +50,28 @@ Todo lo de abajo está verificado contra directos reales y con la suite en verde
 # 1. Entorno (rutas de cache dentro del proyecto; ver docs/decisions.md D6/D7)
 . .\scripts\env.ps1
 
-# 2. Dependencias de la interfaz (una sola vez)
+# 2. Entornos reproducibles (una sola vez)
+.\scripts\setup.ps1
+
+# 3. Dependencias de la interfaz (una sola vez)
 cd apps\desktop
 npm install
 cd ..\..
 
-# 3. Compilar y ejecutar la aplicacion
+# 4. Compilar ejecutable y sidecar
 .\scripts\build.ps1
 .\apps\desktop\src-tauri\target\release\tiktok-stream-dashboard.exe
 ```
 
-El entorno de Python (solo para la voz) se crea una vez dentro del propio proyecto; no hay script de setup, son dos comandos de `uv`:
+Para generar también el instalador NSIS, con el sidecar validado por la configuración de Tauri:
 
 ```powershell
-uv python install 3.12
-uv venv --python 3.12 .tooling\venv
-uv pip install --python .tooling\venv\Scripts\python.exe edge-tts
+.\scripts\build.ps1 -Bundle
 ```
 
-El motor Rust resuelve el intérprete en este orden: `TTSDASH_PYTHON`, `.tooling\venv\Scripts\python.exe` y, por último, `python` del PATH.
+`scripts/setup.ps1` sincroniza `services\tts-provider\requirements.lock`, que fija edge-tts, PyInstaller y todas sus dependencias con hashes. `scripts\build-tts-sidecar.ps1` genera `tiktok-tts-provider-x86_64-pc-windows-msvc.exe` en `apps\desktop\src-tauri\binaries\` y en `target\release\`; los binarios generados no se versionan.
+
+El motor Rust resuelve el runtime en este orden: `TTSDASH_TTS_SIDECAR`, un sidecar junto al ejecutable o en `resources`, el staging release/.tooling y, solo en desarrollo, `TTSDASH_PYTHON`, `.tooling\venv\Scripts\python.exe` o `python` del PATH. Si no encuentra ninguno, el error enumera el modo esperado y el comando de preparación.
 
 ### Modo desarrollo
 
