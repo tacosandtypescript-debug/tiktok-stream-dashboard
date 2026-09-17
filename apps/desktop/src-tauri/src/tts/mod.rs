@@ -23,10 +23,60 @@ pub use provider::{
 pub use queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
 pub use voices::{catalog, detect_language, Language, Voice, DEFAULT_VOICE};
 
+/// Nombre base del ejecutable que Tauri empaqueta como `externalBin`.
+pub const SIDECAR_NAME: &str = "tiktok-tts-provider";
 /// Ruta del script del sidecar, relativa a la raiz del repositorio.
 pub const SIDECAR_SCRIPT: &str = "services/tts-provider/src/main.py";
 /// Interprete de desarrollo (gestionado por `uv` dentro del propio proyecto).
 pub const DEV_PYTHON: &str = ".tooling/venv/Scripts/python.exe";
+
+/// Sufijo que Tauri exige en `src-tauri/binaries/` para el binario de cada
+/// arquitectura. El proyecto publica Windows x64 por ahora; si se habilita
+/// otra arquitectura, el build script debe copiar el artefacto con su triple.
+pub fn sidecar_target_triple() -> &'static str {
+    if cfg!(all(windows, target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else if cfg!(all(windows, target_arch = "aarch64")) {
+        "aarch64-pc-windows-msvc"
+    } else {
+        "unsupported-target"
+    }
+}
+
+pub fn sidecar_filename() -> String {
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    format!("{}-{}{}", SIDECAR_NAME, sidecar_target_triple(), extension)
+}
+
+fn sidecar_candidates(root: &PathBuf) -> Vec<PathBuf> {
+    let filename = sidecar_filename();
+    let mut candidates = Vec::new();
+
+    if let Ok(executable) = std::env::var("TTSDASH_TTS_SIDECAR") {
+        if !executable.trim().is_empty() {
+            candidates.push(PathBuf::from(executable));
+        }
+    }
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            // Release/installed layout: alongside the dashboard or in the
+            // resources directory used by Tauri's NSIS bundle.
+            candidates.push(directory.join(&filename));
+            candidates.push(directory.join(SIDECAR_NAME).with_extension(if cfg!(windows) { "exe" } else { "" }));
+            candidates.push(directory.join("resources").join(&filename));
+        }
+    }
+
+    // Development layout: staged externalBin, release output and the local
+    // tooling cache are all deterministic and remain outside the repository's
+    // tracked source files.
+    candidates.push(root.join("apps/desktop/src-tauri/binaries").join(&filename));
+    candidates.push(root.join("apps/desktop/src-tauri/target/release").join(&filename));
+    candidates.push(root.join(".tooling/tts-provider").join(&filename));
+
+    candidates
+}
 
 /// Localiza la raiz del repositorio subiendo desde el ejecutable.
 ///
@@ -54,14 +104,25 @@ pub fn find_repo_root() -> PathBuf {
 
 /// Configuracion de TTS lista para este equipo.
 ///
-/// El interprete se resuelve en este orden: `TTSDASH_PYTHON`, el Python del
-/// proyecto (`.tooling/venv`), y por ultimo `python` del PATH. En una
-/// instalacion empaquetada se distribuira un interprete propio junto al
-/// ejecutable (docs/plan-review.md §P0-3).
+/// El runtime se resuelve en este orden:
+///
+/// 1. `TTSDASH_TTS_SIDECAR`, override explícito para soporte y QA.
+/// 2. El ejecutable congelado junto al release/recursos de Tauri.
+/// 3. El ejecutable congelado del staging `src-tauri/binaries` o `.tooling`.
+/// 4. Python del proyecto (`.tooling/venv`) y, por último, `python` del PATH.
+///
+/// El último camino es solo desarrollo. El instalador no depende de Python:
+/// Tauri incluye el ejecutable de PyInstaller mediante `externalBin`.
 pub fn default_config() -> TtsConfig {
     let root = find_repo_root();
     let mut config = TtsConfig::default();
     config.script = root.join(SIDECAR_SCRIPT);
+
+    let candidates = sidecar_candidates(&root);
+    if let Some(executable) = candidates.iter().find(|candidate| candidate.exists()) {
+        config.executable = Some(executable.clone());
+        return config;
+    }
 
     if let Ok(python) = std::env::var("TTSDASH_PYTHON") {
         if !python.trim().is_empty() {

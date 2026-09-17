@@ -108,9 +108,21 @@ pub fn tts_probe(
             std::time::SystemTime::now(),
         );
         let (arranques, peticiones, fallos, aciertos) = provider.stats();
+        let runtime_path = config
+            .executable
+            .as_ref()
+            .unwrap_or(&config.python)
+            .display()
+            .to_string();
+        let runtime_kind = if config.executable.is_some() {
+            "frozen-pyinstaller"
+        } else {
+            "python-script"
+        };
         let resumen = serde_json::json!({
-            "proveedor": "edge-tts (sidecar Python)",
-            "interprete": config.python.display().to_string(),
+            "proveedor": "edge-tts (sidecar)",
+            "runtime": runtime_kind,
+            "runtime_path": runtime_path,
             "sidecar": config.script.display().to_string(),
             "voz": voice,
             "texto": text,
