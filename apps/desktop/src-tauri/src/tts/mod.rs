@@ -1,0 +1,139 @@
+//! TTS: cola, filtros, catalogo de voces y sintesis.
+//!
+//! Reparto de responsabilidades (docs/decisions.md D3): Rust decide **que** se
+//! lee, **cuando** y **con que prioridad**; Python solo convierte texto en
+//! audio. Asi el motor de voz es sustituible sin tocar la cola ni los filtros.
+
+pub mod filters;
+pub mod manager;
+pub mod player;
+pub mod provider;
+pub mod queue;
+pub mod voices;
+
+use std::path::PathBuf;
+
+pub use filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
+pub use manager::{TtsManager, TtsNowPlaying, TtsSettings, TtsStatus};
+pub use player::{AudioSink, FallbackSink, NullSink, RodioSink};
+pub use provider::{
+    cache_key, prune_cache, EdgeTtsSidecar, SharedTtsProvider, TtsAudio, TtsConfig, TtsProvider,
+    TtsRequest,
+};
+pub use queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
+pub use voices::{catalog, detect_language, Language, Voice, DEFAULT_VOICE};
+
+/// Ruta del script del sidecar, relativa a la raiz del repositorio.
+pub const SIDECAR_SCRIPT: &str = "services/tts-provider/src/main.py";
+/// Interprete de desarrollo (gestionado por `uv` dentro del propio proyecto).
+pub const DEV_PYTHON: &str = ".tooling/venv/Scripts/python.exe";
+
+/// Localiza la raiz del repositorio subiendo desde el ejecutable.
+///
+/// En desarrollo el binario vive en `apps/desktop/src-tauri/target/<perfil>/`,
+/// asi que la raiz se reconoce por contener el script del sidecar. Si no se
+/// encuentra, se devuelve el directorio de trabajo.
+pub fn find_repo_root() -> PathBuf {
+    if let Ok(root) = std::env::var("TTSDASH_ROOT") {
+        if !root.trim().is_empty() {
+            return PathBuf::from(root);
+        }
+    }
+
+    let mut candidate: Option<PathBuf> = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|parent| parent.to_path_buf()));
+    while let Some(directory) = candidate {
+        if directory.join(SIDECAR_SCRIPT).exists() {
+            return directory;
+        }
+        candidate = directory.parent().map(|parent| parent.to_path_buf());
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Configuracion de TTS lista para este equipo.
+///
+/// El interprete se resuelve en este orden: `TTSDASH_PYTHON`, el Python del
+/// proyecto (`.tooling/venv`), y por ultimo `python` del PATH. En una
+/// instalacion empaquetada se distribuira un interprete propio junto al
+/// ejecutable (docs/plan-review.md §P0-3).
+pub fn default_config() -> TtsConfig {
+    let root = find_repo_root();
+    let mut config = TtsConfig::default();
+    config.script = root.join(SIDECAR_SCRIPT);
+
+    if let Ok(python) = std::env::var("TTSDASH_PYTHON") {
+        if !python.trim().is_empty() {
+            config.python = PathBuf::from(python);
+            return config;
+        }
+    }
+
+    let dev_python = root.join(DEV_PYTHON);
+    config.python = if dev_python.exists() {
+        dev_python
+    } else {
+        PathBuf::from("python")
+    };
+    config
+}
+
+/// Elige la voz segun el idioma detectado en el texto.
+pub fn voice_for(text: &str, spanish: &str, english: &str) -> String {
+    match detect_language(text) {
+        Language::Es => spanish.to_string(),
+        Language::En => english.to_string(),
+    }
+}
+
+/// Texto que se lee para un mensaje de chat: "Nick dice: mensaje".
+pub fn chat_line(nickname: &str, content: &str, say_author: bool) -> String {
+    let nickname = nickname.trim();
+    if !say_author || nickname.is_empty() {
+        return content.trim().to_string();
+    }
+    format!("{nickname} dice: {}", content.trim())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elige_la_voz_por_idioma() {
+        assert_eq!(
+            voice_for("hola, ¿qué tal?", "es-ES-ElviraNeural", "en-US-AriaNeural"),
+            "es-ES-ElviraNeural"
+        );
+        assert_eq!(
+            voice_for("hello everyone", "es-ES-ElviraNeural", "en-US-AriaNeural"),
+            "en-US-AriaNeural"
+        );
+    }
+
+    #[test]
+    fn compone_la_linea_que_se_lee() {
+        assert_eq!(chat_line("Carlos", "hola a todos", true), "Carlos dice: hola a todos");
+        assert_eq!(chat_line("Carlos", "hola a todos", false), "hola a todos");
+        // Sin apodo no se inventa un prefijo raro.
+        assert_eq!(chat_line("   ", "hola", true), "hola");
+    }
+
+    #[test]
+    fn la_configuracion_apunta_a_un_script_existente_en_este_repositorio() {
+        let config = default_config();
+        assert!(
+            config.script.ends_with("main.py"),
+            "script inesperado: {}",
+            config.script.display()
+        );
+        // En este repositorio el sidecar existe; si no, el test avisa.
+        assert!(
+            config.script.exists(),
+            "no se encontro el sidecar en {} (raiz detectada: {})",
+            config.script.display(),
+            find_repo_root().display()
+        );
+    }
+}

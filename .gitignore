@@ -1,0 +1,31 @@
+# Entorno del proyecto — generado por el agente, no por la app
+
+# Herramientas y cachés locales de desarrollo (intérprete Python, venv, cargo, uv)
+.tooling/
+
+# Rust
+target/
+# Variantes usadas para no invalidar la caché de compilación al cambiar de
+# features (target-tests, target-tts): suman varios GB.
+target-*/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Salidas de Tauri (un patron con barra ancla a la raiz: hace falta **/)
+**/src-tauri/target/
+**/src-tauri/gen/
+
+# Datos y logs en tiempo de ejecución (nunca versionar)
+data/
+logs/
+cache/
+backup/
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
