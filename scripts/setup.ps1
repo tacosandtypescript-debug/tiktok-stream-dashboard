@@ -33,7 +33,7 @@ if (-not (Test-Path $venvPython)) {
     if ($LASTEXITCODE -ne 0) { throw 'uv no pudo crear el venv de Python 3.12.' }
 }
 
-$pythonVersion = (& $venvPython -c 'import sys; print("%d.%d" % sys.version_info[:2])').Trim()
+$pythonVersion = (& $venvPython -c 'import sys; print(str(sys.version_info[0]) + chr(46) + str(sys.version_info[1]))').Trim()
 if ($pythonVersion -ne '3.12') {
     throw "El venv existente usa Python $pythonVersion; se esperaba Python 3.12. Borra solo .tooling\venv y vuelve a ejecutar scripts/setup.ps1."
 }
