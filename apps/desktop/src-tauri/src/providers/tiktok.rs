@@ -69,6 +69,13 @@ pub struct ProviderConfig {
     /// Ventana minima entre actualizaciones de viewers.
     pub viewer_coalesce: Duration,
     pub heartbeat: Duration,
+    /// Tiempo maximo de cada solicitud HTTP de resolucion/firma.
+    pub http_timeout: Duration,
+    /// Tiempo maximo para completar el handshake WebSocket.
+    pub ws_connect_timeout: Duration,
+    /// Tiempo maximo para una escritura en el WebSocket. La lectura siempre
+    /// esta protegida por el canal de cancelacion y el heartbeat.
+    pub ws_io_timeout: Duration,
 }
 
 impl Default for ProviderConfig {
@@ -87,6 +94,9 @@ impl Default for ProviderConfig {
             max_consecutive_failures: 10,
             viewer_coalesce: Duration::from_secs(1),
             heartbeat: Duration::from_secs(9),
+            http_timeout: Duration::from_secs(30),
+            ws_connect_timeout: Duration::from_secs(15),
+            ws_io_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -108,6 +118,10 @@ pub struct NativeProvider {
     /// de pedirle que parase.
     cancel: Mutex<Option<watch::Sender<bool>>>,
     task: Mutex<Option<JoinHandle<()>>>,
+    /// Serializa las transiciones connect/disconnect. Sin esta puerta, dos
+    /// llamadas concurrentes podian hacer ambas `stop_task()` antes de que
+    /// ninguna publicara su tarea y dejar dos supervisores activos.
+    lifecycle: tokio::sync::Mutex<()>,
     reporter: StatusReporter,
 }
 
@@ -115,7 +129,7 @@ impl NativeProvider {
     pub fn new(config: ProviderConfig, bus: Arc<EventBus>, metrics: Arc<Metrics>) -> Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent(config.user_agent.clone())
-            .timeout(Duration::from_secs(30))
+            .timeout(config.http_timeout)
             .build()
             .context("construyendo cliente HTTP del provider")?;
         let reporter = StatusReporter::new(bus.clone(), metrics.clone());
@@ -127,6 +141,7 @@ impl NativeProvider {
             device_id: random_device_id(),
             cancel: Mutex::new(None),
             task: Mutex::new(None),
+            lifecycle: tokio::sync::Mutex::new(()),
             reporter,
         })
     }
@@ -143,6 +158,7 @@ impl TikTokProvider for NativeProvider {
 
     fn connect<'a>(&'a self, handle: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            let _lifecycle = self.lifecycle.lock().await;
             let handle = handle.trim().trim_start_matches('@').to_string();
             // Una sola conexion por instancia: reconectar es reemplazar la tarea.
             self.stop_task().await;
@@ -176,6 +192,7 @@ impl TikTokProvider for NativeProvider {
 
     fn disconnect<'a>(&'a self) -> BoxFuture<'a, ()> {
         Box::pin(async move {
+            let _lifecycle = self.lifecycle.lock().await;
             // El supervisor sale del bucle por cancelacion, asi que el
             // `StreamDisconnected` que emitiria al caerse la conexion no se
             // publica solo: sin esto la sesion quedaba abierta en la base (y
@@ -207,17 +224,38 @@ impl NativeProvider {
             let _ = sender.send(true);
         }
         let task = self.task.lock().ok().and_then(|mut guard| guard.take());
-        if let Some(task) = task {
+        if let Some(mut task) = task {
             // Margen corto: el supervisor observa la cancelacion en cada select.
-            match tokio::time::timeout(Duration::from_secs(5), task).await {
-                Ok(_) => {}
-                Err(_) => tracing::warn!("el supervisor no termino a tiempo; se aborta"),
+            if join_task_or_abort(&mut task, Duration::from_secs(5)).await {
+                tracing::warn!("el supervisor no termino a tiempo; se aborta");
             }
         }
     }
 }
 
+/// Espera una tarea cooperativa y, si no sale a tiempo, la cancela de verdad.
+/// Devuelve `true` cuando tuvo que usar `abort`; devolver el `JoinHandle` sin
+/// hacer esto lo dejaria ejecutandose en segundo plano.
+async fn join_task_or_abort(task: &mut JoinHandle<()>, grace: Duration) -> bool {
+    if tokio::time::timeout(grace, &mut *task).await.is_ok() {
+        return false;
+    }
+    task.abort();
+    let _ = task.await;
+    true
+}
+
 /// Estado del supervisor de una conexion.
+#[derive(Debug, PartialEq, Eq)]
+enum PumpExit {
+    /// La conexion se cayo y el supervisor puede aplicar backoff.
+    Reconnect(String),
+    /// TikTok anuncio fin/suspension: la sesion no debe volver a conectarse.
+    Terminal(String),
+    /// Cancelacion local, sin publicar un motivo de reconexion.
+    Cancelled,
+}
+
 struct Supervisor {
     config: ProviderConfig,
     http: reqwest::Client,
@@ -229,6 +267,27 @@ struct Supervisor {
 }
 
 impl Supervisor {
+    fn publish_sink(&self, sink: &mut EventSink, final_flush: bool) -> Option<String> {
+        let terminal = sink.terminal_reason();
+        let events = if final_flush || terminal.is_some() {
+            sink.drain_final()
+        } else {
+            sink.drain()
+        };
+        for (source_id, kind) in events {
+            self.bus.publish(source_id, kind);
+        }
+        terminal
+    }
+
+    async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
+        while !*cancel.borrow() {
+            if cancel.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
     async fn sleep_or_cancel(&self, cancel: &mut watch::Receiver<bool>, delay: Duration) -> bool {
         tokio::select! {
             _ = tokio::time::sleep(delay) => false,
@@ -239,11 +298,16 @@ impl Supervisor {
     async fn run(&self, mut cancel: watch::Receiver<bool>) {
         let mut failures: u32 = 0;
         let mut delay = self.config.min_reconnect_delay;
+        // El cursor es parte de la sesion de Webcast, no de un intento de
+        // conexion. Conservarlo evita pedir desde cero los mensajes al
+        // reconectar y tambien permite al firmador continuar la secuencia.
+        let mut cursor: Option<String> = None;
+        let mut cursor_room: Option<String> = None;
         // Motivo por el que el supervisor se rinde. Se guarda para **no** pisarlo
         // con `Stopped` al salir: si no, tras "cuota inservible; detenido" el
         // usuario veia "Desconectado" (igual que si nunca hubiera conectado) y
         // volvia a pulsar Conectar, justo lo que se intenta evitar.
-        let mut terminal: Option<String> = None;
+        let mut terminal: Option<(ProviderStatus, String)> = None;
 
         loop {
             if *cancel.borrow() {
@@ -251,7 +315,15 @@ impl Supervisor {
             }
 
             // --- Etapa 1: resolver la sala (sin cuota) ---------------------
-            let room = match resolve_room(&self.http, &self.config, &self.device_id, &self.handle).await {
+            let room = match tokio::select! {
+                result = resolve_room(&self.http, &self.config, &self.device_id, &self.handle) => result,
+                changed = cancel.changed() => {
+                    if changed.is_err() || *cancel.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+            } {
                 Ok(room) => room,
                 Err(error) => {
                     failures += 1;
@@ -262,7 +334,7 @@ impl Supervisor {
                         let detail = format!("{} fallos consecutivos; detenido", failures);
                         self.reporter
                             .set(ProviderStatus::Error, Some(detail.clone()));
-                        terminal = Some(detail);
+                        terminal = Some((ProviderStatus::Error, detail));
                         break;
                     }
                     if self.sleep_or_cancel(&mut cancel, delay).await {
@@ -296,13 +368,25 @@ impl Supervisor {
             }
 
             self.bus.set_room(&room.room_id);
+            if cursor_room.as_deref() != Some(room.room_id.as_str()) {
+                cursor = None;
+                cursor_room = Some(room.room_id.clone());
+            }
             failures = 0;
             delay = self.config.min_reconnect_delay;
 
             // --- Etapa 2: payload firmado (consume 1 unidad de cuota) ------
             self.reporter.set(ProviderStatus::Connecting, Some("firmando conexion".into()));
             self.metrics.sign_requests.fetch_add(1, Ordering::Relaxed);
-            let signed = match fetch_signed(&self.http, &self.config, &room.room_id).await {
+            let signed = match tokio::select! {
+                result = fetch_signed(&self.http, &self.config, &room.room_id, cursor.as_deref()) => result,
+                changed = cancel.changed() => {
+                    if changed.is_err() || *cancel.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+            } {
                 Ok(signed) => signed,
                 Err(error) => {
                     let rate_limited = error.to_string().contains("LIMITE");
@@ -318,7 +402,7 @@ impl Supervisor {
                             "cuota o firma inservible; detenido para no agotar el dia".to_string();
                         self.reporter
                             .set(ProviderStatus::Error, Some(detail.clone()));
-                        terminal = Some(detail);
+                        terminal = Some((ProviderStatus::Error, detail));
                         break;
                     }
                     // Con cuota agotada se espera mucho mas: reintentar rapido
@@ -336,6 +420,10 @@ impl Supervisor {
                 }
             };
 
+            if !signed.envelope.cursor.is_empty() {
+                cursor = Some(signed.envelope.cursor.clone());
+            }
+
         // --- Etapas 3 y 4: WebSocket + decodificacion ------------------
         // Traza temporal: que nos ha dado el servidor de firma exactamente.
         // El `push_server` decide si habra eventos en vivo: se registra siempre.
@@ -351,28 +439,49 @@ impl Supervisor {
             internal_ext = signed.envelope.internal_ext.len(),
             "sobre firmado recibido"
         );
-        let reason = self
-            .pump(&mut cancel, &signed, &room)
-                .await
-                .unwrap_or_else(|error| {
+            match self.pump(&mut cancel, &signed, &room, &mut cursor).await {
+                Ok(PumpExit::Cancelled) => break,
+                Ok(PumpExit::Terminal(reason)) => {
+                    // `pump` ya publico el evento terminal procedente de
+                    // WebcastControlMessage. No debe caer en el camino de
+                    // reconexion ni publicar un segundo disconnected.
+                    terminal = Some((ProviderStatus::Stopped, reason));
+                    break;
+                }
+                Ok(PumpExit::Reconnect(reason)) => {
+                    if *cancel.borrow() {
+                        break;
+                    }
+
+                    self.metrics
+                        .provider_reconnects
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.bus.publish(
+                        None,
+                        EventKind::StreamDisconnected {
+                            reason: reason.clone(),
+                        },
+                    );
+                    self.reporter.set(ProviderStatus::Reconnecting, Some(reason));
+                }
+                Err(error) => {
+                    if *cancel.borrow() {
+                        break;
+                    }
                     self.metrics.provider_errors.fetch_add(1, Ordering::Relaxed);
-                    error.to_string()
-                });
-
-            if *cancel.borrow() {
-                break;
+                    let reason = error.to_string();
+                    self.metrics
+                        .provider_reconnects
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.bus.publish(
+                        None,
+                        EventKind::StreamDisconnected {
+                            reason: reason.clone(),
+                        },
+                    );
+                    self.reporter.set(ProviderStatus::Reconnecting, Some(reason));
+                }
             }
-
-            self.metrics
-                .provider_reconnects
-                .fetch_add(1, Ordering::Relaxed);
-            self.bus.publish(
-                None,
-                EventKind::StreamDisconnected {
-                    reason: reason.clone(),
-                },
-            );
-            self.reporter.set(ProviderStatus::Reconnecting, Some(reason));
             if self.sleep_or_cancel(&mut cancel, delay).await {
                 break;
             }
@@ -380,7 +489,7 @@ impl Supervisor {
         }
 
         match terminal {
-            Some(detail) => self.reporter.set(ProviderStatus::Error, Some(detail)),
+            Some((status, detail)) => self.reporter.set(status, Some(detail)),
             None => self.reporter.set(ProviderStatus::Stopped, None),
         }
     }
@@ -391,7 +500,8 @@ impl Supervisor {
         cancel: &mut watch::Receiver<bool>,
         signed: &SignedFetch,
         room: &RoomInfo,
-    ) -> Result<String> {
+        cursor: &mut Option<String>,
+    ) -> Result<PumpExit> {
         let ws_url = build_ws_url(&signed.envelope, &room.room_id, &self.config)?;
         // Traza temporal: la URL exacta del push server, para compararla con la
         // que funcionaba en la sesion grabada (fixtures `live.jsonl`).
@@ -416,9 +526,16 @@ impl Supervisor {
             headers.insert("Cookie", HeaderValue::from_str(&cookie)?);
         }
 
-        let (stream, response) = tokio_tungstenite::connect_async(request)
-            .await
-            .context("handshake del WebSocket")?;
+        let handshake = tokio::select! {
+            result = tokio::time::timeout(
+                self.config.ws_connect_timeout,
+                tokio_tungstenite::connect_async(request),
+            ) => result
+                .context("timeout del handshake del WebSocket")?
+                .context("handshake del WebSocket")?,
+            _ = Self::wait_for_cancel(cancel) => return Ok(PumpExit::Cancelled),
+        };
+        let (stream, response) = handshake;
         self.metrics.ws_connects.fetch_add(1, Ordering::Relaxed);
         tracing::info!(status = response.status().as_u16(), "WebSocket conectado");
 
@@ -436,8 +553,9 @@ impl Supervisor {
         for message in &signed.envelope.messages {
             translate_message(&message.method, &message.payload, &mut sink);
         }
-        for (source_id, kind) in sink.drain() {
-            self.bus.publish(source_id, kind);
+        let initial_terminal = self.publish_sink(&mut sink, false);
+        if let Some(reason) = initial_terminal {
+            return Ok(PumpExit::Terminal(reason));
         }
 
         let (mut write, mut read) = stream.split();
@@ -471,10 +589,13 @@ impl Supervisor {
                 }
                 .encode_to_vec(),
             };
-            write
-                .send(Message::Binary(peticion.encode_to_vec()))
-                .await
-                .context("enviando im_enter_room")?;
+            tokio::time::timeout(
+                self.config.ws_io_timeout,
+                write.send(Message::Binary(peticion.encode_to_vec())),
+            )
+            .await
+            .context("timeout enviando im_enter_room")?
+            .context("enviando im_enter_room")?;
             tracing::info!(room_id = %room.room_id, "peticion de entrada en la sala enviada");
         }
 
@@ -507,15 +628,24 @@ impl Supervisor {
                         .encode_to_vec(),
                     };
                     latido += 1;
-                    write
-                        .send(Message::Binary(frame.encode_to_vec()))
-                        .await
-                        .context("enviando heartbeat")?;
+                    tokio::time::timeout(
+                        self.config.ws_io_timeout,
+                        write.send(Message::Binary(frame.encode_to_vec())),
+                    )
+                    .await
+                    .context("timeout enviando heartbeat")?
+                    .context("enviando heartbeat")?;
                 }
                 incoming = read.next() => {
                     match incoming {
-                        None => return Ok("el servidor cerro la conexion".into()),
-                        Some(Err(error)) => return Err(anyhow!("error de WebSocket: {error}")),
+                        None => {
+                            self.publish_sink(&mut sink, true);
+                            return Ok(PumpExit::Reconnect("el servidor cerro la conexion".into()));
+                        }
+                        Some(Err(error)) => {
+                            self.publish_sink(&mut sink, true);
+                            return Err(anyhow!("error de WebSocket: {error}"));
+                        }
                         Some(Ok(Message::Binary(raw))) => {
                             self.metrics.ws_frames.fetch_add(1, Ordering::Relaxed);
                             // Traza temporal: distingue "el servidor no manda nada"
@@ -526,7 +656,10 @@ impl Supervisor {
                                 "frame crudo recibido"
                             );
                             match decode_frame(&raw) {
-                                Ok((ack, messages)) => {
+                                Ok((ack, messages, next_cursor)) => {
+                                    if let Some(next_cursor) = next_cursor {
+                                        *cursor = Some(next_cursor);
+                                    }
                                     for message in &messages {
                                         translate_message(
                                             &message.method,
@@ -534,26 +667,53 @@ impl Supervisor {
                                             &mut sink,
                                         );
                                     }
+                                    let terminal = sink.terminal_reason();
+                                    if let Some(reason) = terminal {
+                                        self.publish_sink(&mut sink, true);
+                                        return Ok(PumpExit::Terminal(reason));
+                                    }
                                     if let Some(ack) = ack {
-                                        write.send(Message::Binary(ack)).await
-                                            .context("enviando ACK")?;
+                                        tokio::time::timeout(
+                                            self.config.ws_io_timeout,
+                                            write.send(Message::Binary(ack)),
+                                        )
+                                        .await
+                                        .context("timeout enviando ACK")?
+                                        .context("enviando ACK")?;
                                     }
                                 }
                                 Err(error) => tracing::debug!(%error, "frame no procesable"),
                             }
-                            for (source_id, kind) in sink.drain() {
-                                self.bus.publish(source_id, kind);
+                            let terminal = self.publish_sink(&mut sink, false);
+                            if let Some(reason) = terminal {
+                                return Ok(PumpExit::Terminal(reason));
                             }
                         }
                         Some(Ok(Message::Ping(payload))) => {
-                            write.send(Message::Pong(payload)).await.ok();
+                            let pong = tokio::time::timeout(
+                                self.config.ws_io_timeout,
+                                write.send(Message::Pong(payload)),
+                            )
+                            .await;
+                            match pong {
+                                Err(error) => {
+                                    self.publish_sink(&mut sink, true);
+                                    return Err(anyhow!("timeout enviando pong: {error}"));
+                                }
+                                Ok(Err(error)) => {
+                                    self.publish_sink(&mut sink, true);
+                                    return Err(anyhow!("enviando pong: {error}"));
+                                }
+                                Ok(Ok(())) => {}
+                            }
                         }
                         Some(Ok(_)) => {}
                     }
                 }
-                _ = cancel.changed() => {
-                    if *cancel.borrow() {
-                        return Ok("desconectado por el usuario".into());
+                changed = cancel.changed() => {
+                    if changed.is_err() || *cancel.borrow() {
+                        self.publish_sink(&mut sink, true);
+                        return Ok(PumpExit::Cancelled);
                     }
                 }
             }
@@ -764,6 +924,7 @@ pub struct EventSink {
     events: Vec<(Option<String>, EventKind)>,
     last_viewer_emit: Option<std::time::Instant>,
     latest_viewers: Option<(i64, i64)>,
+    last_emitted_viewers: Option<(i64, i64)>,
     metrics: Arc<Metrics>,
     /// Ventana minima entre actualizaciones de viewers.
     coalesce: Duration,
@@ -775,6 +936,7 @@ impl EventSink {
             events: Vec::new(),
             last_viewer_emit: None,
             latest_viewers: None,
+            last_emitted_viewers: None,
             metrics,
             coalesce,
         }
@@ -801,6 +963,41 @@ impl EventSink {
         self.latest_viewers
     }
 
+    fn terminal_reason(&self) -> Option<String> {
+        self.events.iter().find_map(|(_, kind)| match kind {
+            EventKind::StreamDisconnected { reason } => Some(reason.clone()),
+            _ => None,
+        })
+    }
+
+    fn pending_viewers(&self) -> Option<(i64, i64)> {
+        self.latest_viewers
+            .filter(|viewers| self.last_emitted_viewers != Some(*viewers))
+    }
+
+    /// Vuelca el ultimo valor de viewers coalescido. Si el mismo frame trae el
+    /// evento terminal, lo coloca antes de `stream.disconnected` para mantener
+    /// el orden temporal de los eventos.
+    pub fn drain_final(&mut self) -> Vec<(Option<String>, EventKind)> {
+        if let Some((current, cumulative)) = self.pending_viewers() {
+            let index = self
+                .events
+                .iter()
+                .position(|(_, kind)| matches!(kind, EventKind::StreamDisconnected { .. }))
+                .unwrap_or(self.events.len());
+            self.events.insert(
+                index,
+                (None, EventKind::ViewerUpdated { current, cumulative }),
+            );
+            self.last_viewer_emit = Some(std::time::Instant::now());
+            self.last_emitted_viewers = Some((current, cumulative));
+            self.metrics
+                .viewer_updates_emitted
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        self.drain()
+    }
+
     /// Los viewers llegan muy rapido y solo interesa el ultimo valor: se emite
     /// como maximo una vez por ventana y se cuenta lo colapsado.
     pub fn observe_viewers(&mut self, current: i64, cumulative: i64) {
@@ -815,6 +1012,7 @@ impl EventSink {
             self.metrics
                 .viewer_updates_emitted
                 .fetch_add(1, Ordering::Relaxed);
+            self.last_emitted_viewers = Some((current, cumulative));
             self.push(None, EventKind::ViewerUpdated { current, cumulative });
         } else {
             self.metrics
@@ -830,12 +1028,12 @@ impl EventSink {
 /// importante devolver los mensajes y no solo el ACK: en la primera conexion
 /// real se detecto que, al descartarlos aqui, los frames se decodificaban
 /// correctamente pero ningun evento llegaba al bus.
-fn decode_frame(raw: &[u8]) -> Result<(Option<Vec<u8>>, Vec<BaseProtoMessage>)> {
+fn decode_frame(raw: &[u8]) -> Result<(Option<Vec<u8>>, Vec<BaseProtoMessage>, Option<String>)> {
     let frame = WebcastPushFrame::decode(raw).context("decodificando WebcastPushFrame")?;
 
     if frame.payload_type != "msg" {
         tracing::trace!(payload_type = %frame.payload_type, "frame ignorado");
-        return Ok((None, Vec::new()));
+        return Ok((None, Vec::new(), None));
     }
 
     let payload = match frame.compress_type() {
@@ -886,7 +1084,8 @@ fn decode_frame(raw: &[u8]) -> Result<(Option<Vec<u8>>, Vec<BaseProtoMessage>)> 
         None
     };
 
-    Ok((ack, envelope.messages))
+    let cursor = (!envelope.cursor.is_empty()).then_some(envelope.cursor);
+    Ok((ack, envelope.messages, cursor))
 }
 
 fn gunzip(payload: &[u8]) -> Result<Vec<u8>> {
@@ -1225,14 +1424,17 @@ struct SignedFetch {
 /// barras, y el servidor responde `400 Invalid user agent provided` si se envia
 /// en crudo. Es el mismo cuidado que exige la URL del WebSocket, asi que ambas
 /// usan `pct`.
-fn sign_url(config: &ProviderConfig, room_id: &str) -> String {
-    let params = [
+fn sign_url(config: &ProviderConfig, room_id: &str, cursor: Option<&str>) -> String {
+    let mut params = vec![
         ("client".to_string(), CLIENT_NAME.to_string()),
         ("room_id".to_string(), room_id.to_string()),
         ("user_agent".to_string(), pct(&config.user_agent)),
         ("platform".to_string(), "web".to_string()),
         ("client_enter".to_string(), "true".to_string()),
     ];
+    if let Some(cursor) = cursor.filter(|cursor| !cursor.is_empty()) {
+        params.push(("cursor".to_string(), pct(cursor)));
+    }
     format!("{}/webcast/fetch?{}", config.sign_base, query(&params))
 }
 
@@ -1240,8 +1442,9 @@ async fn fetch_signed(
     http: &reqwest::Client,
     config: &ProviderConfig,
     room_id: &str,
+    cursor: Option<&str>,
 ) -> Result<SignedFetch> {
-    let url = sign_url(config, room_id);
+    let url = sign_url(config, room_id, cursor);
 
     let response = http
         .get(&url)
@@ -1582,7 +1785,7 @@ mod tests {
     fn la_url_de_firma_codifica_el_user_agent() {        // Regresion: enviarlo en crudo hace que el servidor de firma responda
         // `400 Invalid user agent provided` y no se pueda conectar a nada.
         let config = ProviderConfig::default();
-        let url = sign_url(&config, "7686381796992322334");
+        let url = sign_url(&config, "7686381796992322334", None);
 
         assert!(url.starts_with("https://api.eulerstream.com/webcast/fetch?"));
         assert!(url.contains("client=ttlive-python"));
@@ -1595,6 +1798,16 @@ mod tests {
         );
         assert!(!url.contains(' '), "una URL con espacios da HTTP 400");
         assert!(!url.contains('('), "los parentesis crudos dan HTTP 400");
+    }
+
+    #[test]
+    fn la_firma_de_reconexion_reenvia_el_cursor_codificado() {
+        let config = ProviderConfig::default();
+        let url = sign_url(&config, "123", Some("1789625530246_1/2"));
+        assert!(
+            url.contains("cursor=1789625530246_1%2F2"),
+            "el cursor se conserva y no viaja con caracteres crudos: {url}"
+        );
     }
 
     #[test]
@@ -1710,6 +1923,64 @@ mod tests {
         assert_eq!(sink.latest_viewers(), Some((102, 1002)));
     }
 
+    #[test]
+    fn el_flush_final_de_viewers_precede_al_fin_del_directo() {
+        let metrics = Arc::new(Metrics::default());
+        let mut sink = EventSink::new(metrics.clone(), Duration::from_secs(60));
+        sink.observe_viewers(100, 1000);
+        sink.observe_viewers(102, 1002);
+        sink.push(
+            None,
+            EventKind::StreamDisconnected {
+                reason: "el directo ha terminado".into(),
+            },
+        );
+
+        let events = sink.drain_final();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0].1, EventKind::ViewerUpdated { current: 100, .. }));
+        assert!(matches!(events[1].1, EventKind::ViewerUpdated { current: 102, .. }));
+        assert!(matches!(events[2].1, EventKind::StreamDisconnected { .. }));
+        assert_eq!(metrics.snapshot().viewer_updates_emitted, 2);
+    }
+
+    #[tokio::test]
+    async fn un_join_handle_atascado_se_aborta_de_verdad() {
+        let mut task = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+        assert!(join_task_or_abort(&mut task, Duration::from_millis(1)).await);
+        assert!(task.is_finished());
+    }
+
+    #[tokio::test]
+    async fn la_firma_respeta_el_timeout_http_con_un_servidor_lento() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let address = listener.local_addr().expect("direccion local");
+        let server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("conexion local");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        let config = ProviderConfig {
+            sign_base: format!("http://{address}"),
+            http_timeout: Duration::from_millis(20),
+            ..ProviderConfig::default()
+        };
+        let http = reqwest::Client::builder()
+            .timeout(config.http_timeout)
+            .build()
+            .expect("cliente local");
+
+        let error = fetch_signed(&http, &config, "room-local", None)
+            .await
+            .err()
+            .expect("la respuesta lenta debe agotar el timeout");
+        assert!(error.to_string().contains("GET webcast/fetch"));
+        server.await.expect("servidor local");
+    }
+
     /// Regresion del fallo detectado en la primera conexion real: los frames se
     /// decodificaban, pero sus mensajes nunca llegaban al bus.
     ///
@@ -1748,7 +2019,7 @@ mod tests {
             };
             frames += 1;
             match decode_frame(&raw) {
-                Ok((_ack, messages)) => {
+                Ok((_ack, messages, _cursor)) => {
                     for message in &messages {
                         translate_message(&message.method, &message.payload, &mut sink);
                     }
@@ -1872,6 +2143,167 @@ mod tests {
         assert!(hex.contains("4a0130"), "filter_welcome_msg va en el tag 9: {hex}");
         // El tag 3 es una cadena (live_region), nunca un varint: 0x18 = tag 3 varint.
         assert!(!hex.contains("18"), "el tag 3 es live_region (string): {hex}");
+    }
+
+    /// Smoke test de ciclo de vida contra un WebSocket local: no usa TikTok ni
+    /// el servidor de firma y comprueba que el control terminal corta `pump`,
+    /// conserva el cursor entrante y no devuelve una reconexion.
+    #[tokio::test]
+    async fn pump_corta_en_control_terminal_y_actualiza_cursor() {
+        use futures_util::SinkExt;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::accept_async;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let address = listener.local_addr().expect("direccion local");
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.expect("conexion local");
+            let mut websocket = accept_async(socket).await.expect("handshake local");
+            let control = WebcastControlMessage {
+                common: Some(comun("WebcastControlMessage", 77)),
+                action: WebcastControlMessage::STREAM_ENDED,
+            };
+            let envelope = ProtoMessageFetchResult {
+                messages: vec![BaseProtoMessage {
+                    method: "WebcastControlMessage".into(),
+                    payload: control.encode_to_vec(),
+                }],
+                cursor: "cursor-after-frame".into(),
+                ..Default::default()
+            };
+            let frame = WebcastPushFrame {
+                seq_id: 9,
+                log_id: 0,
+                payload_type: "msg".into(),
+                payload: envelope.encode_to_vec(),
+                ..Default::default()
+            };
+            websocket
+                .send(Message::Binary(frame.encode_to_vec()))
+                .await
+                .expect("frame terminal");
+        });
+
+        let metrics = Arc::new(Metrics::default());
+        let bus = Arc::new(EventBus::new(16, metrics.clone()));
+        let mut events = bus.subscribe();
+        bus.set_room("room-local");
+        let config = ProviderConfig {
+            ws_connect_timeout: Duration::from_secs(1),
+            ws_io_timeout: Duration::from_secs(1),
+            heartbeat: Duration::from_secs(60),
+            ..ProviderConfig::default()
+        };
+        let supervisor = Supervisor {
+            config,
+            http: reqwest::Client::new(),
+            bus: bus.clone(),
+            metrics: metrics.clone(),
+            device_id: "device-test".into(),
+            handle: "fixture".into(),
+            reporter: StatusReporter::new(bus, metrics),
+        };
+        let signed = SignedFetch {
+            envelope: ProtoMessageFetchResult {
+                push_server: format!("ws://{address}/webcast/im/ws/"),
+                cursor: "cursor-before-frame".into(),
+                ..Default::default()
+            },
+            cookies: String::new(),
+        };
+        let room = RoomInfo {
+            room_id: "room-local".into(),
+            live: true,
+            title: "fixture".into(),
+        };
+        let (_cancel_tx, mut cancel) = watch::channel(false);
+        let mut cursor = Some(signed.envelope.cursor.clone());
+        let result = supervisor
+            .pump(&mut cancel, &signed, &room, &mut cursor)
+            .await
+            .expect("pump local");
+
+        assert_eq!(result, PumpExit::Terminal("el directo ha terminado".into()));
+        assert_eq!(cursor.as_deref(), Some("cursor-after-frame"));
+        let mut observed = Vec::new();
+        loop {
+            let event = events.recv().await.expect("evento del ciclo");
+            let is_terminal = event.kind.name() == "stream.disconnected";
+            observed.push(event);
+            if is_terminal {
+                break;
+            }
+        }
+        assert!(
+            observed.iter().any(|event| event.kind.name() == "stream.connected"),
+            "el pump debe publicar stream.connected: {:?}",
+            observed.iter().map(|event| event.kind.name()).collect::<Vec<_>>()
+        );
+        let disconnected = observed
+            .iter()
+            .find(|event| event.kind.name() == "stream.disconnected")
+            .expect("stream.disconnected");
+        assert!(matches!(
+            disconnected.kind,
+            EventKind::StreamDisconnected { ref reason } if reason.contains("terminado")
+        ));
+        server.await.expect("servidor local");
+    }
+
+    #[tokio::test]
+    async fn pump_cancela_un_handshake_pendiente() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let address = listener.local_addr().expect("direccion local");
+        let server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("conexion local");
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+        let metrics = Arc::new(Metrics::default());
+        let bus = Arc::new(EventBus::new(8, metrics.clone()));
+        let supervisor = Supervisor {
+            config: ProviderConfig {
+                ws_connect_timeout: Duration::from_secs(5),
+                ..ProviderConfig::default()
+            },
+            http: reqwest::Client::new(),
+            bus: bus.clone(),
+            metrics: metrics.clone(),
+            device_id: "device-test".into(),
+            handle: "fixture".into(),
+            reporter: StatusReporter::new(bus, metrics),
+        };
+        let signed = SignedFetch {
+            envelope: ProtoMessageFetchResult {
+                push_server: format!("ws://{address}/webcast/im/ws/"),
+                cursor: "cursor".into(),
+                ..Default::default()
+            },
+            cookies: String::new(),
+        };
+        let room = RoomInfo {
+            room_id: "room-local".into(),
+            live: true,
+            title: "fixture".into(),
+        };
+        let (cancel_tx, mut cancel) = watch::channel(false);
+        let cancel_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            cancel_tx.send(true).expect("cancelar handshake");
+        });
+        let mut cursor = Some(signed.envelope.cursor.clone());
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            supervisor.pump(&mut cancel, &signed, &room, &mut cursor),
+        )
+        .await
+        .expect("la cancelacion no debe esperar al timeout WS")
+        .expect("pump cancelado limpiamente");
+
+        assert_eq!(result, PumpExit::Cancelled);
+        cancel_task.await.expect("tarea de cancelacion");
+        server.await.expect("servidor local");
     }
 
     /// El latido lleva sala y contador; con payload vacio el servidor puede
