@@ -132,7 +132,6 @@ impl TikTokProvider for SimulatedProvider {
 
             let guion = Guion {
                 bus: self.bus.clone(),
-                metrics: self.metrics.clone(),
             };
             let interval = self.interval();
 
@@ -180,7 +179,6 @@ impl TikTokProvider for SimulatedProvider {
 /// Datos que necesita el guion dentro de la tarea.
 struct Guion {
     bus: Arc<EventBus>,
-    metrics: Arc<Metrics>,
 }
 
 impl Guion {
@@ -215,7 +213,6 @@ impl Guion {
             // Likes: incremento + total absoluto, como TikTok.
             0 | 1 => {
                 let count = 3 + (tick % 5) as i64;
-                self.metrics.likes_total.fetch_add(count, Ordering::Relaxed);
                 self.bus.publish(
                     Some(format!("sim-like-{tick}")),
                     EventKind::LikeUpdated {
@@ -313,6 +310,34 @@ mod tests {
         assert!(tiene("viewer.updated"), "faltan viewers");
         assert!(tiene("follow.received"), "faltan follows");
         assert_eq!(provider.status(), ProviderStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn el_simulador_no_duplica_los_likes_en_metricas() {
+        let metrics = Arc::new(Metrics::default());
+        let bus = Arc::new(EventBus::new(512, metrics.clone()));
+        let provider = SimulatedProvider::new(bus.clone(), metrics.clone())
+            .with_interval(Duration::from_millis(2));
+        let mut rx = bus.subscribe();
+
+        provider.connect("prueba").await.expect("arranca");
+        let mut last_total = None;
+        let mut like_events = 0;
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+        while like_events < 2 && tokio::time::Instant::now() < deadline {
+            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+                if let EventKind::LikeUpdated { total, .. } = event.kind {
+                    last_total = Some(total);
+                    like_events += 1;
+                }
+            }
+        }
+        provider.disconnect().await;
+
+        let total = last_total.expect("el simulador debe publicar un like");
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.likes_total, total);
+        assert_eq!(snapshot.like_events, like_events);
     }
 
     #[tokio::test]

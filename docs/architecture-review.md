@@ -51,7 +51,7 @@ invisible desde fuera.
 | Un regalo conserva usuario, regalo, cantidad, diamantes, racha, icono y grupo | `src/core/contract.rs` + `providers/tiktok.rs` |
 | Los frames reales producen comentarios y regalos con `group_id` e `is_final` | `providers/tiktok.rs` (fixture `live.jsonl`) |
 | Los buffers no crecen: chat 200, actividad 150, regalos 150 | `feed.rs`, `chat/mod.rs`, `tests/stress_limits.rs` |
-| La deduplicación por `source_id` no duplica nada | `core/bus.rs`, `tests/integration_flow.rs` |
+| La deduplicación por `(room_id, source_id)` no duplica nada | `core/bus.rs`, `tests/integration_flow.rs` |
 | Las migraciones no destruyen datos (v1 → v2) | `database/mod.rs` |
 | El estado del proveedor es único y consistente | `providers/mod.rs` (`StatusReporter` sobre `metrics.provider_state`) |
 

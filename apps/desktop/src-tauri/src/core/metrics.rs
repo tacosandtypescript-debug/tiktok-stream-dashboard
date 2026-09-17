@@ -5,6 +5,7 @@
 //! esta visible.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::RwLock;
 
 use serde::Serialize;
 
@@ -20,7 +21,9 @@ pub struct Metrics {
     pub chat_messages: AtomicU64,
     pub gifts: AtomicU64,
     pub follows: AtomicU64,
+    /// Ultimo total absoluto de likes del proveedor; no es la suma de deltas.
     pub likes_total: AtomicI64,
+    /// Numero de actualizaciones de likes recibidas, independiente del total.
     pub like_events: AtomicU64,
     /// Actualizaciones de viewers que se colapsaron (coalescing).
     pub viewer_updates_coalesced: AtomicU64,
@@ -34,6 +37,9 @@ pub struct Metrics {
     pub provider_errors: AtomicU64,
     pub provider_reconnects: AtomicU64,
     pub provider_state: AtomicI64,
+    /// Ultimo detalle publicado por el proveedor. A diferencia de un evento,
+    /// este valor sobrevive a una nueva peticion de snapshot.
+    pub provider_detail: RwLock<Option<String>>,
     pub subscribers: AtomicI64,
     /// Eventos criticos (regalos, follows) que no cupieron en la cola de
     /// escritura ni esperando. Si es mayor que cero, la sesion esta degradada.
@@ -64,6 +70,19 @@ pub struct MetricsSnapshot {
 }
 
 impl Metrics {
+    pub fn set_provider_detail(&self, detail: Option<String>) {
+        if let Ok(mut current) = self.provider_detail.write() {
+            *current = detail;
+        }
+    }
+
+    pub fn provider_detail(&self) -> Option<String> {
+        self.provider_detail
+            .read()
+            .map(|detail| detail.clone())
+            .unwrap_or(None)
+    }
+
     pub fn snapshot(&self) -> MetricsSnapshot {
         MetricsSnapshot {
             events_published: self.events_published.load(Ordering::Relaxed),

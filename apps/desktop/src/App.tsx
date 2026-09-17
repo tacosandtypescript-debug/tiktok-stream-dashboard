@@ -154,7 +154,7 @@ export function App() {
   const applySnapshot = useCallback((next: Snapshot) => {
     setSnapshot(next);
     setStatus(next.status);
-    setDetail(null);
+    setDetail(next.status_detail);
     // Fusionado, no reemplazo: ver `mergeSnapshot`. Y los emotes que la foto del
     // motor no trae se recuperan de la copia en memoria: ver `conservarEmotes`.
     setChat((previous) =>
@@ -172,11 +172,13 @@ export function App() {
       cumulativeViewers: totalsRef.current.cumulativeViewers,
       // Las entradas tambien son solo de eventos: el snapshot no las cuenta.
       joined: totalsRef.current.joined,
-      likes: next.metrics.likes_total,
-      gifts: next.total_gifts,
-      diamonds: next.total_diamonds,
-      comments: next.metrics.chat_messages,
-      follows: next.metrics.follows,
+      // Una foto puede haberse construido antes de un evento que ya llegó a
+      // React. Los contadores monotónicos no deben retroceder al fusionarla.
+      likes: Math.max(totalsRef.current.likes, next.metrics.likes_total),
+      gifts: Math.max(totalsRef.current.gifts, next.total_gifts),
+      diamonds: Math.max(totalsRef.current.diamonds, next.total_diamonds),
+      comments: Math.max(totalsRef.current.comments, next.metrics.chat_messages),
+      follows: Math.max(totalsRef.current.follows, next.metrics.follows),
     });
   }, [mergeSnapshot]);
 

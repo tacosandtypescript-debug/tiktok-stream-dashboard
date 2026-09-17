@@ -5,8 +5,9 @@
 //!     pierde eventos antiguos y se contabiliza, nunca bloquea al productor.
 //!   * los eventos viajan como `Arc<Event>`: una sola serializacion por evento
 //!     para todos los suscriptores.
-//!   * deduplicacion por `source_id` con memoria acotada: tras una reconexion
-//!     TikTok puede reenviar mensajes y duplicar diamantes en rankings y metas.
+//!   * deduplicacion por `(room_id, source_id)` con memoria acotada: tras una
+//!     reconexion TikTok puede reenviar mensajes y duplicar diamantes en rankings
+//!     y metas, pero un mismo `source_id` de otra sala es un evento distinto.
 //!   * el bus asigna `seq`, de modo que hay un unico escritor del contador.
 
 use std::collections::{HashSet, VecDeque};
@@ -94,11 +95,15 @@ impl EventBus {
     /// Sin suscriptores activos el evento se descarta silenciosamente: es lo
     /// correcto, nadie lo esta mirando.
     pub fn publish(&self, source_id: Option<String>, kind: EventKind) -> bool {
+        // TikTok puede reutilizar un `msg_id` al cambiar de sala. El ámbito de
+        // deduplicación es la sala, no el proceso completo.
+        let room_id = self.room_id();
         if let Some(id) = source_id.as_deref() {
+            let dedupe_key = format!("{room_id}\0{id}");
             let is_new = self
                 .dedupe
                 .lock()
-                .map(|mut dedupe| dedupe.insert(id))
+                .map(|mut dedupe| dedupe.insert(&dedupe_key))
                 .unwrap_or(true);
             if !is_new {
                 self.metrics.duplicates_dropped.fetch_add(1, Ordering::Relaxed);
@@ -108,7 +113,7 @@ impl EventBus {
 
         let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
         self.count(&kind);
-        let event = Arc::new(Event::new(seq, self.room_id(), source_id, kind));
+        let event = Arc::new(Event::new(seq, room_id, source_id, kind));
         // `send` falla solo si no hay receptores; no es un error.
         let _ = self.sender.send(event);
         self.metrics.events_published.fetch_add(1, Ordering::Relaxed);
@@ -127,9 +132,24 @@ impl EventBus {
             EventKind::FollowReceived { .. } => {
                 metrics.follows.fetch_add(1, Ordering::Relaxed);
             }
-            EventKind::LikeUpdated { count, .. } => {
+            EventKind::LikeUpdated { total, .. } => {
                 metrics.like_events.fetch_add(1, Ordering::Relaxed);
-                metrics.likes_total.fetch_add(*count, Ordering::Relaxed);
+                // `total` ya es el acumulado absoluto del directo. Guardar el
+                // incremento (`count`) aqui producia una cifra distinta a la
+                // del evento y al snapshot. El CAS evita retroceder si dos
+                // productores entregan una actualizacion fuera de orden.
+                let mut previous = metrics.likes_total.load(Ordering::Relaxed);
+                while *total > previous {
+                    match metrics.likes_total.compare_exchange_weak(
+                        previous,
+                        *total,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(observed) => previous = observed,
+                    }
+                }
             }
             _ => {}
         }
@@ -185,6 +205,52 @@ mod tests {
         let second = rx.recv().await.unwrap();
         assert_eq!(first.seq, 1);
         assert_eq!(second.seq, 2, "el duplicado no debe consumir seq");
+    }
+
+    #[tokio::test]
+    async fn el_dedupe_usa_room_id_y_source_id() {
+        let metrics = Arc::new(Metrics::default());
+        let bus = EventBus::new(16, metrics.clone());
+        let mut rx = bus.subscribe();
+
+        bus.set_room("room-a");
+        assert!(bus.publish(Some("msg-1".into()), chat("1")));
+        assert!(!bus.publish(Some("msg-1".into()), chat("1")));
+
+        // El mismo source_id de otra sala es otro mensaje, no un replay.
+        bus.set_room("room-b");
+        assert!(bus.publish(Some("msg-1".into()), chat("2")));
+
+        assert_eq!(metrics.snapshot().duplicates_dropped, 1);
+        let first = rx.recv().await.expect("primer evento");
+        let second = rx.recv().await.expect("evento de la segunda sala");
+        assert_eq!(first.room_id, "room-a");
+        assert_eq!(second.room_id, "room-b");
+    }
+
+    #[tokio::test]
+    async fn likes_total_es_el_ultimo_absoluto_y_like_events_va_aparte() {
+        let metrics = Arc::new(Metrics::default());
+        let bus = EventBus::new(16, metrics.clone());
+        let mut rx = bus.subscribe();
+
+        for (count, total) in [(3, 1_000), (8, 1_008)] {
+            assert!(bus.publish(
+                Some(format!("like-{total}")),
+                EventKind::LikeUpdated {
+                    user: None,
+                    count,
+                    total,
+                },
+            ));
+        }
+        let _ = rx.recv().await;
+        let _ = rx.recv().await;
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.like_events, 2);
+        assert_eq!(snapshot.likes_total, 1_008);
+        assert_ne!(snapshot.likes_total, 11, "no se deben sumar los incrementos");
     }
 
     #[tokio::test]
