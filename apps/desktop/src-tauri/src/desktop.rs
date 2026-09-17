@@ -108,7 +108,7 @@ fn tts_status(state: State<'_, Arc<AppState>>) -> crate::tts::manager::TtsStatus
 }
 
 #[tauri::command]
-fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) {
+fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), String> {
     use crate::tts::voices::Language;
 
     if let Some(enabled) = patch.enabled {
@@ -138,6 +138,9 @@ fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) {
     if let Some(voice) = patch.voice_en {
         state.tts.set_voice(Language::En, &voice);
     }
+    state
+        .persist_tts_settings()
+        .map_err(|error| format!("no se pudieron guardar los ajustes TTS: {error:#}"))
 }
 
 /// Acciones puntuales sobre la cola o los usuarios silenciados.
@@ -180,6 +183,28 @@ fn tts_action(
 #[tauri::command]
 fn tts_voices() -> Vec<crate::tts::Voice> {
     crate::tts::catalog()
+}
+
+/// Enumera las salidas disponibles. La enumeracion puede fallar en una
+/// maquina sin backend de audio; se devuelve el motivo para que la interfaz no
+/// muestre una lista ficticia.
+#[tauri::command]
+fn tts_devices() -> Result<Vec<String>, String> {
+    crate::tts::player::list_devices().map_err(|error| format!("no se pudieron listar los dispositivos: {error:#}"))
+}
+
+/// Selecciona una salida TTS de forma transaccional desde el punto de vista de
+/// audio: si no se puede abrir, se conserva la anterior y el estado queda
+/// degradado con el motivo exacto.
+#[tauri::command]
+fn tts_select_device(
+    state: State<'_, Arc<AppState>>,
+    device: Option<String>,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .select_tts_device(device.as_deref())
+        .map(|_| state.tts_status())
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -368,6 +393,8 @@ fn launch(instance_port: u16) {
             tts_update,
             tts_action,
             tts_voices,
+            tts_devices,
+            tts_select_device,
             connect,
             start_simulation,
             use_native_provider,

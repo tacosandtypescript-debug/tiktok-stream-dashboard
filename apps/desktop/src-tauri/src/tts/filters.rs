@@ -67,6 +67,7 @@ impl RejectReason {
 /// mas el token bucket global que la revision anadio porque sin el la cola se
 /// satura de forma inevitable (§P1-7).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FilterConfig {
     pub enabled: bool,
     /// Longitud maxima leida.

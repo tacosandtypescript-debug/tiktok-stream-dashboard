@@ -211,6 +211,11 @@ pub fn database_path() -> PathBuf {
 /// y los follows no (docs/plan-review.md §6).
 #[derive(Debug, Clone)]
 pub enum WriteJob {
+    /// Perfil TTS completo. Se guarda como un snapshot JSON para que anadir
+    /// ajustes no obligue a otra migracion de columnas.
+    TtsProfile {
+        settings_json: String,
+    },
     StreamStarted {
         stream_id: String,
         handle: String,
@@ -481,9 +486,30 @@ impl Database {
                         like_total    = MAX(like_total, COALESCE(?3, like_total))
                   WHERE id = ?1",
             )?;
+            // El indice unico de `is_default = 1` protege la base, pero se
+            // desmarca primero cualquier fila antigua que pudiera haber sido
+            // creada antes del indice. El perfil estable `default` es el unico
+            // que escribe el gestor en esta version.
+            let mut clear_other_tts_defaults = tx.prepare_cached(
+                "UPDATE tts_profiles SET is_default = 0
+                 WHERE is_default = 1 AND id <> 'default'",
+            )?;
+            let mut tts_profile = tx.prepare_cached(
+                "INSERT INTO tts_profiles
+                   (id, name, settings_json, is_default, created_at, updated_at)
+                 VALUES ('default', 'Predeterminado', ?1, 1, ?2, ?2)
+                 ON CONFLICT(id) DO UPDATE SET
+                   settings_json = excluded.settings_json,
+                   is_default = 1,
+                   updated_at = excluded.updated_at",
+            )?;
 
             for job in jobs {
                 match job {
+                    WriteJob::TtsProfile { settings_json } => {
+                        clear_other_tts_defaults.execute([])?;
+                        written += tts_profile.execute(params![settings_json, now_ms()])?;
+                    }
                     WriteJob::StreamStarted {
                         stream_id,
                         handle,
@@ -656,6 +682,21 @@ impl Database {
             Some(row) => Ok(Some(row.get(index)?)),
             None => Ok(None),
         }
+    }
+
+    /// Lee el JSON del perfil TTS que la migracion marca como predeterminado.
+    ///
+    /// La lectura ocurre antes de arrancar `DbWriter` para que `TtsManager`
+    /// nazca ya con la configuracion persistida y no haya una ventana de audio
+    /// usando valores de fabrica.
+    pub fn default_tts_profile(&self) -> Result<Option<String>> {
+        self.query_string(
+            "SELECT settings_json FROM tts_profiles
+             WHERE is_default = 1
+             ORDER BY updated_at DESC
+             LIMIT 1",
+            0,
+        )
     }
 
     /// Cierra las sesiones que quedaron abiertas por un cierre inesperado.
@@ -1099,6 +1140,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(database.count("tts_profiles").unwrap(), 2);
+    }
+
+    #[test]
+    fn el_perfil_tts_se_guarda_completo_y_solo_deja_un_default() {
+        let mut database = open();
+        let settings_json = r#"{
+            "enabled": false,
+            "voice_es": "es-MX-DaliaNeural",
+            "voice_en": "en-GB-SoniaNeural",
+            "say_author": false,
+            "volume": 0.35,
+            "rate": "+25%",
+            "pitch": "-4Hz",
+            "audio_device": "Cable Input",
+            "read_gifts": false,
+            "read_follows": true,
+            "filters": {"max_chars": 99, "blocked_words": ["spoiler"]},
+            "queue_capacity": 64
+        }"#;
+
+        assert_eq!(
+            database
+                .write_batch(&[WriteJob::TtsProfile {
+                    settings_json: settings_json.into()
+                }])
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database.default_tts_profile().unwrap().as_deref(),
+            Some(settings_json)
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT COUNT(*) FROM tts_profiles WHERE is_default = 1", 0)
+                .unwrap(),
+            Some(1)
+        );
     }
 
     /// El caso real de la migracion: una instalacion que ya tenia datos en la v2
