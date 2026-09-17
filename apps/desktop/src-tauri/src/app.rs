@@ -872,16 +872,21 @@ impl AppState {
             })
             .unwrap_or_default();
         let provider = self.current_provider();
-        let (written, dropped) = self
+        let (written, dropped, write_errors, critical_write_errors) = self
             .writer
             .lock()
             .ok()
             .and_then(|guard| {
-                guard
-                    .as_ref()
-                    .map(|writer| (writer.written(), writer.dropped()))
+                guard.as_ref().map(|writer| {
+                    (
+                        writer.written(),
+                        writer.dropped(),
+                        writer.write_errors(),
+                        writer.critical_write_errors(),
+                    )
+                })
             })
-            .unwrap_or((0, 0));
+            .unwrap_or((0, 0, 0, 0));
 
         Snapshot {
             protocol_version: PROTOCOL_VERSION,
@@ -904,6 +909,8 @@ impl AppState {
             schema_version: self.schema_version,
             db_written: written,
             db_dropped: dropped,
+            db_write_errors: write_errors,
+            db_critical_write_errors: critical_write_errors,
             log_dir: telemetry::log_dir().display().to_string(),
             instance_port: self.instance_port,
             ui_events: self.ui_event_counts(),
@@ -1047,6 +1054,11 @@ pub struct Snapshot {
     pub schema_version: u32,
     pub db_written: u64,
     pub db_dropped: u64,
+    /// Lotes SQLite que fallaron; se conservan aparte de los descartes por
+    /// saturacion de la cola.
+    pub db_write_errors: u64,
+    /// Trabajos criticos incluidos en lotes SQLite fallidos.
+    pub db_critical_write_errors: u64,
     pub log_dir: String,
     pub instance_port: u16,
     /// Eventos reconocidos por la interfaz, por tipo (diagnostico).

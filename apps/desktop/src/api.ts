@@ -187,6 +187,10 @@ export interface Snapshot {
   schema_version: number;
   db_written: number;
   db_dropped: number;
+  /** Lotes SQLite fallidos. */
+  db_write_errors: number;
+  /** Trabajos críticos incluidos en lotes SQLite fallidos. */
+  db_critical_write_errors: number;
   log_dir: string;
   instance_port: number;
   /** Eventos reconocidos por la interfaz, por tipo (diagnóstico). */

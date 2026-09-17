@@ -36,6 +36,8 @@ export function Developer({
     [t.developer.instancePort, snapshot.instance_port],
     [t.developer.dbWritten, snapshot.db_written],
     [t.developer.dbDropped, snapshot.db_dropped],
+    ["db_write_errors", snapshot.db_write_errors],
+    ["db_critical_write_errors", snapshot.db_critical_write_errors],
     ["events_published", metrics.events_published],
     ["ws_connects", metrics.ws_connects],
     ["ws_frames", metrics.ws_frames],
