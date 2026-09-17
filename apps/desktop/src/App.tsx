@@ -33,6 +33,16 @@ const FEED_WINDOW = 150;
  * politica que aplica Rust (`feed::like_is_notable`).
  */
 const LIKE_FEED_THRESHOLD = 10;
+/**
+ * Mensajes borrados que la interfaz recuerda.
+ *
+ * Se guardan **aparte** del chat y no marcando la entrada, por dos motivos: una
+ * foto del motor (`applySnapshot`) puede reemplazar la entrada y perderia la
+ * marca, y el chat se recorta a `CHAT_WINDOW` mientras que el borrado puede
+ * llegar despues. El conjunto va acotado: los borrados son raros, y cuando el
+ * mensaje ya ha salido de la ventana su marca deja de hacer falta.
+ */
+const DELETED_WINDOW = 512;
 
 const EMPTY_TOTALS: Totals = {
   viewers: 0,
@@ -42,6 +52,7 @@ const EMPTY_TOTALS: Totals = {
   diamonds: 0,
   comments: 0,
   follows: 0,
+  joined: 0,
 };
 
 /**
@@ -57,6 +68,8 @@ const HANDLED_TYPES = new Set([
   "stream.disconnected",
   "stream.waiting",
   "chat.message",
+  "chat.message.deleted",
+  "member.joined",
   "gift.received",
   "like.updated",
   "viewer.updated",
@@ -87,6 +100,16 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   /** Métricas en vivo de la página Developer (solo se sondea con esa pestaña abierta). */
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  /**
+   * Espejos locales de dos cosas que el motor no publica por lista:
+   *   * `deleted`: `source_id` de los comentarios borrados en TikTok;
+   *   * `muted`: ids de usuario silenciados en la voz desde este chat.
+   *
+   * Ninguno de los dos toca el chat en si (las entradas no se mutan): el chat se
+   * fusiona con las fotos del motor y perderia cualquier marca guardada dentro.
+   */
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [muted, setMuted] = useState<ReadonlySet<string>>(() => new Set<string>());
 
   /**
    * Estados en los que el motor ya tiene una sesión en curso.
@@ -132,8 +155,11 @@ export function App() {
     setSnapshot(next);
     setStatus(next.status);
     setDetail(null);
-    // Fusionado, no reemplazo: ver `mergeSnapshot`.
-    setChat((previous) => mergeSnapshot(previous, next.chat, CHAT_WINDOW, false));
+    // Fusionado, no reemplazo: ver `mergeSnapshot`. Y los emotes que la foto del
+    // motor no trae se recuperan de la copia en memoria: ver `conservarEmotes`.
+    setChat((previous) =>
+      conservarEmotes(previous, mergeSnapshot(previous, next.chat, CHAT_WINDOW, false)),
+    );
     setFeed((previous) => mergeSnapshot(previous, next.events, FEED_WINDOW, true));
     setGifts((previous) => mergeSnapshot(previous, next.gifts, GIFT_WINDOW, true));
     // Los agregados vienen calculados del motor: la interfaz no los recalcula,
@@ -144,6 +170,8 @@ export function App() {
       // Los espectadores solo llegan por eventos: hasta el primero, se desconoce.
       viewers: totalsRef.current.viewers,
       cumulativeViewers: totalsRef.current.cumulativeViewers,
+      // Las entradas tambien son solo de eventos: el snapshot no las cuenta.
+      joined: totalsRef.current.joined,
       likes: next.metrics.likes_total,
       gifts: next.total_gifts,
       diamonds: next.total_diamonds,
@@ -243,6 +271,7 @@ export function App() {
               user: event.user,
               content: event.content,
               source_id: event.source_id,
+              emote_count: event.emote_count,
             };
             const next = [...previous, entry];
             return next.length > CHAT_WINDOW ? next.slice(next.length - CHAT_WINDOW) : next;
@@ -250,6 +279,33 @@ export function App() {
           setTotals((previous) => ({ ...previous, comments: previous.comments + 1 }));
           // Diagnóstico temporal: deja constancia de que ESTE mensaje llegó aquí.
           void api.uiChat({ received_seq: event.seq }).catch(() => undefined);
+          break;
+        case "chat.message.deleted": {
+          // Se marca, no se quita: ver `DELETED_WINDOW` y `chatText`. Si el
+          // evento no trae `source_id` (mensajes viejos sin `msg_id`) no hay
+          // forma de saber que linea es: no se inventa nada y no se toca el chat.
+          const id = event.source_id;
+          if (id !== undefined && id.length > 0) {
+            setDeleted((previous) => {
+              if (previous.has(id)) return previous;
+              const next = new Set(previous);
+              next.add(id);
+              // Los mas antiguos sobran: su mensaje ya salio de la ventana.
+              let sobra = next.size - DELETED_WINDOW;
+              for (const viejo of next) {
+                if (sobra <= 0) break;
+                next.delete(viejo);
+                sobra -= 1;
+              }
+              return next;
+            });
+          }
+          break;
+        }
+        case "member.joined":
+          // Es el evento mas frecuente de TikTok: se cuenta en el pie, nunca se
+          // pinta una linea por entrada (taparia el chat y la actividad).
+          setTotals((previous) => ({ ...previous, joined: previous.joined + 1 }));
           break;
         case "gift.received":
           pushFeed({
@@ -451,6 +507,28 @@ export function App() {
     [applySnapshot],
   );
 
+  /**
+   * Silencia o vuelve a leer a un usuario en la voz.
+   *
+   * `tts_action` ya existia y lo usaba la pagina de Voz, pero desde el chat no
+   * habia forma de llamarlo. El motor sigue siendo la fuente de verdad: la
+   * interfaz no puede consultar **quien** esta silenciado (el estado solo publica
+   * cuantos), asi que lleva un espejo optimista para marcar los mensajes; si la
+   * orden falla, se ve el error arriba.
+   */
+  const setUserMuted = useCallback((userId: string, silenciar: boolean) => {
+    setMuted((previous) => {
+      const next = new Set(previous);
+      if (silenciar) next.add(userId);
+      else next.delete(userId);
+      return next;
+    });
+    // La llamada al motor va fuera del actualizador de estado, que debe ser puro.
+    void api
+      .ttsAction(silenciar ? "mute" : "unmute", userId)
+      .catch((cause: unknown) => setError(String(cause)));
+  }, []);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -532,12 +610,16 @@ export function App() {
               giftsByType={giftsByType}
               totals={totals}
               now={now}
+              deleted={deleted}
             />
           ) : null}
 
           {tab === "chat" ? (
             <Chat
               chat={chat}
+              deleted={deleted}
+              muted={muted}
+              onToggleMute={setUserMuted}
               onClear={() => {
                 void api.clearChat();
                 setChat([]);
@@ -580,9 +662,34 @@ export function App() {
         <Stat label={t.stats.diamonds} value={formatNumber(totals.diamonds)} />
         <Stat label={t.stats.comments} value={formatNumber(totals.comments)} />
         <Stat label={t.stats.follows} value={formatNumber(totals.follows)} />
+        {/* Entradas a la sala: el evento mas frecuente de TikTok se resume aqui
+            en vez de pintar una linea por persona. */}
+        <Stat label={t.stats.joined} value={formatNumber(totals.joined)} />
       </footer>
     </div>
   );
+}
+
+/**
+ * Recupera los emotes que la foto del motor no trae.
+ *
+ * `chat.message` viaja con `emote_count`, pero el `ChatEntry` del snapshot de
+ * Rust (`chat::ChatEntry`) todavia no guarda ese campo: al fusionar una foto, el
+ * comentario volvia sin el dato y los mensajes que son **solo emote** se pintaban
+ * como «sin texto». Se rellena desde la copia que ya estaba en memoria (misma
+ * `seq`). Cuando Rust lo guarde en el buffer de chat, esto sobra.
+ */
+function conservarEmotes(previous: ChatEntry[], merged: ChatEntry[]): ChatEntry[] {
+  const emotes = new Map<number, number>();
+  for (const entry of previous) {
+    if ((entry.emote_count ?? 0) > 0) emotes.set(entry.seq, entry.emote_count ?? 0);
+  }
+  if (emotes.size === 0) return merged;
+  return merged.map((entry) => {
+    if ((entry.emote_count ?? 0) > 0) return entry;
+    const recordado = emotes.get(entry.seq);
+    return recordado === undefined ? entry : { ...entry, emote_count: recordado };
+  });
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

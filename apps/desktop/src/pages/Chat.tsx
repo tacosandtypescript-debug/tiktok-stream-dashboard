@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ChatEntry } from "../api";
-import { Card, Empty, formatClock, nickname } from "../components";
+import { Card, Empty, chatText, formatClock, nickname } from "../components";
 import { t } from "../i18n/es";
 
 /** Mensajes que se pintan de una vez. El resto sigue en Rust. */
@@ -11,10 +11,20 @@ const VISIBLE = 200;
 
 interface Props {
   chat: ChatEntry[];
+  /**
+   * `source_id` de los comentarios borrados en TikTok. Se reciben aparte (y no
+   * dentro de la entrada) porque el chat se fusiona con las fotos del motor:
+   * una marca guardada en la entrada se perderia al llegar un snapshot.
+   */
+  deleted: ReadonlySet<string>;
+  /** Ids de usuario silenciados en la voz desde este chat. */
+  muted: ReadonlySet<string>;
+  /** Silencia o vuelve a leer a un usuario. La orden la manda `App`. */
+  onToggleMute: (userId: string, muted: boolean) => void;
   onClear: () => void;
 }
 
-export function Chat({ chat, onClear }: Props) {
+export function Chat({ chat, deleted, muted, onToggleMute, onClear }: Props) {
   const [search, setSearch] = useState("");
   const [stick, setStick] = useState(true);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -83,15 +93,36 @@ export function Chat({ chat, onClear }: Props) {
           <Empty>{t.chat.empty}</Empty>
         ) : (
           <ul className="chat" ref={listRef} onScroll={onScroll}>
-            {visible.map((entry) => (
-              <li key={entry.seq}>
-                <span className="time">{formatClock(entry.timestamp_ms)}</span>
-                <span className="user" title={`@${entry.user.unique_id}`}>
-                  {nickname(entry.user.nickname, entry.user.unique_id)}
-                </span>
-                <span className="content">{entry.content}</span>
-              </li>
-            ))}
+            {visible.map((entry) => {
+              // Un mensaje borrado se queda en la lista, atenuado y rotulado: si
+              // se quitara, el hilo de la conversacion quedaria cortado.
+              const borrado = entry.source_id !== undefined && deleted.has(entry.source_id);
+              // El silencio es por usuario (asi lo guarda el motor): se marca
+              // todas sus lineas, no solo la que se ha pulsado.
+              const silenciado = muted.has(entry.user.id);
+              return (
+                <li key={entry.seq} className={silenciado ? "muted" : undefined}>
+                  <span className="time">{formatClock(entry.timestamp_ms)}</span>
+                  <span className="user" title={`@${entry.user.unique_id}`}>
+                    {nickname(entry.user.nickname, entry.user.unique_id)}
+                  </span>
+                  <span
+                    className={borrado ? "content deleted" : "content"}
+                    title={borrado ? t.chat.deletedHint : undefined}
+                  >
+                    {chatText(entry, borrado)}
+                  </span>
+                  <button
+                    type="button"
+                    className="ghost tiny mute"
+                    title={silenciado ? t.chat.unmuteHint : t.chat.muteHint}
+                    onClick={() => onToggleMute(entry.user.id, !silenciado)}
+                  >
+                    {silenciado ? t.chat.unmute : t.chat.mute}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className="hint">{t.chat.showing(visible.length, chat.length)}</p>

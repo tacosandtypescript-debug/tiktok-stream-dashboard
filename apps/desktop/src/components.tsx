@@ -5,12 +5,30 @@
 
 import type { ReactNode } from "react";
 
-import type { FeedItem, FeedKind, UserRef } from "./api";
+import type { ChatEntry, FeedItem, FeedKind, UserRef } from "./api";
 import { t } from "./i18n/es";
 
 /** Nombre visible de un usuario: el apodo o, si no lo tiene, su @usuario. */
 export function nickname(nickname: string, uniqueId: string): string {
   return nickname && nickname.trim().length > 0 ? nickname : `@${uniqueId}`;
+}
+
+/**
+ * Texto visible de un comentario del chat.
+ *
+ * Dos casos que no son texto normal:
+ *   * los mensajes que son **solo emote** llegan con `content` vacio y
+ *     `emote_count > 0`: sin este rotulo se pintaba una linea en blanco;
+ *   * un comentario borrado se rotula, **no** se quita de la lista: quitarlo
+ *     perderia el hilo de la conversacion (y el hueco se nota igual).
+ *
+ * La redaccion vive en `i18n` (docs/decisions.md D4).
+ */
+export function chatText(entry: ChatEntry, deleted = false): string {
+  if (deleted) return t.chat.deleted;
+  if (entry.content.length > 0) return entry.content;
+  const emotes = entry.emote_count ?? 0;
+  return emotes > 0 ? t.chat.emotes(emotes) : t.chat.noText;
 }
 
 export function userLabel(user: UserRef | undefined): string {

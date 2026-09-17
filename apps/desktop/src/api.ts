@@ -29,8 +29,31 @@ export type DashEvent =
   | { type: "stream.connected"; room_id: string; title: string }
   | { type: "stream.disconnected"; reason: string }
   | { type: "stream.waiting"; handle: string; detail: string }
-  | { type: "chat.message"; user: UserRef; content: string }
+  | {
+      type: "chat.message";
+      user: UserRef;
+      content: string;
+      /**
+       * Emotes del fans club que traia el mensaje.
+       *
+       * TikTok manda los mensajes que son **solo** emote con `content` vacio: sin
+       * este dato se pintaban como una linea en blanco. El contrato de Rust lo
+       * fija siempre presente (`core/contract.rs`).
+       */
+      emote_count: number;
+    }
+  /**
+   * Un comentario borrado en TikTok.
+   *
+   * `source_id` es el `msg_id` del mensaje borrado, el mismo que viaja en la
+   * envoltura de su `chat.message` (y que la interfaz guarda en `ChatEntry`).
+   * Ojo: la envoltura del evento **tambien** tiene un `source_id` y el enum va
+   * aplanado (`#[serde(flatten)]`), asi que la clave se escribe dos veces; el
+   * campo del payload se serializa despues y es el que gana.
+   */
   | { type: "chat.message.deleted"; source_id: string }
+  /** Alguien ha entrado en la sala. El evento mas frecuente de TikTok. */
+  | { type: "member.joined"; user: UserRef }
   | { type: "gift.received"; user: UserRef; gift: GiftInfo }
   | { type: "like.updated"; user: UserRef | null; count: number; total: number }
   | { type: "viewer.updated"; current: number; cumulative: number }
@@ -64,6 +87,12 @@ export interface ChatEntry {
   user: UserRef;
   content: string;
   source_id?: string;
+  /**
+   * Emotes del mensaje. Opcional a proposito: el snapshot de Rust
+   * (`chat::ChatEntry`) todavia no guarda este campo, asi que una entrada que
+   * venga de una foto del motor puede no traerlo (se trata como 0).
+   */
+  emote_count?: number;
 }
 
 export type FeedKind = "gift" | "follow" | "share" | "subscribe" | "like" | "info";

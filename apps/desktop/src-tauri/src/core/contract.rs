@@ -72,8 +72,13 @@ fn todos_los_eventos_llevan_el_tipo_plano_y_sus_campos() {
             EventKind::ChatMessage {
                 user: user(),
                 content: "hola".into(),
+                emote_count: 0,
             },
-            vec![("content", "string"), ("user", "object")],
+            vec![
+                ("content", "string"),
+                ("user", "object"),
+                ("emote_count", "number"),
+            ],
         ),
         (
             "chat.message.deleted",
@@ -81,6 +86,11 @@ fn todos_los_eventos_llevan_el_tipo_plano_y_sus_campos() {
                 source_id: "m1".into(),
             },
             vec![("source_id", "string")],
+        ),
+        (
+            "member.joined",
+            EventKind::MemberJoined { user: user() },
+            vec![("user", "object")],
         ),
         (
             "gift.received",
@@ -226,6 +236,7 @@ fn los_opcionales_ausentes_no_se_serializan() {
         EventKind::ChatMessage {
             user: user(),
             content: "hola".into(),
+            emote_count: 0,
         },
     );
     let json = serde_json::to_value(&event).expect("serializa");
@@ -238,6 +249,7 @@ fn los_opcionales_ausentes_no_se_serializan() {
     let con_id = serialized(EventKind::ChatMessage {
         user: user(),
         content: "hola".into(),
+        emote_count: 0,
     });
     assert_eq!(con_id["source_id"], "msg-1");
 }

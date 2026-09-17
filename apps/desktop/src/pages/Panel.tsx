@@ -6,6 +6,7 @@ import {
   Empty,
   FeedTag,
   GiftThumb,
+  chatText,
   feedText,
   formatDuration,
   formatNumber,
@@ -24,6 +25,8 @@ interface Props {
   giftsByType: GiftTypeSummary[];
   totals: Totals;
   now: number;
+  /** `source_id` de los comentarios borrados (se pintan atenuados y rotulados). */
+  deleted: ReadonlySet<string>;
 }
 
 export interface Totals {
@@ -34,6 +37,8 @@ export interface Totals {
   diamonds: number;
   comments: number;
   follows: number;
+  /** Entradas a la sala acumuladas en la sesion (`member.joined`). */
+  joined: number;
 }
 
 export function Panel({
@@ -46,6 +51,7 @@ export function Panel({
   giftsByType,
   totals,
   now,
+  deleted,
 }: Props) {
   const connected = status === "connected";
   const startedAt = snapshot?.started_at_ms ?? null;
@@ -90,12 +96,21 @@ export function Panel({
             <Empty>{t.chat.empty}</Empty>
           ) : (
             <ul className="chat compact">
-              {recientes.map((entry) => (
-                <li key={entry.seq}>
-                  <span className="user">{nickname(entry.user.nickname, entry.user.unique_id)}</span>
-                  <span className="content">{entry.content}</span>
-                </li>
-              ))}
+              {recientes.map((entry) => {
+                // Misma regla que en la pagina de Chat: el borrado se marca, no
+                // se quita (si no, aqui seguiria leyendose como si nada).
+                const borrado = entry.source_id !== undefined && deleted.has(entry.source_id);
+                return (
+                  <li key={entry.seq}>
+                    <span className="user">
+                      {nickname(entry.user.nickname, entry.user.unique_id)}
+                    </span>
+                    <span className={borrado ? "content deleted" : "content"}>
+                      {chatText(entry, borrado)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>

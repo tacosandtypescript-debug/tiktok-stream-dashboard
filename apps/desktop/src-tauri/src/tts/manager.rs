@@ -1342,6 +1342,7 @@ mod tests {
             EventKind::ChatMessage {
                 user: user(id),
                 content: content.into(),
+                emote_count: 0,
             },
         )
     }
@@ -1356,6 +1357,7 @@ mod tests {
             EventKind::ChatMessage {
                 user: user(id),
                 content: content.into(),
+                emote_count: 0,
             },
         )
     }
@@ -1858,6 +1860,7 @@ mod tests {
             EventKind::ChatMessage {
                 user: user("1"),
                 content: "hola desde el bus".into(),
+                emote_count: 0,
             },
         );
 

@@ -44,6 +44,7 @@ export const t = {
     diamonds: "Diamantes",
     comments: "Comentarios",
     follows: "Seguidores",
+    joined: "Entradas",
   },
   chat: {
     title: "Chat en vivo",
@@ -53,6 +54,19 @@ export const t = {
     showing: (visibles: number, total: number) =>
       `${visibles} de ${total} mensajes en memoria`,
     stick: "Ir al final",
+    /** Rotulo de un comentario que TikTok borro. No se quita de la lista. */
+    deleted: "mensaje borrado",
+    deletedHint:
+      "TikTok borró este comentario. Se deja a la vista, atenuado, para no perder el hilo de la conversación.",
+    /** Mensajes que llegan sin texto porque son solo emotes del fans club. */
+    emotes: (count: number) => `😀×${count}`,
+    emotesHint: "Comentario sin texto: solo emotes del fans club.",
+    noText: "(sin texto)",
+    /** Silenciar o volver a leer a un usuario en la voz. */
+    mute: "🔇",
+    muteHint: "Silenciar a este usuario en la voz",
+    unmute: "🔊",
+    unmuteHint: "Ya silenciado: volver a leerlo en la voz",
   },
   feed: {
     title: "Actividad",

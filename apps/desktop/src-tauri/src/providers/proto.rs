@@ -210,6 +210,45 @@ pub struct WebcastChatMessage {
     pub user: Option<User>,
     #[prost(string, tag = "3")]
     pub content: String,
+    /// Emotes que trae el mensaje (`emotes`, tag 13, `EmoteWithIndex`).
+    ///
+    /// Existe porque TikTok manda los mensajes que son **solo** emote con
+    /// `content` vacio (un espacio) y la lista aparte: sin este campo se
+    /// descartaban enteros y desaparecian lineas del chat.
+    #[prost(message, repeated, tag = "13")]
+    pub emotes: Vec<EmoteWithIndex>,
+}
+
+/// Elemento de la lista de emotes de un comentario.
+///
+/// Solo se declara `index` (tag 1): de la lista interesa **cuantos** emotes hay,
+/// no cuales (un mensaje que es solo emote llega con `content` vacio). Declarar
+/// aqui el `Emote` entero (tag 2) seria copiar media tabla de tipos para nada, y
+/// prost ignora los campos que no se declaran.
+#[derive(Clone, PartialEq, Message)]
+pub struct EmoteWithIndex {
+    #[prost(int64, tag = "1")]
+    pub index: i64,
+}
+
+/// Entrada (o salida) de alguien en la sala.
+///
+/// Es el mensaje **mas frecuente** de TikTok: 60 de los 180 mensajes de la
+/// grabacion `spikes/tiktok-rust-provider/live.jsonl`. Solo se declaran `common`
+/// y `user` porque es lo unico que necesita el evento `member.joined`.
+///
+/// **No** se declara `action` (tag 10, enum `MemberMessageAction`) a proposito:
+/// la spec describe este mensaje como "una variedad de eventos, incluidas
+/// entradas y suscripciones", asi que filtrar por ese enum arriesgaria descartar
+/// entradas reales; el contador de la interfaz no distingue el motivo de la
+/// entrada. Los valores del enum (`JOINED = 1`, `SUBSCRIBED = 3`) si estan
+/// verificados en la metadata instalada, pero no se usan.
+#[derive(Clone, PartialEq, Message)]
+pub struct WebcastMemberMessage {
+    #[prost(message, tag = "1")]
+    pub common: Option<CommonMessageData>,
+    #[prost(message, tag = "2")]
+    pub user: Option<User>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -321,6 +360,45 @@ pub struct WebcastSocialMessage {
     pub follow_count: i64,
     #[prost(int32, tag = "8")]
     pub share_count: i32,
+}
+
+/// Control del directo (pausa, reanudacion, fin, suspension).
+///
+/// `action` (tag 2, enum `ControlAction`) es el discriminador y sus valores se
+/// verificaron en la metadata instalada (ver `dump_proto.py`). Se declara como
+/// `int32` en lugar de como enumeracion de prost porque en el cable un enum es
+/// un varint y el resto del modulo ya modela los enums asi; los valores utiles
+/// son constantes con nombre para que el numero no quede suelto en la rama de
+/// traduccion.
+#[derive(Clone, PartialEq, Message)]
+pub struct WebcastControlMessage {
+    #[prost(message, tag = "1")]
+    pub common: Option<CommonMessageData>,
+    #[prost(int32, tag = "2")]
+    pub action: i32,
+}
+
+impl WebcastControlMessage {
+    /// `ControlAction::STREAM_ENDED`: el directo ha terminado.
+    pub const STREAM_ENDED: i32 = 3;
+    /// `ControlAction::STREAM_SUSPENDED`: TikTok ha cortado el directo.
+    ///
+    /// La spec lo agrupa con `STREAM_ENDED` en el mismo evento de fin
+    /// (`LiveEndEvent`), asi que aqui tambien cierra la sesion.
+    pub const STREAM_SUSPENDED: i32 = 4;
+}
+
+/// Borrado de comentarios por moderacion.
+///
+/// `delete_msg_ids` (tag 2) trae los `msg_id` de los mensajes borrados, y un
+/// mismo aviso puede borrar varios. `delete_user_ids` (tag 3) no se declara: el
+/// evento interno identifica el mensaje borrado, no el usuario.
+#[derive(Clone, PartialEq, Message)]
+pub struct WebcastImDeleteMessage {
+    #[prost(message, tag = "1")]
+    pub common: Option<CommonMessageData>,
+    #[prost(int64, repeated, tag = "2")]
+    pub delete_msg_ids: Vec<i64>,
 }
 
 /// Aviso de suscripcion (subscribe, renovacion o regalo de suscripcion).

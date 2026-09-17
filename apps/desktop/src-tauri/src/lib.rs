@@ -184,11 +184,12 @@ pub fn self_test(seconds: u64, live: Option<&str>) -> anyhow::Result<()> {
         match live {
             Some(handle) => {
                 tracing::info!(handle, "autoverificacion contra un directo real");
-                let provider = state.current_provider();
-                provider
+                // Se conecta por el motor para que la sesion guarde el handle.
+                state
                     .connect(handle)
                     .await
                     .map_err(|error| anyhow::anyhow!("no se pudo conectar: {error}"))?;
+                let provider = state.current_provider();
                 tokio::time::sleep(Duration::from_secs(seconds)).await;
                 provider.disconnect().await;
             }
@@ -203,7 +204,6 @@ pub fn self_test(seconds: u64, live: Option<&str>) -> anyhow::Result<()> {
                 }
                 state.simulated.set_interval(Duration::from_millis(50));
                 state
-                    .simulated
                     .connect("autoverificacion")
                     .await
                     .map_err(|error| anyhow::anyhow!("no arranco el simulador: {error}"))?;

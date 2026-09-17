@@ -142,10 +142,28 @@ pub enum EventKind {
     StreamWaiting { handle: String, detail: String },
 
     #[serde(rename = "chat.message")]
-    ChatMessage { user: UserRef, content: String },
+    ChatMessage {
+        user: UserRef,
+        content: String,
+        /// Cuantos emotes del fansclub traia el mensaje.
+        ///
+        /// TikTok manda los mensajes que son **solo** emote con `content` vacio
+        /// y la lista de emotes aparte; sin este dato se descartaban enteros y
+        /// desaparecian lineas del chat.
+        #[serde(default)]
+        emote_count: u32,
+    },
 
     #[serde(rename = "chat.message.deleted")]
     ChatMessageDeleted { source_id: String },
+
+    /// Alguien ha entrado en la sala.
+    ///
+    /// Es el mensaje **mas frecuente** de TikTok (un tercio del trafico medido
+    /// en `live.jsonl`). Se publica para no descartar en silencio, pero la
+    /// interfaz lo resume en un contador: una fila por entrada taparia el chat.
+    #[serde(rename = "member.joined")]
+    MemberJoined { user: UserRef },
 
     #[serde(rename = "gift.received")]
     GiftReceived { user: UserRef, gift: GiftInfo },
@@ -211,6 +229,7 @@ impl EventKind {
             EventKind::StreamWaiting { .. } => "stream.waiting",
             EventKind::ChatMessage { .. } => "chat.message",
             EventKind::ChatMessageDeleted { .. } => "chat.message.deleted",
+            EventKind::MemberJoined { .. } => "member.joined",
             EventKind::GiftReceived { .. } => "gift.received",
             EventKind::LikeUpdated { .. } => "like.updated",
             EventKind::ViewerUpdated { .. } => "viewer.updated",

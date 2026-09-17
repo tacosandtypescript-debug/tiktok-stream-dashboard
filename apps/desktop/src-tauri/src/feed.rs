@@ -230,6 +230,18 @@ impl Settlement {
     };
 }
 
+/// Racha abierta que se liquida al cerrar la sesion.
+///
+/// Lleva lo imprescindible para persistirla: `group_id` identifica las filas de
+/// la racha en `gift_events` y las unidades y diamantes son lo que hay que sumar
+/// a la sesion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreakSettlement {
+    pub group_id: String,
+    pub units: i64,
+    pub diamonds: i64,
+}
+
 /// Racha abierta a la espera de cierre.
 #[derive(Debug, Clone)]
 struct PendingGift {
@@ -337,6 +349,30 @@ impl GiftBoard {
             }
             None => Settlement::NONE,
         }
+    }
+
+    /// Liquida **todas** las rachas abiertas y devuelve lo que ha contabilizado.
+    ///
+    /// Se llama al cerrar la sesion: una racha que nunca recibe su `repeat_end`
+    /// (35 de 176 en el historico medido) se quedaba abierta y sus diamantes se
+    /// perdian enteros. `record` no cambia: la liquidacion al empezar otra racha
+    /// sigue siendo suya, y esto solo cubre el final del directo.
+    pub fn settle_open(&mut self) -> Vec<StreakSettlement> {
+        let abiertas: Vec<(String, PendingGift)> = self.open.drain().collect();
+        // El indice por usuario apunta a rachas que ya no existen: si quedara,
+        // el proximo regalo de ese usuario intentaria liquidar una racha ya
+        // contabilizada.
+        self.open_by_user.clear();
+        let mut liquidado = Vec::with_capacity(abiertas.len());
+        for (group_id, pendiente) in abiertas {
+            liquidado.push(StreakSettlement {
+                group_id,
+                units: pendiente.units,
+                diamonds: pendiente.diamonds,
+            });
+            self.settle(pendiente);
+        }
+        liquidado
     }
 
     /// Contabiliza una aportacion ya completa.
@@ -563,6 +599,55 @@ mod tests {
         assert_eq!(board.record(cierre), Settlement { units: 2, diamonds: 2 });
         assert_eq!(board.total_diamonds(), 3, "1 de la abandonada + 2 de esta");
         assert_eq!(board.open_streaks(), 0);
+    }
+
+    /// Al terminar el directo, las rachas que seguian abiertas se liquidan: si
+    /// no, sus diamantes se perdian enteros (docs/decisions.md D14).
+    #[test]
+    fn cerrar_la_sesion_liquida_las_rachas_abiertas() {
+        let mut board = GiftBoard::new(10);
+        // Carlos con una rosa a medias y Ana con dos TikTok de 5 diamantes a
+        // medias: dos rachas abiertas de dos usuarios distintos.
+        board.record(gift(1, "1", "Carlos", 1, 1, false));
+        let mut de_ana = gift(2, "2", "Ana", 5, 2, false);
+        de_ana.group_id = "g2".into();
+        board.record(de_ana);
+
+        assert_eq!(board.open_streaks(), 2);
+        assert_eq!(board.total_diamonds(), 0, "abiertas no cuentan todavia");
+
+        let liquidado = board.settle_open();
+        assert_eq!(liquidado.len(), 2, "se liquidan las dos");
+        let carlos = liquidado
+            .iter()
+            .find(|racha| racha.group_id == "g1")
+            .expect("la racha de Carlos deberia estar liquidada");
+        assert_eq!(carlos.units, 1);
+        assert_eq!(carlos.diamonds, 1);
+        let ana = liquidado
+            .iter()
+            .find(|racha| racha.group_id == "g2")
+            .expect("la racha de Ana deberia estar liquidada");
+        assert_eq!(ana.units, 2, "dos unidades, no el valor de la ultima");
+        assert_eq!(ana.diamonds, 10, "2 TikTok de 5 diamantes");
+
+        assert_eq!(board.total_diamonds(), 11, "todo lo pendiente se contabiliza");
+        assert_eq!(board.total_gifts(), 3);
+        assert_eq!(board.open_streaks(), 0, "no queda ninguna racha abierta");
+        // El ranking se actualiza con lo liquidado.
+        let top = board.top_gifters(2);
+        assert_eq!(top[0].user.nickname, "Ana");
+        assert_eq!(top[0].diamonds, 10);
+
+        // Liquidar dos veces no puede contabilizar dos veces.
+        assert!(board.settle_open().is_empty());
+        assert_eq!(board.total_diamonds(), 11);
+
+        // Y la siguiente racha del mismo usuario empieza de cero, sin arrastrar
+        // la que ya se liquido.
+        board.record(gift(3, "1", "Carlos", 1, 1, false));
+        assert_eq!(board.total_diamonds(), 11, "no se reliquida lo ya contado");
+        assert_eq!(board.open_streaks(), 1);
     }
 
     #[test]

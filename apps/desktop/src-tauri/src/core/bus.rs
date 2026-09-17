@@ -153,6 +153,7 @@ mod tests {
         EventKind::ChatMessage {
             user: user(id),
             content: "hola".into(),
+            emote_count: 0,
         }
     }
 

@@ -156,6 +156,7 @@ fn chat(seq: u64, user: &UserRef, content: &str) -> Event {
         EventKind::ChatMessage {
             user: user.clone(),
             content: content.to_string(),
+            emote_count: 0,
         },
     )
 }
@@ -751,6 +752,7 @@ async fn el_bus_descarta_el_mismo_source_id_antes_de_llegar_al_estado() {
             EventKind::ChatMessage {
                 user: carlos.clone(),
                 content: "hola".to_string(),
+                emote_count: 0,
             }
         ),
         "la primera publicacion es nueva"
@@ -761,6 +763,7 @@ async fn el_bus_descarta_el_mismo_source_id_antes_de_llegar_al_estado() {
             EventKind::ChatMessage {
                 user: carlos.clone(),
                 content: "hola".to_string(),
+                emote_count: 0,
             }
         ),
         "el duplicado debe descartarse en el bus"
@@ -834,6 +837,7 @@ async fn la_desconexion_cierra_la_sesion_en_la_base_de_datos() {
             EventKind::ChatMessage {
                 user: carlos.clone(),
                 content: "esto se persiste".to_string(),
+                emote_count: 0,
             }
         ),
         "el mensaje es un evento nuevo"
@@ -896,6 +900,191 @@ async fn la_desconexion_cierra_la_sesion_en_la_base_de_datos() {
         base.count("comments").expect("contando comments"),
         1,
         "el comentario del directo se persistio"
+    );
+
+    drop(base);
+    db.finalizar();
+}
+
+// ---------------------------------------------------------------------------
+// A6 · El pico de espectadores y el total de likes llegan a la sesion
+// ---------------------------------------------------------------------------
+
+/// `streams.peak_viewers` y `streams.like_total` existian desde la v1 y nadie
+/// los escribia: el pico de la sesion y los likes se perdian.
+///
+/// Las cifras se agrupan en una ventana (como los viewers en el proveedor) y lo
+/// que queda pendiente se vuelca al cerrar la sesion, asi que despues de
+/// desconectar tienen que estar todas: el pico es el **mayor** visto, no el
+/// ultimo.
+#[test]
+fn el_pico_de_espectadores_y_los_likes_se_guardan_al_cerrar_la_sesion() {
+    let db = DbTemp::nueva("flujo-progreso");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
+
+    estado.on_event(&conectar(1));
+    // Los espectadores suben y bajan: interesa el pico.
+    for (seq, current) in [(2u64, 120i64), (3, 340), (4, 250)] {
+        estado.on_event(&Event::new(
+            seq,
+            SALA.to_string(),
+            None,
+            EventKind::ViewerUpdated {
+                current,
+                cumulative: 900 + current,
+            },
+        ));
+    }
+    // Los likes traen el total absoluto del directo.
+    for (seq, total) in [(5u64, 1_000i64), (6, 2_500)] {
+        estado.on_event(&Event::new(
+            seq,
+            SALA.to_string(),
+            None,
+            EventKind::LikeUpdated {
+                user: None,
+                count: 5,
+                total,
+            },
+        ));
+    }
+    estado.on_event(&desconectar(7));
+
+    estado.shutdown();
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.query_i64("SELECT peak_viewers FROM streams", 0)
+            .expect("leyendo el pico"),
+        Some(340),
+        "el pico es el mayor numero de espectadores, no el ultimo"
+    );
+    assert_eq!(
+        base.query_i64("SELECT like_total FROM streams", 0)
+            .expect("leyendo los likes"),
+        Some(2_500),
+        "los likes de la sesion son el ultimo total absoluto"
+    );
+
+    drop(base);
+    db.finalizar();
+}
+
+// ---------------------------------------------------------------------------
+// A7 · La sesion guarda el handle real
+// ---------------------------------------------------------------------------
+
+/// El arranque automatico conectaba el proveedor sin pasar por el motor, asi que
+/// la fila de `streams` quedaba con `handle = ''` aunque el proveedor se hubiera
+/// conectado a un usuario concreto. `AppState::connect` es ahora el unico sitio
+/// que abre sesion y el que guarda el handle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn la_sesion_guarda_el_handle_con_el_que_se_conecta() {
+    let db = DbTemp::nueva("flujo-handle");
+    let estado = Arc::new(
+        AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"),
+    );
+    let _consumer = tokio::spawn(estado.consumer_future());
+    // Se usa el simulador para no tocar la red; el camino que se prueba
+    // (motor -> handle -> base) es el mismo que el del proveedor real.
+    // Con `@` delante a proposito: el motor lo normaliza.
+    estado
+        .start_simulation("@carlos")
+        .await
+        .expect("arranca la simulacion");
+
+    let mut abierta = false;
+    for _ in 0..250 {
+        abierta = estado.snapshot().stream_id.is_some();
+        if abierta {
+            break;
+        }
+        tokio::time::sleep(SYNC_POLL).await;
+    }
+    assert!(abierta, "la sesion deberia abrirse al conectar");
+    estado.current_provider().disconnect().await;
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    estado.shutdown();
+
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.query_string("SELECT handle FROM streams", 0)
+            .expect("leyendo el handle"),
+        Some("carlos".to_string()),
+        "la sesion debe guardar a que usuario se conecto, sin arroba"
+    );
+
+    drop(base);
+    db.finalizar();
+}
+
+// ---------------------------------------------------------------------------
+// A8 · Las rachas abiertas se liquidan al cerrar la sesion
+// ---------------------------------------------------------------------------
+
+/// Una racha que no recibe `repeat_end` (35 de 176 en el historico medido) se
+/// quedaba abierta al terminar el directo y sus diamantes se perdian: ni en el
+/// resumen de la sesion ni en la base.
+#[test]
+fn las_rachas_abiertas_se_liquidan_al_cerrar_la_sesion() {
+    let db = DbTemp::nueva("flujo-liquidacion");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
+    let carlos = usuario("1", "Carlos");
+
+    estado.on_event(&conectar(1));
+    // Dos rosas de la misma racha, ninguna con `is_final`: el directo termina
+    // antes de que TikTok mande el cierre.
+    for (seq, final_) in [(2u64, false), (3, false)] {
+        estado.on_event(&Event::new(
+            seq,
+            SALA.to_string(),
+            Some(format!("gift-{seq}")),
+            EventKind::GiftReceived {
+                user: carlos.clone(),
+                gift: regalo("5655", "Rose", 1, 1, true, final_, "g-1"),
+            },
+        ));
+    }
+    assert_eq!(
+        estado.snapshot().total_diamonds,
+        0,
+        "mientras la racha sigue abierta no se contabiliza nada"
+    );
+
+    estado.on_event(&desconectar(4));
+
+    let snapshot = estado.snapshot();
+    assert_eq!(
+        snapshot.total_diamonds, 2,
+        "al cerrar la sesion, la racha abierta se liquida"
+    );
+    assert_eq!(snapshot.total_gifts, 2, "dos rosas, no dos eventos");
+
+    estado.shutdown();
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.query_i64("SELECT diamond_total FROM streams", 0)
+            .expect("leyendo los diamantes"),
+        Some(2),
+        "los diamantes de la racha abandonada deben persistirse"
+    );
+    assert_eq!(
+        base.query_i64("SELECT gift_count FROM streams", 0)
+            .expect("leyendo las unidades"),
+        Some(2)
+    );
+    assert_eq!(
+        base.count("gift_events").expect("contando regalos"),
+        2,
+        "no se inventa una fila de ajuste: se marcan las filas reales"
+    );
+    assert_eq!(
+        base.query_i64(
+            "SELECT is_final FROM gift_events WHERE group_id = 'g-1' ORDER BY id DESC LIMIT 1",
+            0
+        )
+        .expect("leyendo el cierre"),
+        Some(1),
+        "la ultima fila de la racha queda como la que la cierra"
     );
 
     drop(base);

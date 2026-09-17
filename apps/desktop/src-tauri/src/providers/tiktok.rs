@@ -573,7 +573,12 @@ pub(crate) fn translate_message(method: &str, payload: &[u8], sink: &mut EventSi
                     let Some(user) = user_ref(&message.user) else {
                         return;
                     };
-                    if message.content.trim().is_empty() {
+                    // TikTok manda los mensajes que son **solo** emote con
+                    // `content` vacio (un espacio) y los emotes aparte: mirar
+                    // solo el texto los descartaba enteros. Solo se descarta lo
+                    // que no trae ni texto ni emotes.
+                    let emote_count = message.emotes.len() as u32;
+                    if message.content.trim().is_empty() && emote_count == 0 {
                         return;
                     }
                     let id = message.common.as_ref().map(source_id);
@@ -584,6 +589,7 @@ pub(crate) fn translate_message(method: &str, payload: &[u8], sink: &mut EventSi
                         id = id.as_deref().unwrap_or("-"),
                         autor = %user.unique_id,
                         texto = %message.content,
+                        emotes = emote_count,
                         "chat decodificado"
                     );
                     sink.push(
@@ -591,10 +597,73 @@ pub(crate) fn translate_message(method: &str, payload: &[u8], sink: &mut EventSi
                         EventKind::ChatMessage {
                             user,
                             content: message.content,
+                            emote_count,
                         },
                     );
                 }
                 Err(error) => tracing::debug!(%error, "chat no decodificable"),
+            },
+
+            // Entradas en la sala: el mensaje mas frecuente de TikTok. Sin esta
+            // rama se descartaba en silencio (el `other =>` de abajo).
+            "WebcastMemberMessage" => match WebcastMemberMessage::decode(payload) {
+                Ok(message) => {
+                    let Some(user) = user_ref(&message.user) else {
+                        return;
+                    };
+                    sink.push(
+                        message.common.as_ref().map(source_id),
+                        EventKind::MemberJoined { user },
+                    );
+                }
+                Err(error) => tracing::debug!(%error, "entrada en la sala no decodificable"),
+            },
+
+            // Fin del directo: cierra la sesion en el momento en vez de
+            // esperar a que caiga el WebSocket (o al siguiente arranque, donde
+            // `mark_crashed_streams` la marcaba como interrumpida).
+            "WebcastControlMessage" => match WebcastControlMessage::decode(payload) {
+                Ok(message) => {
+                    let reason = match message.action {
+                        WebcastControlMessage::STREAM_ENDED => "el directo ha terminado",
+                        WebcastControlMessage::STREAM_SUSPENDED => "el directo se ha suspendido",
+                        other => {
+                            // Pausa, reanudacion y desconocidos no cierran nada.
+                            tracing::trace!(action = other, "control sin fin de directo");
+                            return;
+                        }
+                    };
+                    sink.push(
+                        message.common.as_ref().map(source_id),
+                        EventKind::StreamDisconnected {
+                            reason: reason.to_string(),
+                        },
+                    );
+                }
+                Err(error) => tracing::debug!(%error, "control no decodificable"),
+            },
+
+            "WebcastImDeleteMessage" => match WebcastImDeleteMessage::decode(payload) {
+                Ok(message) => {
+                    if message.delete_msg_ids.is_empty() {
+                        tracing::trace!("aviso de borrado sin mensajes; se ignora");
+                        return;
+                    }
+                    for msg_id in &message.delete_msg_ids {
+                        // El `source_id` del evento va vacio a proposito: un
+                        // mismo aviso puede borrar varios mensajes, y repetir el
+                        // id del aviso haria que el bus descartase los
+                        // siguientes como duplicados. El mensaje borrado viaja
+                        // en el cuerpo del evento.
+                        sink.push(
+                            None,
+                            EventKind::ChatMessageDeleted {
+                                source_id: msg_id.to_string(),
+                            },
+                        );
+                    }
+                }
+                Err(error) => tracing::debug!(%error, "borrado de comentarios no decodificable"),
             },
 
             "WebcastGiftMessage" => match WebcastGiftMessage::decode(payload) {
@@ -1263,6 +1332,213 @@ fn next_delay(current: Duration, config: &ProviderConfig) -> Duration {
 mod tests {
     use super::*;
 
+    /// Usuario minimo decodificable: `user_ref` descarta los que no traen id.
+    fn usuario(id: i64, handle: &str) -> User {
+        User {
+            id,
+            nickname: format!("Nick {id}"),
+            display_id: handle.to_string(),
+            sec_uid: String::new(),
+        }
+    }
+
+    fn comun(method: &str, msg_id: i64) -> CommonMessageData {
+        CommonMessageData {
+            method: method.to_string(),
+            msg_id,
+            ..Default::default()
+        }
+    }
+
+    fn sink_de_prueba() -> EventSink {
+        EventSink::new(Arc::new(Metrics::default()), Duration::from_millis(500))
+    }
+
+    fn chat_proto(content: &str, emotes: usize) -> Vec<u8> {
+        WebcastChatMessage {
+            common: Some(comun("WebcastChatMessage", 11)),
+            user: Some(usuario(1, "carlos")),
+            content: content.to_string(),
+            emotes: (0..emotes)
+                .map(|indice| EmoteWithIndex {
+                    index: indice as i64,
+                })
+                .collect(),
+        }
+        .encode_to_vec()
+    }
+
+    // -----------------------------------------------------------------------
+    // Mensajes que antes se descartaban o no se modelaban
+    // -----------------------------------------------------------------------
+
+    /// TikTok manda los mensajes que son **solo** emote con `content` vacio (un
+    /// espacio) y la lista de emotes aparte: mirar solo el texto los
+    /// descartaba enteros.
+    #[test]
+    fn un_mensaje_que_es_solo_emote_no_se_descarta() {
+        let mut sink = sink_de_prueba();
+        translate_message("WebcastChatMessage", &chat_proto(" ", 2), &mut sink);
+
+        let eventos = sink.drain();
+        assert_eq!(eventos.len(), 1, "el mensaje de emotes debe llegar al bus");
+        match &eventos[0].1 {
+            EventKind::ChatMessage {
+                content,
+                emote_count,
+                user,
+            } => {
+                assert_eq!(*emote_count, 2, "dos emotes del fansclub");
+                assert_eq!(content.as_str(), " ");
+                assert_eq!(user.unique_id, "carlos");
+            }
+            otro => panic!("se esperaba un chat, llego {}", otro.name()),
+        }
+        assert_eq!(
+            eventos[0].0.as_deref(),
+            Some("11"),
+            "el mensaje conserva su msg_id"
+        );
+    }
+
+    /// Un mensaje con texto no puede contar emotes que no trae.
+    #[test]
+    fn el_chat_con_texto_cuenta_cero_emotes() {
+        let mut sink = sink_de_prueba();
+        translate_message("WebcastChatMessage", &chat_proto("hola a todos", 0), &mut sink);
+
+        match &sink.drain()[0].1 {
+            EventKind::ChatMessage { emote_count, .. } => assert_eq!(*emote_count, 0),
+            otro => panic!("se esperaba un chat, llego {}", otro.name()),
+        }
+    }
+
+    /// Sin texto **y** sin emotes se sigue descartando: una lista de emotes
+    /// vacia no convierte un mensaje vacio en un mensaje valido.
+    #[test]
+    fn el_chat_sin_texto_ni_emotes_se_sigue_descartando() {
+        let mut sink = sink_de_prueba();
+        translate_message("WebcastChatMessage", &chat_proto("   ", 0), &mut sink);
+        assert!(sink.is_empty(), "un mensaje vacio no es un mensaje");
+    }
+
+    /// Las entradas en la sala son el mensaje mas frecuente de TikTok y antes se
+    /// perdian en el `other =>` de `translate_message`.
+    #[test]
+    fn la_entrada_en_la_sala_publica_member_joined() {
+        let mut sink = sink_de_prueba();
+        let payload = WebcastMemberMessage {
+            common: Some(comun("WebcastMemberMessage", 22)),
+            user: Some(usuario(7, "ana")),
+        }
+        .encode_to_vec();
+        translate_message("WebcastMemberMessage", &payload, &mut sink);
+
+        let eventos = sink.drain();
+        assert_eq!(eventos.len(), 1);
+        assert_eq!(eventos[0].1.name(), "member.joined");
+        match &eventos[0].1 {
+            EventKind::MemberJoined { user } => assert_eq!(user.unique_id, "ana"),
+            otro => panic!("se esperaba una entrada, llego {}", otro.name()),
+        }
+        assert_eq!(eventos[0].0.as_deref(), Some("22"));
+    }
+
+    /// Una entrada sin usuario identificable (id 0) no puede publicarse.
+    #[test]
+    fn la_entrada_sin_usuario_no_publica_nada() {
+        let mut sink = sink_de_prueba();
+        let payload = WebcastMemberMessage {
+            common: Some(comun("WebcastMemberMessage", 23)),
+            user: None,
+        }
+        .encode_to_vec();
+        translate_message("WebcastMemberMessage", &payload, &mut sink);
+        assert!(sink.is_empty());
+    }
+
+    /// El fin del directo llega por `WebcastControlMessage` y cierra la sesion
+    /// en el momento, sin esperar a que caiga el WebSocket.
+    #[test]
+    fn el_control_de_fin_de_directo_publica_la_desconexion() {
+        for (action, fragmento) in [
+            (WebcastControlMessage::STREAM_ENDED, "terminado"),
+            (WebcastControlMessage::STREAM_SUSPENDED, "suspendido"),
+        ] {
+            let mut sink = sink_de_prueba();
+            let payload = WebcastControlMessage {
+                common: Some(comun("WebcastControlMessage", 33)),
+                action,
+            }
+            .encode_to_vec();
+            translate_message("WebcastControlMessage", &payload, &mut sink);
+
+            let eventos = sink.drain();
+            assert_eq!(eventos.len(), 1, "action {action} cierra el directo");
+            match &eventos[0].1 {
+                EventKind::StreamDisconnected { reason } => assert!(
+                    reason.contains(fragmento),
+                    "el motivo debe ser claro, es {reason:?}"
+                ),
+                otro => panic!("se esperaba una desconexion, llego {}", otro.name()),
+            }
+        }
+
+        // Pausa, reanudacion y valores desconocidos no cierran la sesion.
+        for action in [0, 1, 2, 99] {
+            let mut sink = sink_de_prueba();
+            let payload = WebcastControlMessage {
+                common: Some(comun("WebcastControlMessage", 34)),
+                action,
+            }
+            .encode_to_vec();
+            translate_message("WebcastControlMessage", &payload, &mut sink);
+            assert!(
+                sink.is_empty(),
+                "action {action} no es un fin de directo y no debe cerrar la sesion"
+            );
+        }
+    }
+
+    /// El borrado de comentarios se publica con el `msg_id` del mensaje borrado.
+    #[test]
+    fn el_borrado_de_comentarios_publica_su_evento() {
+        let mut sink = sink_de_prueba();
+        let payload = WebcastImDeleteMessage {
+            common: Some(comun("WebcastImDeleteMessage", 44)),
+            delete_msg_ids: vec![111, 222],
+        }
+        .encode_to_vec();
+        translate_message("WebcastImDeleteMessage", &payload, &mut sink);
+
+        let eventos = sink.drain();
+        assert_eq!(eventos.len(), 2, "un aviso puede borrar varios mensajes");
+        let borrados: Vec<&str> = eventos
+            .iter()
+            .filter_map(|(_, kind)| match kind {
+                EventKind::ChatMessageDeleted { source_id } => Some(source_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(borrados, vec!["111", "222"]);
+        // El `source_id` del evento va vacio: repetir el id del aviso haria que
+        // el bus descartase el segundo borrado como duplicado.
+        assert!(
+            eventos.iter().all(|(source, _)| source.is_none()),
+            "el aviso no puede reutilizar su id para cada mensaje borrado"
+        );
+
+        // Un aviso sin ids no publica nada.
+        let mut sink = sink_de_prueba();
+        let vacio = WebcastImDeleteMessage {
+            common: Some(comun("WebcastImDeleteMessage", 45)),
+            delete_msg_ids: Vec::new(),
+        }
+        .encode_to_vec();
+        translate_message("WebcastImDeleteMessage", &vacio, &mut sink);
+        assert!(sink.is_empty());
+    }
+
     #[test]
     fn extrae_el_json_de_un_script_por_id() {
         let html = r#"<html><head><script id="SIGI_STATE" type="application/json">{"a":1}</script></head></html>"#;
@@ -1483,6 +1759,24 @@ mod tests {
             .iter()
             .filter(|(_, kind)| kind.name() == "chat.message")
             .count();
+        let miembros = eventos
+            .iter()
+            .filter(|(_, kind)| kind.name() == "member.joined")
+            .count();
+        // Mensajes que son solo emote: sin el campo `emotes` no llegaban.
+        let con_emotes = eventos
+            .iter()
+            .filter(|(_, kind)| match kind {
+                EventKind::ChatMessage { emote_count, .. } => *emote_count > 0,
+                _ => false,
+            })
+            .count();
+        // Recuento por tipo: si TikTok anade algo, el fallo dice que llego.
+        let mut por_tipo: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for (_, kind) in &eventos {
+            *por_tipo.entry(kind.name()).or_insert(0) += 1;
+        }
         let regalos: Vec<&GiftInfo> = eventos
             .iter()
             .filter_map(|(_, kind)| match kind {
@@ -1493,6 +1787,15 @@ mod tests {
 
         assert!(frames >= 100, "se esperaban frames grabados, hay {frames}");
         assert!(chats > 0, "una sala en directo produce comentarios");
+        assert!(
+            miembros >= 50,
+            "la grabacion medida trae 60 entradas en la sala, el mensaje mas \
+             frecuente de TikTok; ahora llegan como member.joined: {por_tipo:?}"
+        );
+        assert!(
+            con_emotes > 0,
+            "y al menos un mensaje que es solo emote: {por_tipo:?}"
+        );
         assert!(!regalos.is_empty(), "y regalos");
         assert!(
             regalos

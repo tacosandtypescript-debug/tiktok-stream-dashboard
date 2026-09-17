@@ -231,6 +231,9 @@ impl Guion {
                     EventKind::ChatMessage {
                         user,
                         content: MENSAJES[(tick as usize) % MENSAJES.len()].to_string(),
+                        // El simulador no manda emotes: el campo es del
+                        // proveedor real.
+                        emote_count: 0,
                     },
                 );
             }

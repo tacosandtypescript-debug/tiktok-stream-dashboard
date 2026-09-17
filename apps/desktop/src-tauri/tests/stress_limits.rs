@@ -137,6 +137,7 @@ fn evento_chat(seq: usize) -> Event {
         EventKind::ChatMessage {
             user: usuario(seq % 50),
             content: format!("mensaje numero {seq} de la rafaga"),
+            emote_count: 0,
         },
     )
 }
@@ -467,6 +468,7 @@ async fn la_rafaga_por_el_bus_tambien_deja_el_estado_acotado() {
                 EventKind::ChatMessage {
                     user: usuario(seq % 50),
                     content: format!("mensaje numero {seq} de la rafaga"),
+                    emote_count: 0,
                 },
             ),
             "el mensaje {seq} no deberia ser un duplicado"

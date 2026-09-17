@@ -367,6 +367,20 @@ ol.ranking {
   padding: 0;
 }
 
+/* Las listas de ranking tambien se escriben como `ul` (Panel, Regalos,
+   Desarrollador y la cola de Voz) y no estaban en la regla de arriba: sin
+   `min-height: 0` no podian encogerse y sin scroll propio su contenido empujaba
+   la pagina. Era el desbordamiento de 4 px del Panel: con la lista «Por tipo de
+   regalo» a dos filas (~38 px) la tarjeta tenia ~71 px (12 de relleno arriba +
+   25 de cabecera + 22 para la lista), asi que 4 px asomaban por debajo del area
+   visible de `main`.
+   Se anade solo lo necesario para que encoja y se desplace: `list-style`,
+   `padding` y `flex` se dejan como estaban para no cambiar la apariencia. */
+ul.ranking {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 ul.chat {
   display: flex;
   flex-direction: column;
@@ -382,6 +396,30 @@ ul.chat li {
 
 ul.chat.compact li:nth-child(n + 8) {
   opacity: 0.75;
+}
+
+/* Un comentario borrado en TikTok se atenua y se rotula, pero sigue en su sitio:
+   quitarlo cortaria el hilo de la conversacion. */
+.content.deleted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Silenciar a un usuario en la voz. El boton vive en cada linea y se mantiene
+   discreto; el silencio marca al usuario en todas sus lineas, no solo en la que
+   se pulso (el motor silencia por `user_id`). */
+ul.chat li .mute {
+  flex: 0 0 auto;
+  opacity: 0.5;
+}
+
+ul.chat li .mute:hover,
+ul.chat li.muted .mute {
+  opacity: 1;
+}
+
+ul.chat li.muted .user {
+  opacity: 0.6;
 }
 
 ul.feed li {

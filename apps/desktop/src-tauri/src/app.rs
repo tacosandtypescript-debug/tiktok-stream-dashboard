@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 
@@ -64,6 +64,10 @@ pub struct AppState {
     pub(crate) ui_events: Mutex<std::collections::HashMap<String, u64>>,
     /// Ultima vez que se publicaron los agregados de regalos (coalescing).
     pub(crate) last_board: Mutex<Option<std::time::Instant>>,
+    /// Progreso de la sesion pendiente de escribir: pico de espectadores y
+    /// total de likes. Va aparte del feed porque su destino es la fila de
+    /// `streams`, no una tabla de eventos.
+    pub(crate) progress: Mutex<SessionProgress>,
     /// Traza del chat (recibido en la interfaz / renderizado por React).
     pub(crate) ui_chat: Mutex<UiChatTrace>,
     /// Lectura del chat en voz alta. Vive en su propio modulo y solo depende del
@@ -132,6 +136,7 @@ impl AppState {
             started_at_ms: RwLock::new(None),
             ui_events: Mutex::new(std::collections::HashMap::new()),
             last_board: Mutex::new(None),
+            progress: Mutex::new(SessionProgress::default()),
             ui_chat: Mutex::new(UiChatTrace::default()),
             tts,
             tts_provider,
@@ -143,6 +148,37 @@ impl AppState {
 
     pub fn new(instance_port: u16) -> anyhow::Result<Self> {
         Self::open(database_path(), instance_port)
+    }
+
+    /// Conecta el proveedor activo **y** recuerda a que usuario.
+    ///
+    /// Es el unico sitio donde se abre una sesion, y existe por un motivo
+    /// concreto: el handle es lo que acaba en `streams.handle` (lo lee
+    /// `on_event` al recibir `StreamConnected`). El arranque automatico
+    /// (`TTSDASH_AUTOSTART`) llamaba al proveedor directamente, asi que la
+    /// sesion se guardaba con `handle` vacio aunque el proveedor se hubiera
+    /// conectado a un usuario concreto.
+    pub async fn connect(&self, handle: &str) -> anyhow::Result<()> {
+        let limpio = handle.trim().trim_start_matches('@').to_string();
+        if let Ok(mut guard) = self.handle.write() {
+            *guard = limpio.clone();
+        }
+        self.current_provider().connect(&limpio).await
+    }
+
+    /// Cambia al proveedor simulado y abre sesion con el.
+    ///
+    /// Vive en el motor y no en el comando de Tauri para que "elegir proveedor y
+    /// abrir sesion" sea un solo camino (el comando es una envoltura) y se pueda
+    /// probar sin Tauri ni red.
+    pub async fn start_simulation(&self, handle: &str) -> anyhow::Result<()> {
+        // Se detiene el proveedor activo antes de cambiar: nunca dos a la vez
+        // (consumirian la misma cuota de firma).
+        self.current_provider().disconnect().await;
+        if let Ok(mut guard) = self.provider.write() {
+            *guard = self.simulated.clone() as Arc<dyn TikTokProvider>;
+        }
+        self.connect(handle).await
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<Event>> {
@@ -244,6 +280,14 @@ impl AppState {
                 if let Ok(mut gifts) = self.gifts.lock() {
                     gifts.clear();
                 }
+                // El progreso tambien es de la sesion: un pico pendiente de la
+                // anterior no puede colarse en esta.
+                if let Ok(mut progress) = self.progress.lock() {
+                    *progress = SessionProgress::default();
+                }
+                // El handle lo fija `AppState::connect`: es el unico sitio que
+                // sabe a que usuario se esta conectando el proveedor (el
+                // arranque automatico lo omitia y la sesion quedaba sin el).
                 let handle = self.handle.read().map(|g| g.clone()).unwrap_or_default();
                 self.push_feed(FeedItem::info(
                     event.seq,
@@ -272,6 +316,13 @@ impl AppState {
                     event.timestamp_ms,
                     format!("conexión cerrada · {reason}"),
                 ));
+                // Antes de soltar la sesion hay que volcar lo que solo vive en
+                // memoria: el pico de espectadores y los likes pendientes, y las
+                // rachas de regalos que TikTok dejo abiertas (sin `repeat_end`).
+                // Todo se persiste contra el `stream_id` que esta a punto de
+                // cerrarse.
+                self.flush_progress(true);
+                self.settle_streaks(event.seq, event.timestamp_ms);
                 if let Ok(mut guard) = self.started_at_ms.write() {
                     *guard = None;
                 }
@@ -288,7 +339,15 @@ impl AppState {
                 }
             }
 
-            EventKind::ChatMessage { user, content } => {
+            // `emote_count` solo interesa mientras el mensaje esta vivo: la
+            // tabla `comments` guarda el texto y no tiene columna de emotes, y
+            // anadirla ahora seria un cambio de esquema que nadie ha pedido. El
+            // dato viaja a la interfaz en el evento.
+            EventKind::ChatMessage {
+                user,
+                content,
+                emote_count: _,
+            } => {
                 let entry = ChatEntry {
                     seq: event.seq,
                     timestamp_ms: event.timestamp_ms,
@@ -339,7 +398,7 @@ impl AppState {
                     }),
                     Err(_) => crate::feed::Settlement::NONE,
                 };
-                self.publish_gift_board(gift);
+                self.publish_gift_board(gift.is_final);
 
                 let (units, diamonds) = (settlement.units, settlement.diamonds);
                 if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
@@ -350,6 +409,7 @@ impl AppState {
                             user_id: user.id.clone(),
                             gift_id: gift.id.clone(),
                             gift_name: gift.name.clone(),
+                            image_url: gift.image_url.clone(),
                             diamond_count: gift.diamond_count,
                             repeat_count: gift.repeat_count,
                             is_final: gift.is_final,
@@ -421,7 +481,31 @@ impl AppState {
                         *total,
                     ));
                 }
+                if let Ok(mut progress) = self.progress.lock() {
+                    progress.observe_likes(*total);
+                }
+                self.flush_progress(false);
             }
+
+            EventKind::ViewerUpdated { current, .. } => {
+                // Los espectadores no van al feed (lo pinta el panel con el
+                // snapshot), pero su pico si interesa: se guarda por sesion.
+                if let Ok(mut progress) = self.progress.lock() {
+                    progress.observe_viewers(*current);
+                }
+                self.flush_progress(false);
+            }
+
+            // Las entradas en la sala se publican para que la interfaz las
+            // cuente, pero no se persisten ni se anaden al feed: es el mensaje
+            // mas frecuente de TikTok y una fila por entrada taparia el chat
+            // (ver el contrato en `core/event.rs`).
+            EventKind::MemberJoined { .. } => {}
+
+            // El aviso de borrado lo consume la interfaz, que quita la linea del
+            // chat por su `source_id`; `comments` guarda el texto original y
+            // nadie ha pedido todavia un borrado en la base.
+            EventKind::ChatMessageDeleted { .. } => {}
 
             EventKind::StreamWaiting { handle, detail } => {
                 self.push_feed(FeedItem::info(
@@ -453,15 +537,16 @@ impl AppState {
     ///
     /// Se coalesce a **una vez por segundo** para no inundar la interfaz en una
     /// lluvia de regalos, pero un cierre de racha se publica siempre: es el dato
-    /// que el streamer esta mirando.
-    fn publish_gift_board(&self, gift: &crate::core::event::GiftInfo) {
-        let ahora = std::time::Instant::now();
+    /// que el streamer esta mirando. Lo mismo vale para la liquidacion de fin de
+    /// sesion, que se publica con `forzar` porque no habra otra ocasion.
+    fn publish_gift_board(&self, forzar: bool) {
+        let ahora = Instant::now();
         let publicar = match self.last_board.lock() {
             Ok(mut ultimo) => {
                 let toca = ultimo
                     .map(|previo| ahora.duration_since(previo) >= Duration::from_secs(1))
                     .unwrap_or(true);
-                if toca || gift.is_final {
+                if toca || forzar {
                     *ultimo = Some(ahora);
                     true
                 } else {
@@ -486,6 +571,83 @@ impl AppState {
                 gifts_by_type: board.by_gift(10),
             },
         );
+    }
+
+    /// Vuelca a la fila de `streams` el pico de espectadores y los likes.
+    ///
+    /// La politica de coalescing vive **solo** aqui y es la misma que la de los
+    /// viewers en el proveedor: como mucho una escritura por segundo. Lo que se
+    /// agrupa no se pierde, porque el pico se acumula con `max` y al cerrar la
+    /// sesion se volca lo pendiente (`forzar`), que es el unico momento en el
+    /// que no habria otra ocasion de escribirlo.
+    fn flush_progress(&self, forzar: bool) {
+        let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) else {
+            return;
+        };
+        let Ok(mut progress) = self.progress.lock() else {
+            return;
+        };
+        if !forzar && !progress.due(Instant::now()) {
+            return;
+        }
+        let (peak_viewers, like_total) = progress.take();
+        if peak_viewers.is_none() && like_total.is_none() {
+            return;
+        }
+        // El volcado de cierre no puede perderse: es el ultimo dato de la
+        // sesion. Los intermedios son descartables, como el chat.
+        self.persist(
+            WriteJob::StreamProgress {
+                stream_id,
+                peak_viewers,
+                like_total,
+            },
+            forzar,
+        );
+    }
+
+    /// Liquida las rachas de regalos que siguen abiertas y las persiste.
+    ///
+    /// Una racha sin `repeat_end` se quedaba abierta para siempre y sus
+    /// diamantes se perdian: ni en el resumen de la sesion ni en la base. Se
+    /// cierra **antes** de soltar el `stream_id`, que es a lo que hay que
+    /// colgarla.
+    fn settle_streaks(&self, seq: u64, timestamp_ms: i64) {
+        // Sin sesion abierta no hay a quien colgarle la liquidacion. Ocurre en el
+        // doble cierre (el control de fin de directo y despues la caida del
+        // WebSocket): la segunda vez ya esta todo liquidado y persistido.
+        let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) else {
+            return;
+        };
+        let liquidado = match self.gifts.lock() {
+            Ok(mut board) => board.settle_open(),
+            Err(_) => return,
+        };
+        if liquidado.is_empty() {
+            return;
+        }
+        let diamantes: i64 = liquidado.iter().map(|racha| racha.diamonds).sum();
+        self.push_feed(FeedItem::info(
+            seq,
+            timestamp_ms,
+            format!(
+                "cierre de sesión · {} racha(s) sin cerrar liquidadas ({diamantes} diamantes)",
+                liquidado.len()
+            ),
+        ));
+        // La interfaz tiene que ver los diamantes que se acaban de liberar.
+        self.publish_gift_board(true);
+        for racha in liquidado {
+            self.persist(
+                WriteJob::GiftSettlement {
+                    stream_id: stream_id.clone(),
+                    group_id: racha.group_id,
+                    units: racha.units,
+                    diamonds: racha.diamonds,
+                },
+                true,
+            );
+        }
     }
 
     /// Anade un item ya estructurado al feed de actividad.
@@ -558,13 +720,25 @@ impl AppState {
                 tracing::info!(seq, recibidos = traza.received, "chat recibido por la interfaz");
             }
             // Aviso inequivoco: llegan mensajes y React no ha pintado ninguna
-            // lista. Se deja un margen porque los informes van por rafagas.
-            if !traza.warned && traza.received >= 8 && traza.rendered == 0 {
-                traza.warned = true;
-                tracing::warn!(
-                    "la interfaz recibe mensajes de chat pero no ha renderizado ninguna lista: \
-                     el fallo esta en el estado o el render de React, no en la cadena de eventos"
-                );
+            // lista **en varios segundos**. Se mide el tiempo, no el numero de
+            // mensajes: una rafaga inicial de ocho es normal en una sala grande,
+            // y contar mensajes daba falsos positivos.
+            if !traza.warned && traza.rendered == 0 {
+                let ahora = std::time::Instant::now();
+                match traza.first_received {
+                    None => traza.first_received = Some(ahora),
+                    Some(inicio)
+                        if ahora.duration_since(inicio) >= std::time::Duration::from_secs(5) =>
+                    {
+                        traza.warned = true;
+                        tracing::warn!(
+                            "la interfaz recibe mensajes de chat pero no ha renderizado ninguna \
+                             lista en 5 s: el fallo esta en el estado o el render de React, no en \
+                             la cadena de eventos"
+                        );
+                    }
+                    Some(_) => {}
+                }
             }
         }
         if let Some(len) = rendered_len {
@@ -726,6 +900,58 @@ impl AppState {
     }
 }
 
+/// Progreso de la sesion que vive en la fila de `streams` y no en una tabla de
+/// eventos: pico de espectadores y total de likes.
+///
+/// Existe para no inundar al escritor: los viewers y los likes llegan en rafagas
+/// y cada uno seria un `UPDATE`. La ventana es la **misma politica** que el
+/// coalescing de viewers del proveedor (1/s), y aqui ademas el pico se acumula
+/// con `max` en lugar de quedarse con el ultimo valor, de modo que agrupar no
+/// puede perder el pico. El ultimo volcado del dia es el del cierre de sesion.
+#[derive(Debug, Default)]
+pub(crate) struct SessionProgress {
+    /// Mayor numero de espectadores visto desde el ultimo volcado.
+    pending_peak: Option<i64>,
+    /// Ultimo total absoluto de likes (es monotono, asi que el ultimo es el
+    /// mayor).
+    pending_likes: Option<i64>,
+    /// Cuando se volco por ultima vez.
+    last_flush: Option<Instant>,
+}
+
+impl SessionProgress {
+    /// Ventana minima entre volcados.
+    const WINDOW: Duration = Duration::from_secs(1);
+
+    fn observe_viewers(&mut self, current: i64) {
+        self.pending_peak = Some(self.pending_peak.map_or(current, |pico| pico.max(current)));
+    }
+
+    fn observe_likes(&mut self, total: i64) {
+        self.pending_likes = Some(total);
+    }
+
+    /// Si toca volcar (ventana cumplida y algo pendiente). Marca el volcado.
+    fn due(&mut self, now: Instant) -> bool {
+        if self.pending_peak.is_none() && self.pending_likes.is_none() {
+            return false;
+        }
+        let toca = self
+            .last_flush
+            .map(|previo| now.duration_since(previo) >= Self::WINDOW)
+            .unwrap_or(true);
+        if toca {
+            self.last_flush = Some(now);
+        }
+        toca
+    }
+
+    /// Toma lo pendiente y lo deja vacio.
+    fn take(&mut self) -> (Option<i64>, Option<i64>) {
+        (self.pending_peak.take(), self.pending_likes.take())
+    }
+}
+
 /// Traza del chat desde el bus hasta la pantalla.
 ///
 /// Distingue los dos ultimos eslabones, que no se pueden comprobar desde Rust:
@@ -743,6 +969,10 @@ pub struct UiChatTrace {
     pub rendered_len: u64,
     /// Ultima medida del DOM enviada por la interfaz (quien desplaza la lista).
     pub last_dom: String,
+    /// Cuando llego el primer comentario, para no avisar durante la rafaga
+    /// inicial (no se serializa).
+    #[serde(skip)]
+    pub first_received: Option<std::time::Instant>,
     /// Ya se aviso de una brecha entre recibidos y pintados (no se serializa).
     #[serde(skip)]
     pub warned: bool,
@@ -838,6 +1068,7 @@ mod tests {
                 EventKind::ChatMessage {
                     user: user.clone(),
                     content: format!("mensaje {seq}"),
+                    emote_count: 0,
                 },
             );
             state.on_event(&event);
@@ -873,11 +1104,9 @@ mod tests {
             *guard = state.simulated.clone() as Arc<dyn TikTokProvider>;
         }
         state.simulated.set_interval(std::time::Duration::from_millis(5));
-        if let Ok(mut guard) = state.handle.write() {
-            *guard = "prueba".into();
-        }
+        // Se conecta por el camino de la aplicacion: `AppState::connect` es el
+        // que recuerda el handle que acaba en `streams.handle`.
         state
-            .simulated
             .connect("prueba")
             .await
             .expect("arranca el simulador");
@@ -922,12 +1151,132 @@ mod tests {
         );
         assert!(database.count("gift_events").unwrap() > 0, "y los regalos");
         assert_eq!(database.count("streams").unwrap(), 1, "una sola sesion");
+        // El handle real del usuario conectado, no una cadena vacia.
+        assert_eq!(
+            database
+                .query_string("SELECT handle FROM streams", 0)
+                .unwrap()
+                .as_deref(),
+            Some("prueba"),
+            "la sesion debe guardar a que usuario se conecto"
+        );
 
         // La sesion queda cerrada, no interrumpida: el cierre fue ordenado.
         let abiertas = database
             .query_i64("SELECT COUNT(*) FROM streams WHERE ended_at IS NULL", 0)
             .unwrap();
         assert_eq!(abiertas, Some(0));
+
+        drop(database);
+        cleanup(&path);
+    }
+
+    /// El progreso de sesion se agrupa por ventana, acumula el pico y nunca
+    /// escribe dos veces lo mismo.
+    #[test]
+    fn el_progreso_de_sesion_se_agrupa_y_conserva_el_pico() {
+        let mut progress = SessionProgress::default();
+        let t0 = Instant::now();
+
+        // Sin nada pendiente no hay volcado, aunque haya pasado la ventana.
+        assert!(!progress.due(t0));
+        assert_eq!(progress.take(), (None, None));
+
+        // Varios viewers seguidos: el primero vence la ventana, los demas se
+        // agrupan y el pico se queda con el mayor (los viewers bajan).
+        progress.observe_viewers(120);
+        assert!(progress.due(t0), "el primer volcado no espera");
+        assert_eq!(progress.take(), (Some(120), None));
+
+        progress.observe_viewers(300);
+        progress.observe_viewers(90);
+        progress.observe_likes(1_000);
+        assert!(
+            !progress.due(t0 + Duration::from_millis(500)),
+            "dentro de la ventana no se vuelca"
+        );
+        assert!(
+            progress.due(t0 + SessionProgress::WINDOW),
+            "cumplida la ventana, si"
+        );
+        assert_eq!(
+            progress.take(),
+            (Some(300), Some(1_000)),
+            "se queda el pico, no el ultimo valor"
+        );
+        assert_eq!(progress.take(), (None, None), "tomar vacia lo pendiente");
+    }
+
+    /// Al cerrar la sesion, lo que quedo pendiente se escribe y llega a la fila
+    /// de `streams` que se esta cerrando.
+    #[test]
+    fn el_cierre_de_sesion_vuelca_el_progreso_pendiente() {
+        let path = temp_db_path("progreso");
+        let state = AppState::open(path.clone(), 0).expect("estado");
+        state.on_event(&Event::new(
+            1,
+            "sala".into(),
+            Some("sys-1".into()),
+            EventKind::StreamConnected {
+                room_id: "sala".into(),
+                title: String::new(),
+            },
+        ));
+        // Dos viewers separados por menos de la ventana: el segundo no se
+        // escribe hasta el cierre.
+        state.on_event(&Event::new(
+            2,
+            "sala".into(),
+            None,
+            EventKind::ViewerUpdated {
+                current: 100,
+                cumulative: 900,
+            },
+        ));
+        state.on_event(&Event::new(
+            3,
+            "sala".into(),
+            None,
+            EventKind::ViewerUpdated {
+                current: 250,
+                cumulative: 1_100,
+            },
+        ));
+        state.on_event(&Event::new(
+            4,
+            "sala".into(),
+            None,
+            EventKind::LikeUpdated {
+                user: None,
+                count: 5,
+                total: 4_000,
+            },
+        ));
+        state.on_event(&Event::new(
+            5,
+            "sala".into(),
+            Some("sys-5".into()),
+            EventKind::StreamDisconnected {
+                reason: "fin de la prueba".into(),
+            },
+        ));
+
+        state.shutdown();
+        let database = Database::open(&path).expect("reabriendo la base");
+        assert_eq!(
+            database
+                .query_i64("SELECT peak_viewers FROM streams", 0)
+                .unwrap(),
+            Some(250),
+            "el pico de la sesion no se pierde al cerrar"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT like_total FROM streams", 0)
+                .unwrap(),
+            Some(4_000),
+            "y el total de likes tampoco"
+        );
 
         drop(database);
         cleanup(&path);

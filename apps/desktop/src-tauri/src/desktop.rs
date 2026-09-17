@@ -193,11 +193,8 @@ async fn connect(state: State<'_, Arc<AppState>>, handle: String) -> Result<Snap
     if handle.trim().is_empty() {
         return Err("el usuario no puede estar vacío".into());
     }
-    if let Ok(mut guard) = state.handle.write() {
-        *guard = handle.trim().trim_start_matches('@').to_string();
-    }
-    let provider = state.current_provider();
-    provider.connect(&handle).await.map_err(|e| e.to_string())?;
+    // El handle lo guarda el motor: es el que acaba en `streams.handle`.
+    state.connect(&handle).await.map_err(|e| e.to_string())?;
     Ok(state.snapshot())
 }
 
@@ -207,21 +204,10 @@ async fn start_simulation(
     handle: Option<String>,
 ) -> Result<Snapshot, String> {
     let state = state.inner().clone();
-    // Se detiene el proveedor activo antes de cambiar: nunca dos a la vez
-    // (consumirian la misma cuota de firma).
-    let active = state.current_provider();
-    active.disconnect().await;
-
-    if let Ok(mut guard) = state.provider.write() {
-        *guard = state.simulated.clone() as Arc<dyn TikTokProvider>;
-    }
     let handle = handle.unwrap_or_else(|| "simulado".into());
-    if let Ok(mut guard) = state.handle.write() {
-        *guard = handle.clone();
-    }
+    // Elegir proveedor y abrir sesion vive en el motor (y guarda el handle).
     state
-        .simulated
-        .connect(&handle)
+        .start_simulation(&handle)
         .await
         .map_err(|e| e.to_string())?;
     Ok(state.snapshot())
@@ -340,9 +326,11 @@ fn launch(instance_port: u16) {
                             if let Ok(mut guard) = state.provider.write() {
                                 *guard = state.simulated.clone() as Arc<dyn TikTokProvider>;
                             }
-                            state.simulated.connect("simulado").await
+                            state.connect("simulado").await
                         } else {
-                            state.native.connect(&auto).await
+                            // `AppState::connect` y no el proveedor a pelo: es lo
+                            // que guarda el handle en la sesion.
+                            state.connect(&auto).await
                         };
                         match result {
                             Ok(()) => tracing::info!(proveedor = %auto, "arranque automatico"),

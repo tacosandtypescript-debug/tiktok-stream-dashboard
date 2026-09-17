@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
 /// Version de esquema actual. Subirla obliga a anadir la migracion.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Filas por transaccion. Mas grande = menos I/O, mas memoria en vuelo.
 const BATCH_SIZE: usize = 200;
@@ -122,6 +122,20 @@ const MIGRATIONS: &[(u32, &str)] = &[
         ON social_events(source_id) WHERE source_id IS NOT NULL;
     "#,
     ),
+    (
+        3,
+        r#"
+    -- El icono del regalo se pinta en la interfaz (`GiftEventView.image_url`) y
+    -- sin esta columna se perdia al reabrir la aplicacion: la lista se
+    -- reconstruia desde la base y salia sin imagen.
+    --
+    -- `ALTER TABLE ADD COLUMN` no admite `IF NOT EXISTS` en SQLite; la
+    -- idempotencia la garantiza el registro de `schema_migrations`, que solo
+    -- aplica esta migracion una vez y dentro de una transaccion (si fallara a
+    -- medias, no quedaria registrada).
+    ALTER TABLE gift_events ADD COLUMN image_url TEXT NOT NULL DEFAULT '';
+    "#,
+    ),
 ];
 
 /// Directorio de datos de la aplicacion.
@@ -192,6 +206,9 @@ pub enum WriteJob {
         user_id: String,
         gift_id: String,
         gift_name: String,
+        /// Icono del regalo: sin el, la lista de regalos se reconstruia sin
+        /// imagen al reabrir la aplicacion.
+        image_url: String,
         diamond_count: i32,
         repeat_count: i32,
         is_final: bool,
@@ -203,6 +220,31 @@ pub enum WriteJob {
         committed_units: i64,
         /// Diamantes que se contabilizan en la sesion.
         committed_diamonds: i64,
+    },
+    /// Racha que TikTok dejo abierta y se liquida al cerrar la sesion.
+    ///
+    /// No se inventa una fila de regalo falsa en `gift_events`: se marca como
+    /// cerrada la ultima fila **real** de esa racha (asi el historico no muestra
+    /// un streak colgando) y se suman sus unidades y diamantes a la sesion con
+    /// la misma sentencia que un cierre normal.
+    GiftSettlement {
+        stream_id: String,
+        /// Identifica las filas de la racha en `gift_events`.
+        group_id: String,
+        units: i64,
+        diamonds: i64,
+    },
+    /// Pico de espectadores y total de likes de la sesion.
+    ///
+    /// Van en una sola orden y no en dos: los dos numeros viven en la fila de
+    /// `streams` y el coalescing de `app.rs` los agrupa en la misma ventana, asi
+    /// que una unica sentencia por volcado es lo que de verdad ocurre.
+    StreamProgress {
+        stream_id: String,
+        /// Pico visto desde el ultimo volcado, o `None` si no hubo viewers.
+        peak_viewers: Option<i64>,
+        /// Ultimo total absoluto de likes, o `None` si no hubo likes.
+        like_total: Option<i64>,
     },
     Follow {
         stream_id: String,
@@ -322,9 +364,9 @@ impl Database {
             )?;
             let mut gift = tx.prepare_cached(
                 "INSERT OR IGNORE INTO gift_events
-                   (stream_id, user_id, gift_id, gift_name, diamond_count, repeat_count,
-                    is_final, group_id, timestamp_ms, source_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                   (stream_id, user_id, gift_id, gift_name, image_url, diamond_count,
+                    repeat_count, is_final, group_id, timestamp_ms, source_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             let mut follow = tx.prepare_cached(
                 "INSERT OR IGNORE INTO follows (stream_id, user_id, timestamp_ms, source_id)
@@ -355,6 +397,23 @@ impl Database {
                 "UPDATE streams SET gift_count = gift_count + ?2,
                                     diamond_total = diamond_total + ?3
                  WHERE id = ?1",
+            )?;
+            // Cierra el historico de una racha abandonada: la ultima fila real
+            // pasa a ser la que la cierra. Se busca por `MAX(id)` porque el
+            // orden de llegada es el unico orden disponible.
+            let mut close_streak = tx.prepare_cached(
+                "UPDATE gift_events SET is_final = 1
+                  WHERE id = (SELECT MAX(id) FROM gift_events
+                               WHERE stream_id = ?1 AND group_id = ?2 AND is_final = 0)",
+            )?;
+            // `MAX` con dos argumentos es una funcion escalar de SQLite: deja el
+            // pico anterior si el nuevo es menor. `COALESCE` respeta la columna
+            // que este volcado no toca.
+            let mut stream_progress = tx.prepare_cached(
+                "UPDATE streams
+                    SET peak_viewers = MAX(peak_viewers, COALESCE(?2, peak_viewers)),
+                        like_total    = COALESCE(?3, like_total)
+                  WHERE id = ?1",
             )?;
 
             for job in jobs {
@@ -396,6 +455,7 @@ impl Database {
                         user_id,
                         gift_id,
                         gift_name,
+                        image_url,
                         diamond_count,
                         repeat_count,
                         is_final,
@@ -411,6 +471,7 @@ impl Database {
                             user_id,
                             gift_id,
                             gift_name,
+                            image_url,
                             diamond_count,
                             repeat_count,
                             is_final,
@@ -427,6 +488,25 @@ impl Database {
                                 committed_diamonds
                             ])?;
                         }
+                    }
+                    WriteJob::GiftSettlement {
+                        stream_id,
+                        group_id,
+                        units,
+                        diamonds,
+                    } => {
+                        written += close_streak.execute(params![stream_id, group_id])?;
+                        if *units > 0 || *diamonds > 0 {
+                            written += bump_gift.execute(params![stream_id, units, diamonds])?;
+                        }
+                    }
+                    WriteJob::StreamProgress {
+                        stream_id,
+                        peak_viewers,
+                        like_total,
+                    } => {
+                        written +=
+                            stream_progress.execute(params![stream_id, peak_viewers, like_total])?;
                     }
                     WriteJob::Follow {
                         stream_id,
@@ -761,6 +841,7 @@ mod tests {
                     user_id: "u1".into(),
                     gift_id: "5655".into(),
                     gift_name: "Rose".into(),
+                    image_url: "https://cdn.example/rose.png".into(),
                     diamond_count: 1,
                     repeat_count: 1,
                     is_final: false,
@@ -776,6 +857,7 @@ mod tests {
                     user_id: "u1".into(),
                     gift_id: "5655".into(),
                     gift_name: "Rose".into(),
+                    image_url: "https://cdn.example/rose.png".into(),
                     diamond_count: 1,
                     repeat_count: 3,
                     is_final: true,
@@ -812,6 +894,246 @@ mod tests {
             .query_i64("SELECT COUNT(*) FROM gift_events WHERE is_final = 1", 0)
             .unwrap();
         assert_eq!(finales, Some(1), "solo el ultimo evento cierra el streak");
+
+        // El icono se guarda: sin el, la lista de regalos salia sin imagen al
+        // reabrir la aplicacion (migracion v3).
+        assert_eq!(
+            database
+                .query_string("SELECT image_url FROM gift_events ORDER BY id LIMIT 1", 0)
+                .unwrap()
+                .as_deref(),
+            Some("https://cdn.example/rose.png"),
+            "el icono del regalo debe persistirse"
+        );
+    }
+
+    /// La migracion v3 anade `image_url` a una base que ya existia con la v2.
+    #[test]
+    fn la_migracion_v3_anade_el_icono_del_regalo() {
+        let database = open();
+        assert_eq!(database.schema_version(), 3, "el esquema llega a la v3");
+        // La columna existe y su valor por defecto es vacio (no NULL): las filas
+        // antiguas siguen siendo legibles.
+        let columnas = database
+            .query_i64(
+                "SELECT COUNT(*) FROM pragma_table_info('gift_events') WHERE name = 'image_url'",
+                0,
+            )
+            .unwrap();
+        assert_eq!(columnas, Some(1), "gift_events debe tener image_url");
+    }
+
+    /// El caso real de la migracion: una instalacion que ya tenia datos en la v2
+    /// se actualiza sin perder las filas de regalos que ya estaban guardadas.
+    #[test]
+    fn una_base_de_la_v2_se_actualiza_a_la_v3_sin_perder_regalos() {
+        let database = Database::open_in_memory().expect("base en memoria");
+        // Se aplica el esquema hasta la v2, como una instalacion anterior.
+        database
+            .conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (
+                     version    INTEGER PRIMARY KEY,
+                     applied_at INTEGER NOT NULL
+                 );",
+            )
+            .unwrap();
+        for (version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version <= 2) {
+            database.conn.execute_batch(sql).unwrap();
+            database
+                .conn
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    params![version],
+                )
+                .unwrap();
+        }
+        database
+            .conn
+            .execute(
+                "INSERT INTO streams (id, handle, room_id, started_at) VALUES ('s1', 'u', '1', 1)",
+                [],
+            )
+            .unwrap();
+        database
+            .conn
+            .execute(
+                "INSERT INTO gift_events (stream_id, user_id, gift_id, diamond_count, timestamp_ms)
+                 VALUES ('s1', 'u', '5655', 1, 10)",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(database.migrate().expect("migrando"), 3);
+        assert_eq!(database.count("gift_events").unwrap(), 1, "no se pierde la fila");
+        assert_eq!(
+            database
+                .query_string("SELECT image_url FROM gift_events", 0)
+                .unwrap()
+                .as_deref(),
+            Some(""),
+            "las filas anteriores quedan con el icono vacio, no nulas"
+        );
+        // Y aplicar la migracion otra vez no rompe nada.
+        assert_eq!(database.migrate().expect("segunda pasada"), 3);
+    }
+
+    /// El pico de espectadores se guarda con `MAX` y el total de likes con el
+    /// ultimo valor; un volcado que solo trae uno de los dos no pisa el otro.
+    #[test]
+    fn el_progreso_de_la_sesion_solo_avanza() {
+        let mut database = open();
+        database
+            .write_batch(&[WriteJob::StreamStarted {
+                stream_id: "s1".into(),
+                handle: "usuario".into(),
+                room_id: "123".into(),
+                title: String::new(),
+                started_at: 1,
+            }])
+            .expect("stream");
+
+        database
+            .write_batch(&[
+                WriteJob::StreamProgress {
+                    stream_id: "s1".into(),
+                    peak_viewers: Some(100),
+                    like_total: Some(500),
+                },
+                // Los espectadores bajan: el pico no puede bajar con ellos.
+                WriteJob::StreamProgress {
+                    stream_id: "s1".into(),
+                    peak_viewers: Some(80),
+                    like_total: Some(900),
+                },
+                // Un volcado solo de viewers no toca los likes.
+                WriteJob::StreamProgress {
+                    stream_id: "s1".into(),
+                    peak_viewers: Some(150),
+                    like_total: None,
+                },
+                // Y uno solo de likes no toca los viewers.
+                WriteJob::StreamProgress {
+                    stream_id: "s1".into(),
+                    peak_viewers: None,
+                    like_total: Some(1200),
+                },
+            ])
+            .expect("progreso");
+
+        assert_eq!(
+            database
+                .query_i64("SELECT peak_viewers FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(150),
+            "el pico es el mayor visto, no el ultimo"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT like_total FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(1200),
+            "los likes son el total absoluto del ultimo volcado"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT comment_count FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(0),
+            "el progreso no toca otros contadores"
+        );
+    }
+
+    /// Al cerrar la sesion se liquida la racha que TikTok dejo abierta: se marca
+    /// como cerrada su ultima fila real y se suman sus diamantes a la sesion.
+    #[test]
+    fn la_liquidacion_de_una_racha_abierta_cierra_la_fila_y_suma() {
+        let mut database = open();
+        database
+            .write_batch(&[WriteJob::StreamStarted {
+                stream_id: "s1".into(),
+                handle: "usuario".into(),
+                room_id: "123".into(),
+                title: String::new(),
+                started_at: 1,
+            }])
+            .expect("stream");
+        // Dos progresos de una racha que nunca recibe `repeat_end`.
+        for (source, timestamp) in [("m1", 10), ("m2", 11)] {
+            database
+                .write_batch(&[WriteJob::Gift {
+                    stream_id: "s1".into(),
+                    user_id: "u1".into(),
+                    gift_id: "5655".into(),
+                    gift_name: "Rose".into(),
+                    image_url: String::new(),
+                    diamond_count: 1,
+                    repeat_count: 1,
+                    is_final: false,
+                    group_id: "g1".into(),
+                    timestamp_ms: timestamp,
+                    source_id: Some(source.into()),
+                    committed_units: 0,
+                    committed_diamonds: 0,
+                }])
+                .expect("regalo");
+        }
+        assert_eq!(
+            database
+                .query_i64("SELECT diamond_total FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(0),
+            "mientras la racha sigue abierta no se contabiliza nada"
+        );
+
+        database
+            .write_batch(&[WriteJob::GiftSettlement {
+                stream_id: "s1".into(),
+                group_id: "g1".into(),
+                units: 2,
+                diamonds: 2,
+            }])
+            .expect("liquidacion");
+
+        assert_eq!(
+            database
+                .query_i64("SELECT diamond_total FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(2),
+            "los diamantes de la racha abandonada no se pierden"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT gift_count FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(2),
+            "y las unidades tampoco"
+        );
+        assert_eq!(
+            database
+                .query_i64(
+                    "SELECT COUNT(*) FROM gift_events WHERE group_id = 'g1' AND is_final = 1",
+                    0
+                )
+                .unwrap(),
+            Some(1),
+            "solo la ultima fila de la racha queda marcada como cierre"
+        );
+        assert_eq!(
+            database
+                .query_i64(
+                    "SELECT is_final FROM gift_events WHERE group_id = 'g1' ORDER BY id DESC LIMIT 1",
+                    0
+                )
+                .unwrap(),
+            Some(1),
+            "y es la mas reciente"
+        );
+        assert_eq!(
+            database.count("gift_events").unwrap(),
+            2,
+            "no se inventa una fila de regalo para ajustar"
+        );
     }
 
     #[test]
