@@ -24,6 +24,8 @@ export const t = {
     button: "Conectar",
     disconnect: "Desconectar",
     connecting: "Conectando…",
+    activeHint:
+      "Ya hay una sesión en curso. Desconecta antes de conectar a otro usuario: el motor ya está reconectando solo si hace falta.",
   },
   session: {
     title: "Sesión",
@@ -99,6 +101,11 @@ export const t = {
     resume: "Reanudar",
     volume: "Volumen",
     rate: "Velocidad",
+    sources: "Qué se lee",
+    sourcesHint:
+      "Además del chat. Un regalo se lee una sola vez, al cerrar su racha, para no repetir la misma ráfaga.",
+    readGifts: "Regalos",
+    readFollows: "Seguidores nuevos",
     voiceEs: "Voz en español",
     voiceEn: "Voz en inglés",
     sayAuthor: "Decir quién lo escribió",

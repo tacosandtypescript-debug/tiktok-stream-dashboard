@@ -209,6 +209,10 @@ export interface TtsSettings {
   volume: number;
   rate: string;
   pitch: string;
+  /** Leer en voz alta los regalos que cierran su racha. */
+  read_gifts: boolean;
+  /** Leer los follows (apagado por defecto: son muchos). */
+  read_follows: boolean;
   queue_capacity: number;
 }
 
@@ -262,9 +266,12 @@ export const api = {
     enabled?: boolean;
     volume?: number;
     rate?: string;
+    pitch?: string;
     say_author?: boolean;
     voice_es?: string;
     voice_en?: string;
+    read_gifts?: boolean;
+    read_follows?: boolean;
   }) => invoke<void>("tts_update", { patch }),
   ttsAction: (action: string, value?: string) =>
     invoke<void>("tts_action", { action, value: value ?? null }),

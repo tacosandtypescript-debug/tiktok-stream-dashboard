@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
@@ -42,8 +42,6 @@ pub struct TtsConfig {
     pub cache_dir: PathBuf,
     /// Timeout de una sintesis.
     pub timeout: Duration,
-    pub rate: String,
-    pub pitch: String,
     /// Tope de la cache en disco y antiguedad maxima.
     pub cache_max_bytes: u64,
     pub cache_max_age: Duration,
@@ -56,19 +54,26 @@ impl Default for TtsConfig {
             script: PathBuf::from("services/tts-provider/src/main.py"),
             cache_dir: crate::database::data_dir().join("cache").join("tts"),
             timeout: Duration::from_secs(20),
-            rate: "+0%".into(),
-            pitch: "+0Hz".into(),
             cache_max_bytes: 200 * 1024 * 1024,
             cache_max_age: Duration::from_secs(7 * 24 * 60 * 60),
         }
     }
 }
 
+/// Una frase a sintetizar.
+///
+/// La velocidad y el tono viajan **con la peticion**, no en la configuracion del
+/// proveedor: antes vivian en `TtsConfig` y el control de velocidad de la
+/// interfaz solo cambiaba el ajuste del gestor, de modo que la sintesis seguia
+/// saliendo a `+0%` (ver docs/decisions.md D12). Con un unico dueño del dato
+/// —los ajustes del gestor— ese desajuste no puede repetirse.
 #[derive(Debug, Clone)]
 pub struct TtsRequest {
     pub id: u64,
     pub text: String,
     pub voice: String,
+    pub rate: String,
+    pub pitch: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,6 +91,17 @@ pub trait TtsProvider: Send + Sync {
     fn health<'a>(&'a self) -> BoxFuture<'a, bool>;
     fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>>;
     fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()>;
+    /// Poda la cache en disco del proveedor. Devuelve cuantos ficheros borro.
+    ///
+    /// Quien decide **cuando** podar es el gestor (es el unico que sabe cuantas
+    /// frases se han leido y por tanto cuando toca); los **topes** son del
+    /// proveedor, que es el dueno de la carpeta y de su configuracion. Por
+    /// defecto no hace nada: un proveedor sin cache en disco no tiene nada que
+    /// podar. Sin esto, la cache solo se podaba desde el CLI (`--tts-test`) y en
+    /// la aplicacion crecia sin limite.
+    fn prune_cache(&self) -> usize {
+        0
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +159,32 @@ pub struct EdgeTtsSidecar {
     cache_hits: AtomicU64,
 }
 
+/// Lee una linea del protocolo con **tope de longitud**.
+///
+/// El tope se aplica **al leer** (`take`), no despues de tener la linea entera:
+/// si no, un sidecar roto podria hacer crecer el buffer hasta agotar la memoria
+/// antes de que nadie comprobase su tamano, que es justo lo que el tope pretende
+/// evitar. Va aparte de `request` para poder probarlo sin arrancar el sidecar.
+async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    // Un byte de mas deja sitio al `\n` de una linea que llega justo al tope.
+    let limit = MAX_LINE_BYTES as u64 + 1;
+    let read = reader
+        .take(limit)
+        .read_until(b'\n', &mut buffer)
+        .await
+        .context("leyendo del sidecar")?;
+    if read == 0 {
+        bail!("el sidecar cerro la salida");
+    }
+    // Sin el `\n` final y ya en el tope, la linea venia cortada: es demasiado
+    // larga y se rechaza con un motivo claro.
+    if !buffer.ends_with(b"\n") && buffer.len() > MAX_LINE_BYTES {
+        bail!("linea de protocolo demasiado larga (mas de {MAX_LINE_BYTES} bytes)");
+    }
+    Ok(buffer)
+}
+
 impl EdgeTtsSidecar {
     pub fn new(config: TtsConfig) -> Self {
         Self {
@@ -169,9 +211,10 @@ impl EdgeTtsSidecar {
     }
 
     /// Ruta en cache para una frase. La clave incluye voz, velocidad, tono y
-    /// texto: cambiar cualquiera de ellos produce otro fichero.
-    pub fn cache_path(&self, voice: &str, text: &str) -> PathBuf {
-        let key = cache_key(voice, &self.config.rate, &self.config.pitch, text);
+    /// texto: cambiar cualquiera de ellos produce otro fichero, asi que subir la
+    /// velocidad no reutiliza el audio viejo.
+    pub fn cache_path(&self, request: &TtsRequest) -> PathBuf {
+        let key = cache_key(&request.voice, &request.rate, &request.pitch, &request.text);
         self.config.cache_dir.join(format!("{key}.mp3"))
     }
 
@@ -261,18 +304,7 @@ impl EdgeTtsSidecar {
 
             // Se leen lineas hasta encontrar la respuesta de **esta** peticion.
             loop {
-                let mut buffer = Vec::new();
-                let read = sidecar
-                    .stdout
-                    .read_until(b'\n', &mut buffer)
-                    .await
-                    .context("leyendo del sidecar")?;
-                if read == 0 {
-                    bail!("el sidecar cerro la salida");
-                }
-                if buffer.len() > MAX_LINE_BYTES {
-                    bail!("linea de protocolo demasiado larga ({} bytes)", buffer.len());
-                }
+                let buffer = read_line(&mut sidecar.stdout).await?;
                 let text = String::from_utf8_lossy(&buffer);
                 let text = text.trim();
                 if text.is_empty() {
@@ -320,7 +352,7 @@ impl EdgeTtsSidecar {
 
     /// Sintetiza a un fichero, reutilizando la cache si la frase ya se dijo.
     pub async fn synthesize_to_file(&self, request: &TtsRequest) -> Result<TtsAudio> {
-        let path = self.cache_path(&request.voice, &request.text);
+        let path = self.cache_path(request);
         if let Ok(metadata) = std::fs::metadata(&path) {
             if metadata.len() > 0 {
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -339,8 +371,8 @@ impl EdgeTtsSidecar {
                 cmd: "synthesize",
                 text: Some(&request.text),
                 voice: Some(&request.voice),
-                rate: Some(&self.config.rate),
-                pitch: Some(&self.config.pitch),
+                rate: Some(&request.rate),
+                pitch: Some(&request.pitch),
                 out: Some(path.to_string_lossy().to_string()),
             })
             .await?;
@@ -427,6 +459,18 @@ impl TtsProvider for EdgeTtsSidecar {
 
     fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
         Box::pin(async move { self.stop().await })
+    }
+
+    fn prune_cache(&self) -> usize {
+        // La logica de poda vive en la funcion libre de este modulo: aqui solo se
+        // le pasan los topes y la carpeta de la configuracion, que es de quien es
+        // la cache.
+        self::prune_cache(
+            &self.config.cache_dir,
+            self.config.cache_max_bytes,
+            self.config.cache_max_age,
+            std::time::SystemTime::now(),
+        )
     }
 }
 
@@ -606,5 +650,71 @@ mod tests {
             serde_json::from_str(r#"{"ok": true, "voices": [{"name": "es-ES-ElviraNeural"}]}"#)
                 .unwrap();
         assert_eq!(voices.voices.unwrap().len(), 1);
+    }
+
+    /// F3: el gestor decide **cuando** podar, pero la poda en si tiene que usar
+    /// la carpeta y los topes del proveedor. Antes esta llamada no existia en la
+    /// interfaz del proveedor, asi que la cache solo la podaba el CLI.
+    #[test]
+    fn el_proveedor_poda_su_propia_carpeta_con_sus_topes() {
+        let dir = std::env::temp_dir().join(format!("ttdash-provider-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for index in 1..=3 {
+            std::fs::write(dir.join(format!("{index}.mp3")), vec![0u8; 100]).unwrap();
+        }
+        // Los ficheros son anteriores a la poda: si no, su fecha podria quedar
+        // en el mismo instante que `now` y no parecerian caducados.
+        std::thread::sleep(Duration::from_millis(5));
+
+        let mut config = TtsConfig::default();
+        config.cache_dir = dir.clone();
+        // Todo caduca: es la forma de comprobar el cableado sin esperar 7 dias.
+        config.cache_max_age = Duration::from_secs(0);
+        let provider = EdgeTtsSidecar::new(config);
+
+        assert_eq!(provider.prune_cache(), 3, "deberia podar su propia carpeta");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F6: el tope de linea se aplica **al leer**. Sin `take`, un sidecar roto
+    /// haria crecer el buffer sin limite antes de que nadie mirase su tamano.
+    #[tokio::test]
+    async fn una_linea_demasiado_larga_se_rechaza_sin_leerla_entera() {
+        // Una linea enorme y sin `\n` no puede llegar a memoria completa: con el
+        // tope aplicado **al leer**, el lector ni siquiera se agota. Si el tope se
+        // comprobase despues (con la linea entera ya leida), los 256 KB habrian
+        // pasado por memoria y el lector estaria vacio.
+        let enorme = vec![b'x'; MAX_LINE_BYTES * 4];
+        let mut lector = BufReader::new(&enorme[..]);
+        let error = read_line(&mut lector)
+            .await
+            .expect_err("deberia rechazar la linea");
+        assert!(
+            error.to_string().contains("demasiado larga"),
+            "motivo inesperado: {error}"
+        );
+        assert!(
+            !lector.into_inner().is_empty(),
+            "el tope se aplica al leer, no despues: no puede tragarsela entera"
+        );
+
+        // Una linea normal se acepta tal cual.
+        let mut lector = BufReader::new(&b"{\"ok\": true}\n"[..]);
+        assert_eq!(read_line(&mut lector).await.unwrap(), b"{\"ok\": true}\n");
+
+        // Y una que llega justo al tope tambien: el margen de un byte es para su
+        // `\n`, no para colar lineas mas largas.
+        let justa = [vec![b'y'; MAX_LINE_BYTES], vec![b'\n']].concat();
+        let mut lector = BufReader::new(&justa[..]);
+        let leida = read_line(&mut lector).await.unwrap();
+        assert_eq!(leida.len(), MAX_LINE_BYTES + 1);
+        assert!(leida.ends_with(b"\n"));
+
+        // Un sidecar que cierra la salida se detecta (no se confunde con vacio).
+        let mut lector = BufReader::new(&b""[..]);
+        let error = read_line(&mut lector).await.expect_err("sin salida");
+        assert!(error.to_string().contains("cerro la salida"), "{error}");
     }
 }

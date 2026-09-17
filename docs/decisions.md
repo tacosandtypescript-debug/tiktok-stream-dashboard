@@ -205,3 +205,50 @@ Lo que se registra ahora de serie: `sobre firmado recibido` (con `push_server`) 
 
 **Regla:** ante «no se actualiza», medir primero **cuántos eventos entran** (`ws_frames`, `chat_messages`) y **cuántos se pintan** (`ui_chat`). Un log sin eventos no se arregla en el frontend.
 
+## D12 · El TTS: velocidad real, avisos de regalo/follow y un solo dueño del dato (2026-09-17)
+
+**Síntoma:** el selector de velocidad de la página de voz no hacía nada. El ajuste se guardaba (`TtsSettings.rate`), la interfaz lo mostraba, y la síntesis seguía saliendo a `+0%`.
+
+**Causa:** el ritmo y el tono vivían **en dos sitios**: `TtsSettings` (lo que movía la interfaz) y `TtsConfig` (lo que usaba el proveedor al construir la petición y la clave de caché). La interfaz tocaba el primero; el audio se generaba con el segundo, que era constante desde el arranque. Dos dueños del mismo dato es la causa, no el síntoma.
+
+**Arreglo:** `rate`/`pitch` viajan **dentro de `TtsRequest`** y se leen en `dispatch` en el momento de sintetizar (así un cambio afecta a lo que suene después, no a lo que ya está en cola); se eliminan de `TtsConfig`. La clave de caché ya los incluía, de modo que ahora un cambio de velocidad no reutiliza el audio viejo. `--tts-test` acepta `--rate`/`--pitch` para poder comprobarlo de punta a punta.
+
+**Avisos que no son chat (regalos y follows):** el único punto de decisión es `TtsManager::wants`, y ahora tiene sus brazos; las plantillas viven en `tts::gift_line`/`follow_line` (junto a `chat_line`). Un regalo se lee **una sola vez, al cerrar su racha** (`gift.commits()`, la misma regla que la contabilidad de `feed.rs`) y su prioridad sale de los diamantes (`priority::for_gift`). Los avisos **no** pasan por el pipeline de contenido —el cooldown de 20 s o el mínimo de caracteres los descartarían casi siempre— sino por `Filters::admit_announcement`, que solo gasta el cupo global. Dos interruptores nuevos (`read_gifts`, `read_follows`) deciden si se leen; los follows vienen apagados porque una sala media genera decenas por hora.
+
+Añadir un aviso nuevo (suscripción, share, meta de OBS) es un brazo más en `wants` y una plantilla: ni la cola, ni los filtros, ni el proveedor se tocan.
+
+## D13 · Estados de conexión: el botón deja de mentir y la foto no pisa el directo (2026-09-17)
+
+**Tres fallos distintos, con el mismo síntoma («no refleja el estado real»):**
+
+1. **El botón Conectar estaba activo en todos los estados.** En `reconnecting` el motor ya estaba reconectando con backoff; pulsar Conectar mataba el supervisor, reiniciaba el backoff y **gastaba una firma de la cuota** antes de tiempo. Ahora se deshabilita mientras hay sesión en curso (`starting`, `connecting`, `connected`, `reconnecting`, `waiting_for_live`) con un `title` que explica por qué, y se rotula «Conectando…» también durante `starting`/`connecting` (antes solo con `busy`, así que pulsar Desconectar ponía «Conectando…» en el otro botón).
+2. **El motivo del estado era invisible.** La cabecera mostraba `@handle` **o** el detalle: en cuanto `connect` fijaba el handle, el motivo de un error o de una espera solo se veía como tooltip. Ahora se muestran los dos (`@handle · motivo`).
+3. **El error terminal se pisaba con `Stopped`.** Tras «cuota o firma inservible; detenido para no agotar el día» el supervisor hacía `break` y el `set(Stopped, None)` final borraba el motivo: la interfaz decía «Desconectado», idéntico a no haber conectado nunca, y el usuario volvía a pulsar Conectar —justo lo que ese freno intenta evitar—. Ahora el motivo terminal se conserva.
+
+**Además, dos fugas de datos en la interfaz:**
+
+- **Carrera snapshot ↔ eventos:** la foto del motor se pedía **antes** de registrar el listener y `applySnapshot` reemplazaba las listas. Los eventos publicados mientras el invoke resolvía no llegaban nunca (Tauri no los reproduce) y los ya pintados se descartaban con una foto más vieja: mensajes que desaparecían y reaparecían al pulsar Conectar. Ahora se escucha **primero** y la foto se **fusiona** por `seq` (se conserva lo más nuevo que la foto).
+- **Desconectar no cerraba la sesión:** el proveedor nativo no publicaba `stream.disconnected` al cancelar (el supervisor sale por cancelación, no por caída), así que la fila de `streams` quedaba abierta y `mark_crashed_streams` la marcaba como interrumpida en el siguiente arranque. Ahora `disconnect` lo publica si había sesión.
+
+**Diagnóstico honesto:** la sonda del chat contaba como «pintado» cualquier render, aunque no hubiera lista montada, de modo que el aviso «recibe mensajes pero no renderiza» no podía dispararse nunca. Ahora solo cuenta si hay `ul.chat` en el DOM y el registro incluye la pestaña activa (`tab=…`), que es lo que permitió descubrir que el usuario estaba mirando otra página. La página Developer, además, tenía los contadores congelados desde el arranque (`api.metrics` no se usaba): ahora se sondea a 1 Hz **solo mientras esa pestaña está abierta**.
+
+## D14 · `repeat_count` es un incremento: los diamantes estaban a la mitad (2026-09-17)
+
+**Medido sobre los datos reales guardados**, en la sesión de `azoz._.mx2`:
+
+| | Valor |
+|---|---|
+| `streams.diamond_total` que escribió el motor | **4** |
+| Eventos de regalo guardados | 8 (4 rachas × 2 eventos) |
+| `repeat_count` de cada evento | **1** en todos, con `ultimo_valor = 1` |
+| Suma real de incrementos | **8** |
+| Rachas del histórico que nunca reciben `repeat_end` | **35 de 176** |
+
+`repeat_count` es lo que **suma ese mensaje** a la racha, no el acumulado. El código contaba solo el valor del evento que cierra (`commits()`), así que una racha de dos rosas aportaba 1 diamante en vez de 2: en esa sesión se contabilizaron 4 de 8. Y una racha que nunca recibe su cierre no aportaba **nada**.
+
+**Arreglo:** la contabilidad vive en un solo sitio, `GiftBoard` (feed.rs), que ahora acumula los incrementos por `group_id` en un mapa de rachas abiertas y los liquida cuando la racha cierra. Si el mismo usuario empieza otra racha, la anterior se liquida en ese momento en vez de perderse (cubre las 35 sin cierre por cambio de racha; las que se quedan abiertas al terminar el directo siguen pendientes de un cierre de sesión explícito). `GiftBoard::record` devuelve la aportación liquidada y `app.rs` escribe **ese** número en `gift_events.committed_*`: el mismo valor que se enseña es el que se guarda, sin una segunda suma en paralelo.
+
+`GiftEventView::total_diamonds` sigue siendo lo que aporta **la fila** (su incremento por el valor unitario), que es lo que tiene sentido en la lista de eventos.
+
+
+

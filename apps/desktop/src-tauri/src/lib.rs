@@ -46,9 +46,18 @@ pub fn run() {
 ///
 /// Es la comprobacion de que la cadena completa funciona en este equipo:
 /// interprete localizado, sidecar arrancado, protocolo JSONL, fichero MP3
-/// escrito y cache podada.
-pub fn tts_probe(text: &str, voice: Option<&str>) -> anyhow::Result<()> {
+/// escrito y cache podada. Acepta velocidad y tono para poder comprobar de punta
+/// a punta que el ajuste llega al sintetizador (no solo a la interfaz).
+pub fn tts_probe(
+    text: &str,
+    voice: Option<&str>,
+    rate: Option<&str>,
+    pitch: Option<&str>,
+) -> anyhow::Result<()> {
     telemetry::init()?;
+
+    let rate = rate.unwrap_or("+0%");
+    let pitch = pitch.unwrap_or("+0Hz");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -71,6 +80,8 @@ pub fn tts_probe(text: &str, voice: Option<&str>) -> anyhow::Result<()> {
                 id: 1,
                 text: text.to_string(),
                 voice: voice.clone(),
+                rate: rate.to_string(),
+                pitch: pitch.to_string(),
             },
         )
         .await
@@ -84,6 +95,8 @@ pub fn tts_probe(text: &str, voice: Option<&str>) -> anyhow::Result<()> {
                 id: 2,
                 text: text.to_string(),
                 voice: voice.clone(),
+                rate: rate.to_string(),
+                pitch: pitch.to_string(),
             },
         )
         .await?;

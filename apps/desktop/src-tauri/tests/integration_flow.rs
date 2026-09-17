@@ -366,9 +366,10 @@ fn un_streak_de_regalos_cuenta_unidades_y_aparece_entero_en_el_resumen() {
 
     estado.on_event(&conectar(1));
 
-    // Streak real de rosa (1 diamante): el progreso que envia TikTok es 1, 2 y 3,
-    // y solo el ultimo evento lleva `is_final`.
-    let progreso = [(2u64, 1, false), (3, 2, false), (4, 3, true)];
+    // Streak real de rosa (1 diamante): cada evento trae **su incremento** (1, 1
+    // y 1: asi lo envia TikTok, ver D14 en docs/decisions.md) y solo el ultimo
+    // lleva `is_final`.
+    let progreso = [(2u64, 1, false), (3, 1, false), (4, 1, true)];
     for (seq, cuantas, final_) in progreso {
         let evento = Event::new(
             seq,
@@ -416,9 +417,10 @@ fn un_streak_de_regalos_cuenta_unidades_y_aparece_entero_en_el_resumen() {
         .count();
     assert_eq!(en_feed, 4, "cada regalo aparece en la actividad");
 
-    // La contabilidad, en cambio, solo cuenta lo que **cierra** su aportacion:
-    // `repeat_count` es acumulativo, asi que sumar el progreso daria 1+2+3.
-    // La racha termina en 3: son 3 unidades, no 6.
+    // La contabilidad solo cuenta lo que **cierra** su aportacion, y la
+    // aportacion de una racha es la **suma de sus incrementos** (tres eventos de
+    // una rosa): 3 unidades, no 6. Antes se contaba solo el ultimo evento, que
+    // con incrementos de 1 daba la mitad.
     assert_eq!(snapshot.total_gifts, 4, "3 rosas + 1 TikTok");
     let rosas = snapshot
         .gifts_by_type
@@ -451,16 +453,17 @@ fn un_streak_de_regalos_cuenta_unidades_y_aparece_entero_en_el_resumen() {
     db.finalizar();
 }
 
-/// Una racha solo contabiliza cuando **cierra**, y `repeat_count` es acumulativo.
+/// Una racha contabiliza **solo al cerrar**, y su aportacion es la suma de los
+/// incrementos que ha ido trayendo cada evento.
 ///
 /// La evidencia esta en una grabacion real
-/// (`spikes/tiktok-rust-provider/live.jsonl`): un unico regalo produjo **dos**
-/// eventos con el mismo `group_id` y `repeat_count = 1`, uno con
-/// `repeat_end = 0` y otro final. Contar los dos duplicaria el regalo. Ademas,
-/// `PROTOCOL-SPEC.md` (§1929-1935) dice que `repeatCount` es un contador
-/// acumulado por mensaje ("an increment/per-message running count") que solo se
-/// suma **al cerrar la ronda**. Este test exige esa regla y que el total en
-/// memoria y el persistido usen el mismo criterio.
+/// (`spikes/tiktok-rust-provider/live.jsonl`) y en la base de datos de una
+/// sesion real: un regalo produce **dos** eventos con el mismo `group_id` y
+/// **ambos con `repeat_count = 1`**. Es decir, `repeat_count` es lo que suma ese
+/// mensaje a la racha, no el acumulado (docs/decisions.md D14). Contar solo el
+/// evento final daba la mitad de los diamantes: en la sesion medida, 4 en vez de
+/// 8. Este test exige la regla nueva y que el total en memoria y el persistido
+/// usen el mismo criterio.
 #[test]
 fn los_diamantes_de_un_streak_no_se_suman_ronda_a_ronda() {
     let db = DbTemp::nueva("flujo-diamantes");
@@ -469,7 +472,8 @@ fn los_diamantes_de_un_streak_no_se_suman_ronda_a_ronda() {
     let lucas = usuario("2", "Lucas");
 
     estado.on_event(&conectar(1));
-    for (seq, cuantas) in [(2u64, 1), (3, 2), (4, 3)] {
+    // Tres rosas, cada evento con su incremento (la forma real).
+    for (seq, cuantas) in [(2u64, 1), (3, 1), (4, 1)] {
         let final_ = seq == 4;
         estado.on_event(&Event::new(
             seq,
@@ -493,10 +497,10 @@ fn los_diamantes_de_un_streak_no_se_suman_ronda_a_ronda() {
     ));
 
     let snapshot = estado.snapshot();
-    // Carlos mando 3 rosas (la ronda termina en 3) y Lucas 1 TikTok de 5.
+    // Carlos mando 3 rosas (un incremento por evento) y Lucas 1 TikTok de 5.
     assert_eq!(
         snapshot.total_diamonds, 8,
-        "diamantes de la sesion: 3 rosas + 5 diamantes, no 1+2+3+5"
+        "diamantes de la sesion: 3 rosas + 5 diamantes, no 1+1+1+5"
     );
     // El ranking tiene que mirar los diamantes, no los eventos.
     assert_eq!(
@@ -521,6 +525,63 @@ fn los_diamantes_de_un_streak_no_se_suman_ronda_a_ronda() {
         base.count("gift_events").expect("contando regalos"),
         4,
         "los cuatro eventos de regalo se guardan igualmente"
+    );
+
+    db.finalizar();
+}
+
+/// Una racha suma **todos** sus incrementos, no solo el ultimo evento.
+///
+/// Es el caso que estaba mal medido: en la base de datos de una sesion real,
+/// cuatro rachas de dos rosas produjeron 8 eventos con `repeat_count = 1` cada
+/// uno y el motor guardo 4 diamantes en vez de 8 (docs/decisions.md D14). Aqui se
+/// comprueba tambien el caso agrupado: un unico evento con `repeat_count = 2`
+/// vale dos unidades.
+#[test]
+fn una_racha_suma_todos_sus_incrementos_y_el_persistido_coincide() {
+    let db = DbTemp::nueva("flujo-incrementos");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
+    let ana = usuario("3", "Ana");
+
+    estado.on_event(&conectar(1));
+    // Racha de dos rosas: dos eventos de un incremento cada uno.
+    for (seq, final_) in [(2u64, false), (3, true)] {
+        estado.on_event(&Event::new(
+            seq,
+            SALA.to_string(),
+            Some(format!("gift-{seq}")),
+            EventKind::GiftReceived {
+                user: ana.clone(),
+                gift: regalo("5655", "Rose", 1, 1, true, final_, "g-1"),
+            },
+        ));
+    }
+    // Y una racha cuyo incremento llega agrupado en un solo evento.
+    estado.on_event(&Event::new(
+        4,
+        SALA.to_string(),
+        Some("gift-4".to_string()),
+        EventKind::GiftReceived {
+            user: ana.clone(),
+            gift: regalo("5655", "Rose", 1, 2, true, true, "g-2"),
+        },
+    ));
+
+    let snapshot = estado.snapshot();
+    assert_eq!(
+        snapshot.total_diamonds, 4,
+        "2 rosas incrementales + 2 agrupadas = 4 diamantes, no 1 + 2"
+    );
+    assert_eq!(snapshot.total_gifts, 4, "cuatro unidades, no tres eventos");
+
+    // Y lo persistido tiene que decir lo mismo.
+    estado.shutdown();
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.query_i64("SELECT diamond_total FROM streams", 0)
+            .expect("leyendo el total de diamantes"),
+        Some(4),
+        "el resumen persistido debe usar la misma regla que la memoria"
     );
 
     db.finalizar();

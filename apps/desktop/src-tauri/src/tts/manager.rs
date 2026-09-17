@@ -53,6 +53,18 @@ const BUS_CAPACITY: usize = 4096;
 /// clave es (usuario, texto) y ademas el `source_id` de TikTok.
 const SEEN_CAPACITY: usize = 4096;
 
+/// Ventana temporal de esa memoria: pasado este plazo, el mismo texto del mismo
+/// usuario se puede volver a leer.
+///
+/// Es una constante propia y **no** `FilterConfig::duplicate_window` a proposito:
+/// lo que evita esta memoria es que el mismo evento reenviado por el bus se lea
+/// dos veces, y esa garantia no puede depender de un ajuste de usuario (el
+/// pipeline si permite poner la ventana a cero para desactivar su deduplicacion
+/// por texto). El valor es el mismo que el del filtro por defecto, 30 s; sin
+/// ventana, un mensaje repetido quedaba silenciado para siempre mientras cupiera
+/// en la memoria.
+const SEEN_WINDOW: Duration = Duration::from_secs(30);
+
 /// Tope de usuarios silenciados: es una lista de trabajo, no un registro.
 const MUTED_CAPACITY: usize = 1024;
 
@@ -66,6 +78,15 @@ const PLAYBACK_TICK: Duration = Duration::from_millis(25);
 /// que no avisa por el canal.
 const IDLE_TICK: Duration = Duration::from_millis(250);
 
+/// Cada cuantas frases se poda la cache de sintesis en disco (F3).
+///
+/// La poda va atada a las frases atendidas y no a un temporizador a proposito:
+/// el proyecto prohibe los bucles y temporizadores ociosos, y una sesion sin chat
+/// no tiene por que despertar solo para mirar una carpeta. Con este valor, una
+/// sala normal poda varias veces por hora y el coste (leer un directorio) queda
+/// repartido.
+const CACHE_PRUNE_EVERY: u64 = 100;
+
 /// Configuracion del TTS tal como la ve la interfaz. Es el contrato que
 /// persistira SQLite por perfil (docs/milestone-2.md §4).
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +98,11 @@ pub struct TtsSettings {
     pub volume: f32,
     pub rate: String,
     pub pitch: String,
+    /// Leer en voz alta los regalos que cierran su racha.
+    pub read_gifts: bool,
+    /// Leer los follows. Apagado por defecto: una sala media genera decenas por
+    /// hora y taparian el chat.
+    pub read_follows: bool,
     pub filters: FilterConfig,
     pub queue_capacity: usize,
 }
@@ -91,6 +117,8 @@ impl Default for TtsSettings {
             volume: 1.0,
             rate: "+0%".to_string(),
             pitch: "+0Hz".to_string(),
+            read_gifts: true,
+            read_follows: false,
             filters: FilterConfig::default(),
             queue_capacity: 32,
         }
@@ -148,45 +176,74 @@ struct Counters {
 }
 
 /// Memoria acotada de mensajes ya vistos.
+///
+/// La memoria esta acotada por **dos** sitios: la capacidad (`SEEN_CAPACITY`,
+/// para que un chat inundado no se coma la RAM) y la ventana temporal
+/// (`SEEN_WINDOW`, para que repetir un mensaje util no quede silenciado para
+/// siempre).
 #[derive(Default)]
 struct Seen {
     content: HashMap<(String, String), Instant>,
     order_content: VecDeque<(String, String)>,
-    sources: HashSet<String>,
+    sources: HashMap<String, Instant>,
     order_sources: VecDeque<String>,
 }
 
+/// `true` si la marca `seen` sigue dentro de la ventana de deduplicacion.
+///
+/// `duration_since` satura en cero si la marca es posterior a `now` (no puede
+/// pasar con `Instant`, pero de ser asi contaria como reciente: ante la duda, no
+/// repetir el mensaje).
+fn seen_recently(seen: Instant, now: Instant) -> bool {
+    now.duration_since(seen) <= SEEN_WINDOW
+}
+
 impl Seen {
-    /// `true` si este mensaje ya se ha visto.
-    fn contains(&self, user_id: &str, text: &str, source_id: Option<&str>) -> bool {
+    /// `true` si este mensaje ya se ha visto **dentro de la ventana**.
+    fn contains(&self, user_id: &str, text: &str, source_id: Option<&str>, now: Instant) -> bool {
         if let Some(source_id) = source_id {
-            if self.sources.contains(source_id) {
+            if self
+                .sources
+                .get(source_id)
+                .is_some_and(|seen| seen_recently(*seen, now))
+            {
                 return true;
             }
         }
-        self.content.contains_key(&(user_id.to_string(), text.to_string()))
+        self.content
+            .get(&(user_id.to_string(), text.to_string()))
+            .is_some_and(|seen| seen_recently(*seen, now))
     }
 
-    fn remember(&mut self, user_id: &str, text: &str, source_id: Option<&str>) {
+    fn remember(&mut self, user_id: &str, text: &str, source_id: Option<&str>, now: Instant) {
         let key = (user_id.to_string(), text.to_string());
-        if !self.content.contains_key(&key) {
-            if self.order_content.len() >= SEEN_CAPACITY {
-                if let Some(oldest) = self.order_content.pop_front() {
-                    self.content.remove(&oldest);
-                }
-            }
-            self.order_content.push_back(key.clone());
-            self.content.insert(key, Instant::now());
-        }
-        if let Some(source_id) = source_id {
-            if !self.sources.contains(source_id) {
-                if self.order_sources.len() >= SEEN_CAPACITY {
-                    if let Some(oldest) = self.order_sources.pop_front() {
-                        self.sources.remove(&oldest);
+        match self.content.get_mut(&key) {
+            // Ya estaba (repetido dentro de la ventana): se refresca la marca sin
+            // volver a apuntarla en el orden de desalojo, porque un duplicado
+            // expulsaria antes a otra entrada.
+            Some(seen) => *seen = now,
+            None => {
+                if self.order_content.len() >= SEEN_CAPACITY {
+                    if let Some(oldest) = self.order_content.pop_front() {
+                        self.content.remove(&oldest);
                     }
                 }
-                self.order_sources.push_back(source_id.to_string());
-                self.sources.insert(source_id.to_string());
+                self.order_content.push_back(key.clone());
+                self.content.insert(key, now);
+            }
+        }
+        if let Some(source_id) = source_id {
+            match self.sources.get_mut(source_id) {
+                Some(seen) => *seen = now,
+                None => {
+                    if self.order_sources.len() >= SEEN_CAPACITY {
+                        if let Some(oldest) = self.order_sources.pop_front() {
+                            self.sources.remove(&oldest);
+                        }
+                    }
+                    self.order_sources.push_back(source_id.to_string());
+                    self.sources.insert(source_id.to_string(), now);
+                }
             }
         }
     }
@@ -198,6 +255,14 @@ enum Dispatch {
     Played,
     Skipped,
     Failed,
+}
+
+/// `true` si toca podar la cache con este contador de frases.
+///
+/// Es una funcion pura a proposito: la politica (frases, no reloj) se puede
+/// fijar en un test sin esperar a nada ni arrancar el gestor.
+fn prune_due(played: u64, every: u64) -> bool {
+    every > 0 && played > 0 && played % every == 0
 }
 
 pub struct TtsManager {
@@ -352,34 +417,39 @@ impl TtsManager {
         }
 
         let now = Instant::now();
-        let outcome = {
-            let mut filters = self.lock_filters();
-            filters.evaluate(&user_id, trimmed, now)
-        };
-
-        // Se deduplica sobre el texto **normalizado** que devuelve el pipeline:
-        // "hola   a todos" y "hola a todos" son la misma frase leida, y usar el
-        // texto de origen las trataria como dos.
-        let accepted = match outcome {
-            FilterOutcome::Accept { text } => text,
-            FilterOutcome::Reject(reason) => {
-                self.count_rejection(reason.as_str());
-                return;
+        // El chat pasa por el pipeline de contenido (palabras, enlaces, spam,
+        // longitud, cooldown por usuario). Un aviso de regalo o de follow ya
+        // viene compuesto y no es spam: solo gasta cupo global, porque si no el
+        // cooldown de 20 s o el minimo de caracteres lo descartarian casi siempre.
+        let accepted = if source == TtsSource::Chat {
+            let outcome = {
+                let mut filters = self.lock_filters();
+                filters.evaluate(&user_id, trimmed, now)
+            };
+            match outcome {
+                FilterOutcome::Accept { text } => text,
+                FilterOutcome::Reject(reason) => {
+                    self.count_rejection(reason.as_str());
+                    return;
+                }
             }
+        } else {
+            trimmed.to_string()
         };
 
         // Deduplicacion propia, previa al compromiso (token y cooldown): asi el
-        // mismo mensaje reenviado por el bus no gasta cuota global ni relee.
+        // mismo mensaje reenviado por el bus no gasta cuota global ni relee. La
+        // memoria caduca por capacidad y por tiempo (ver `SEEN_WINDOW`).
         {
             let normalized = accepted.to_lowercase();
             let mut seen = self.lock_seen();
-            if seen.contains(&user_id, &normalized, event.source_id.as_deref()) {
-                seen.remember(&user_id, &normalized, event.source_id.as_deref());
+            if seen.contains(&user_id, &normalized, event.source_id.as_deref(), now) {
+                seen.remember(&user_id, &normalized, event.source_id.as_deref(), now);
                 drop(seen);
                 self.count_rejection(RejectReason::Duplicate.as_str());
                 return;
             }
-            seen.remember(&user_id, &normalized, event.source_id.as_deref());
+            seen.remember(&user_id, &normalized, event.source_id.as_deref(), now);
         }
 
         // Admision final: cupo global + registro del cooldown y del mensaje
@@ -388,12 +458,24 @@ impl TtsManager {
         // lo cuenta el propio filtro, en el unico sitio donde ocurre.
         {
             let mut filters = self.lock_filters();
-            if !filters.admit(&user_id, &accepted, now) {
+            let admitted = if source == TtsSource::Chat {
+                filters.admit(&user_id, &accepted, now)
+            } else {
+                filters.admit_announcement(now)
+            };
+            if !admitted {
                 return;
             }
         }
 
-        let line = chat_line(&nickname, &accepted, self.say_author());
+        // El chat se compone aqui (el autor depende del ajuste); los avisos de
+        // regalo y follow ya vienen compuestos por `wants`. Se clona porque el
+        // texto de origen sigue haciendo falta para elegir la voz.
+        let line = if source == TtsSource::Chat {
+            chat_line(&nickname, &accepted, self.say_author())
+        } else {
+            accepted.clone()
+        };
         let (voice_es, voice_en) = self.voices();
         let item = TtsItem {
             id: 0,
@@ -424,19 +506,39 @@ impl TtsManager {
         }
     }
 
-    /// Que eventos se leen. Devuelve el texto de origen, la prioridad y la
-    /// fuente.
+    /// Que eventos se leen. Devuelve el texto **ya compuesto** que se dice, la
+    /// prioridad y la fuente.
     ///
-    /// Anadir `gift.received` o `follow.received` es anadir un brazo aqui (y
-    /// decidir si la prioridad depende del regalo en `priority::for_gift`):
-    /// nada mas del gestor cambia.
+    /// Es el **unico** punto donde se decide que se lee. Anadir un evento nuevo
+    /// (una suscripcion, un share, un aviso de OBS) es anadir un brazo aqui y su
+    /// plantilla en `tts::mod`: nada mas del gestor cambia.
     pub fn wants(&self, kind: &EventKind) -> Option<(String, i32, TtsSource)> {
+        let (read_gifts, read_follows) = self.announcements();
         match kind {
             EventKind::ChatMessage { content, .. } => {
                 Some((content.clone(), priority::CHAT, TtsSource::Chat))
             }
+            // Solo se lee el evento que **cierra** la racha: los intermedios son
+            // acumulativos y anunciarlos todos convertiria una racha de 50 en 50
+            // frases (misma regla que la contabilidad de `feed.rs`).
+            EventKind::GiftReceived { user, gift } if read_gifts && gift.commits() => Some((
+                super::gift_line(&user.nickname, gift),
+                priority::for_gift(gift.diamonds()),
+                TtsSource::Gift,
+            )),
+            EventKind::FollowReceived { user } if read_follows => Some((
+                super::follow_line(&user.nickname),
+                priority::FOLLOWER,
+                TtsSource::Follow,
+            )),
             _ => None,
         }
+    }
+
+    /// Interruptores de los avisos que no son chat.
+    fn announcements(&self) -> (bool, bool) {
+        let settings = self.settings.read().unwrap_or_else(|e| e.into_inner());
+        (settings.read_gifts, settings.read_follows)
     }
 
     // -----------------------------------------------------------------------
@@ -467,6 +569,21 @@ impl TtsManager {
 
     pub fn set_rate(&self, rate: &str) {
         self.write_settings().rate = rate.to_string();
+    }
+
+    pub fn set_pitch(&self, pitch: &str) {
+        self.write_settings().pitch = pitch.to_string();
+    }
+
+    /// Interruptores de los avisos que no son chat (regalos, follows). Se
+    /// aplican en `wants`, asi que valen tanto para lo que llega despues como
+    /// para lo que ya estaba en la cola.
+    pub fn set_read_gifts(&self, value: bool) {
+        self.write_settings().read_gifts = value;
+    }
+
+    pub fn set_read_follows(&self, value: bool) {
+        self.write_settings().read_follows = value;
     }
 
     pub fn set_voice(&self, language: Language, voice: &str) {
@@ -652,6 +769,10 @@ impl TtsManager {
     /// producir trabajo avisa por el canal, y el plazo solo existe para vigilar
     /// el final de lo que suena. Sin trabajo, no hay ciclo.
     async fn run(&self, mut wake: watch::Receiver<u64>) {
+        // La cache de audio puede venir de sesiones anteriores y nadie mas la
+        // vigila (el CLI solo poda en `--tts-test`), asi que la aplicacion la
+        // poda al arrancar el bucle y luego cada `CACHE_PRUNE_EVERY` frases.
+        self.prune_cache().await;
         loop {
             if self.enabled() && !*self.lock_paused() {
                 let Some(item) = self.lock_queue().pop_next(Instant::now()) else {
@@ -661,7 +782,13 @@ impl TtsManager {
                     }
                     continue;
                 };
-                match self.dispatch(item).await {
+                let outcome = self.dispatch(item).await;
+                if outcome != Dispatch::Failed {
+                    // La poda se decide por frases atendidas, no por reloj: asi no
+                    // hay ningun temporizador girando en vacio.
+                    self.prune_cache_when_due().await;
+                }
+                match outcome {
                     // Reproduciendo o esperando a que termine: vigilar de cerca.
                     Dispatch::Played => self.settle(&mut wake, PLAYBACK_TICK).await,
                     // Saltado o fallido: puede haber mas cola, sin esperas.
@@ -684,10 +811,19 @@ impl TtsManager {
 
     /// Sintetiza y reproduce una frase. Devuelve que ha pasado con ella.
     async fn dispatch(&self, item: TtsItem) -> Dispatch {
+        // La velocidad y el tono se leen **en el momento de sintetizar**, no
+        // cuando se encolo: si el streamer los cambia mientras hay cola, lo que
+        // suene despues ya sale con el ajuste nuevo.
+        let (rate, pitch) = {
+            let settings = self.settings.read().unwrap_or_else(|e| e.into_inner());
+            (settings.rate.clone(), settings.pitch.clone())
+        };
         let request = TtsRequest {
             id: item.id,
             text: item.text.clone(),
             voice: item.voice.clone(),
+            rate,
+            pitch,
         };
         let audio = match self.provider.synthesize(&request).await {
             Ok(audio) => audio,
@@ -728,16 +864,45 @@ impl TtsManager {
         self.lock_counters().played += 1;
 
         // Se espera de verdad al final del audio: si no, el bucle sacaria la
-        // frase siguiente y se solaparian. `wait` es sincrona; esta tarea es
-        // bloqueante, no de runtime, asi que no hay nada mas que atender aqui.
+        // frase siguiente y se solaparian.
+        //
+        // La espera **no** corre en el worker del runtime: `wait` es sincrona y
+        // dura lo que la locucion (hasta 30 s), asi que dejaba un hilo de Tokio
+        // secuestrado por frase. Va a la piscina de bloqueo, que es el sitio
+        // previsto para esperas de este tipo; el bucle, mientras tanto, sigue sin
+        // sacar la frase siguiente hasta que esta termina o alguien la corta.
         if self.sink.is_playing() {
-            self.sink.wait();
+            let sink = self.sink.clone();
+            let _ = tokio::task::spawn_blocking(move || sink.wait()).await;
         }
         if self.take_playing(item.id) {
             Dispatch::Played
         } else {
             // Mientras sonaba, alguien pulso "saltar" o "pausa".
             Dispatch::Skipped
+        }
+    }
+
+    /// Poda la cache del proveedor si el contador de frases ha cruzado un
+    /// multiplo. Se llama tras atender una frase.
+    async fn prune_cache_when_due(&self) {
+        let played = self.lock_counters().played;
+        if !prune_due(played, CACHE_PRUNE_EVERY) {
+            return;
+        }
+        self.prune_cache().await;
+    }
+
+    /// Poda la cache de sintesis en disco.
+    ///
+    /// Es E/S sobre cientos de ficheros, asi que no puede correr en el worker del
+    /// runtime: el mismo motivo que la espera de `dispatch`, en pequeno.
+    async fn prune_cache(&self) {
+        let provider = self.provider.clone();
+        match tokio::task::spawn_blocking(move || provider.prune_cache()).await {
+            Ok(0) => {}
+            Ok(removed) => tracing::info!(removed, "cache de TTS podada"),
+            Err(error) => tracing::warn!(%error, "no se pudo podar la cache de TTS"),
         }
     }
 
@@ -904,6 +1069,7 @@ mod tests {
     use anyhow::Result;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Condvar;
 
     // -----------------------------------------------------------------------
     // Dobles de prueba
@@ -912,12 +1078,19 @@ mod tests {
     /// Proveedor falso: escribe un fichero temporal y no toca la red.
     struct FakeProvider {
         synthesised: Mutex<Vec<String>>,
+        /// Ajustes con los que se pidio cada sintesis, para poder comprobar que
+        /// la velocidad y el tono de la interfaz llegan hasta el sintetizador.
+        ajustes: Mutex<Vec<(String, String)>>,
+        /// Veces que el gestor le ha pedido podar la cache.
+        prunes: AtomicU64,
     }
 
     impl FakeProvider {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 synthesised: Mutex::new(Vec::new()),
+                ajustes: Mutex::new(Vec::new()),
+                prunes: AtomicU64::new(0),
             })
         }
 
@@ -926,6 +1099,19 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
+        }
+
+        fn ajustes(&self) -> Vec<(String, String)> {
+            self.ajustes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        }
+
+        /// Cuantas veces se ha podado (que el gestor lo pida es lo que se prueba:
+        /// la poda en si la cubre el test de `provider`).
+        fn prunes(&self) -> u64 {
+            self.prunes.load(Ordering::Relaxed)
         }
 
         fn lock(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
@@ -954,6 +1140,10 @@ mod tests {
         fn synthesize<'a>(&'a self, request: &'a TtsRequest) -> BoxFuture<'a, Result<TtsAudio>> {
             Box::pin(async move {
                 self.lock().push(request.text.clone());
+                self.ajustes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push((request.rate.clone(), request.pitch.clone()));
                 Ok(TtsAudio {
                     path: temp_file("audio"),
                     bytes: 4,
@@ -973,6 +1163,12 @@ mod tests {
 
         fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
             Box::pin(async move {})
+        }
+
+        /// El gestor es quien decide **cuando** se poda; aqui solo se cuenta.
+        fn prune_cache(&self) -> usize {
+            self.prunes.fetch_add(1, Ordering::Relaxed);
+            1
         }
     }
 
@@ -1014,51 +1210,87 @@ mod tests {
         fn wait(&self) {}
     }
 
-    /// Salida que retiene **la primera** reproduccion hasta que el test la
-    /// libera.
+    /// Salida que imita a rodio **de verdad**: `play` deja la frase "sonando" y
+    /// `wait` **bloquea** hasta que el test la libera o alguien la corta con
+    /// `stop()`.
     ///
-    /// Es lo que hace determinista el desalojo por prioridad: mientras la
-    /// primera frase esta "sonando", la cola se llena de verdad. Las
-    /// reproducciones siguientes se resuelven al instante para no alargar el
-    /// test.
-    struct GatedSink {
+    /// Faltaba justo eso: los dobles anteriores devolvian `is_playing() == false`,
+    /// asi que el gestor nunca esperaba y los fallos que solo se ven con una
+    /// locucion en curso (un "saltar" que no corta, un volumen que no cambia a
+    /// media frase) no aparecian en ningun test.
+    ///
+    /// Bloquear en `wait` (y no en `play`) es lo que imita a rodio: encolar es
+    /// instantaneo y quien espera es el que pide el final del audio.
+    struct RodioLikeSink {
         inner: NullSink,
-        /// Permiso de la primera reproduccion: quien lo tenga la desbloquea.
-        gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
-        /// Cuantas reproducciones se han pedido. La primera es la que espera.
-        sessions: AtomicU64,
+        state: Mutex<RodioLikeState>,
+        changed: Condvar,
     }
 
-    impl GatedSink {
-        /// Devuelve el sink y el permiso con el que el test libera la primera
-        /// reproduccion.
-        fn new() -> (Arc<Self>, std::sync::mpsc::Sender<()>) {
-            let (tx, rx) = std::sync::mpsc::channel();
-            let sink = Arc::new(Self {
+    #[derive(Default)]
+    struct RodioLikeState {
+        /// Hay una frase sonando.
+        playing: bool,
+        /// La locucion en curso ha terminado (la libera el test o un corte).
+        finished: bool,
+        /// Hay una espera bloqueada ahora mismo.
+        waiting: bool,
+        /// Esperas que termino un `stop()`.
+        cuts: u64,
+    }
+
+    impl RodioLikeSink {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
                 inner: NullSink::new(),
-                gate: Mutex::new(Some(rx)),
-                sessions: AtomicU64::new(0),
-            });
-            (sink, tx)
+                state: Mutex::new(RodioLikeState::default()),
+                changed: Condvar::new(),
+            })
+        }
+
+        fn lock(&self) -> std::sync::MutexGuard<'_, RodioLikeState> {
+            self.state.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        /// Libera la locucion en curso como si el audio hubiera llegado a su
+        /// final.
+        fn release(&self) {
+            self.lock().finished = true;
+            self.changed.notify_all();
+        }
+
+        /// `true` si ahora mismo hay una espera bloqueada.
+        fn waiting(&self) -> bool {
+            self.lock().waiting
+        }
+
+        /// Esperas que tuvieron que terminar porque alguien corto el audio.
+        fn cut_waits(&self) -> u64 {
+            self.lock().cuts
         }
     }
 
-    impl AudioSink for GatedSink {
+    impl AudioSink for RodioLikeSink {
         fn play(&self, file: &Path, volume: f32) -> anyhow::Result<()> {
-            let session = self.sessions.fetch_add(1, Ordering::SeqCst);
             self.inner.play(file, volume)?;
-            if session == 0 {
-                // Se bloquea como la reproduccion real. El plazo evita que un
-                // test mal escrito deje el hilo colgado para siempre.
-                if let Some(gate) = self.gate.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    let _ = gate.recv_timeout(Duration::from_secs(5));
-                }
-            }
+            let mut state = self.lock();
+            state.playing = true;
+            state.finished = false;
             Ok(())
         }
 
         fn stop(&self) {
             self.inner.stop();
+            let mut state = self.lock();
+            if state.waiting {
+                state.cuts += 1;
+            }
+            // Un corte termina la espera en curso igual que en rodio: la fuente
+            // se descarta en el bloque de audio siguiente.
+            state.playing = false;
+            state.finished = true;
+            drop(state);
+            self.changed.notify_all();
         }
 
         fn set_volume(&self, volume: f32) {
@@ -1066,13 +1298,29 @@ mod tests {
         }
 
         fn is_playing(&self) -> bool {
-            self.inner.is_playing()
+            self.lock().playing
         }
 
         fn wait(&self) {
-            self.inner.wait();
+            let mut state = self.lock();
+            state.waiting = true;
+            // El plazo evita que un test mal escrito deje el hilo de bloqueo
+            // colgado para siempre.
+            let deadline = Instant::now() + ESPERA_MAXIMA;
+            while state.playing && !state.finished && Instant::now() < deadline {
+                let (guard, _) = self
+                    .changed
+                    .wait_timeout(state, ESPERA_MAXIMA)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = guard;
+            }
+            state.playing = false;
+            state.waiting = false;
         }
     }
+
+    /// Plazo maximo de una espera del doble `RodioLikeSink`.
+    const ESPERA_MAXIMA: Duration = Duration::from_secs(2);
 
     // -----------------------------------------------------------------------
     // Utilidades
@@ -1145,17 +1393,27 @@ mod tests {
         sink: Arc<InstantSink>,
     }
 
-    fn harness(settings: TtsSettings) -> Harness {
+    /// Gestor con un sink cualquiera: monta el bus, el proveedor y el gestor sin
+    /// duplicar la construccion en cada test que necesita un doble distinto.
+    fn manager_with(
+        settings: TtsSettings,
+        sink: Arc<dyn AudioSink>,
+    ) -> (Arc<TtsManager>, Arc<FakeProvider>) {
         let metrics = Arc::new(Metrics::default());
         let bus = Arc::new(EventBus::new(64, metrics));
         let provider = FakeProvider::new();
-        let sink = Arc::new(InstantSink::new());
         let manager = Arc::new(TtsManager::new(
             settings,
             provider.clone() as SharedTtsProvider,
             bus,
-            sink.clone() as Arc<dyn AudioSink>,
+            sink,
         ));
+        (manager, provider)
+    }
+
+    fn harness(settings: TtsSettings) -> Harness {
+        let sink = Arc::new(InstantSink::new());
+        let (manager, provider) = manager_with(settings, sink.clone() as Arc<dyn AudioSink>);
         Harness {
             manager,
             provider,
@@ -1283,23 +1541,16 @@ mod tests {
         // La primera reproduccion se queda "sonando" hasta que el test la
         // libera: asi la cola se llena de verdad y el adelantamiento es
         // determinista, sin depender de tiempos.
-        let metrics = Arc::new(Metrics::default());
-        let bus = Arc::new(EventBus::new(64, metrics));
-        let provider = FakeProvider::new();
-        let (sink, gate) = GatedSink::new();
-        let manager = Arc::new(TtsManager::new(
-            settings(),
-            provider.clone() as SharedTtsProvider,
-            bus,
-            sink.clone() as Arc<dyn AudioSink>,
-        ));
+        let sink = RodioLikeSink::new();
+        let (manager, provider) = manager_with(settings(), sink.clone() as Arc<dyn AudioSink>);
         manager.start();
 
         manager.handle_event(&chat(1, "hablante", "primera frase del chat"));
         assert!(
-            wait_for(|| sink.inner.played_len() >= 1).await,
+            wait_for(|| !provider.synthesised().is_empty()).await,
             "el bucle deberia estar reproduciendo la primera frase"
         );
+        assert!(wait_for(|| sink.waiting()).await, "la frase deberia estar sonando");
 
         // Con el bucle entretenido en el reproductor, la cola se llena de chat
         // normal (prioridad 10) y despues entra un regalo prioritario. Hoy los
@@ -1339,7 +1590,7 @@ mod tests {
         );
 
         // Y se lee de verdad antes que el chat que ya esperaba.
-        let _ = gate.send(());
+        sink.release();
         assert!(
             wait_for(|| provider.synthesised().len() >= 2).await,
             "el bucle deberia seguir tras liberar la reproduccion"
@@ -1539,9 +1790,16 @@ mod tests {
         assert_eq!(priority, priority::CHAT);
         assert_eq!(source, TtsSource::Chat);
 
-        // Los regalos y los follows llegaran aqui: hoy se declaran no leibles de
-        // forma explicita, que es la mitad del trabajo de anadirlos.
-        assert!(h.manager.wants(&gift(2, "2", 100).kind).is_none());
+        // Los regalos ya se leen, con su prioridad segun los diamantes.
+        let (text, priority, source) = h
+            .manager
+            .wants(&gift(2, "2", 100).kind)
+            .expect("un regalo que cierra racha se lee");
+        assert_eq!(text, "Nick 2 envio Rose");
+        assert_eq!(priority, priority::PREMIUM_GIFT);
+        assert_eq!(source, TtsSource::Gift);
+
+        // Los follows, en cambio, vienen apagados por defecto.
         let follow = Event::new(
             3,
             "sala".into(),
@@ -1549,6 +1807,12 @@ mod tests {
             EventKind::FollowReceived { user: user("3") },
         );
         assert!(h.manager.wants(&follow.kind).is_none());
+        h.manager.set_read_follows(true);
+        assert_eq!(
+            h.manager.wants(&follow.kind).expect("activado se lee").2,
+            TtsSource::Follow
+        );
+
         // Y un tipo sin texto no rompe nada.
         let viewers = Event::new(
             4,
@@ -1666,5 +1930,293 @@ mod tests {
         assert_eq!(manager.status().played, 0);
         // El gestor sigue vivo y acepta mas eventos.
         manager.handle_event(&chat(9, "9", "otra frase"));
+    }
+
+    /// Regresion: la velocidad y el tono se quedaban en los ajustes del gestor y
+    /// la sintesis salia siempre a `+0%` (docs/decisions.md D12).
+    #[tokio::test]
+    async fn el_ritmo_y_el_tono_llegan_al_sintetizador() {
+        let h = harness(settings());
+        h.manager.start();
+
+        h.manager.set_rate("+25%");
+        h.manager.set_pitch("-4Hz");
+        h.manager.handle_event(&chat(1, "1", "una frase distinta"));
+
+        assert!(wait_for(|| !h.provider.ajustes().is_empty()).await);
+        assert_eq!(
+            h.provider.ajustes()[0],
+            ("+25%".to_string(), "-4Hz".to_string()),
+            "la sintesis debe usar el ajuste vigente, no uno fijo"
+        );
+
+        // Y se lee por frase, asi que un cambio posterior afecta a lo siguiente.
+        h.manager.set_rate("+40%");
+        h.manager.handle_event(&chat(2, "2", "otra frase distinta"));
+        assert!(wait_for(|| h.provider.ajustes().len() >= 2).await);
+        assert_eq!(h.provider.ajustes()[1].0, "+40%");
+    }
+
+    #[tokio::test]
+    async fn los_regalos_se_leen_solo_al_cerrar_la_racha() {
+        let h = harness(settings());
+        h.manager.start();
+
+        let racha = |seq: u64, repeat: i32, final_: bool| {
+            Event::new(
+                seq,
+                "sala".into(),
+                Some(format!("gift-{seq}")),
+                EventKind::GiftReceived {
+                    user: user("9"),
+                    gift: GiftInfo::new("5655", "Rose", 1, true, repeat, final_, "g1"),
+                },
+            )
+        };
+
+        // Dos eventos intermedios de la racha: no se leen.
+        h.manager.handle_event(&racha(1, 1, false));
+        h.manager.handle_event(&racha(2, 2, false));
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(
+            h.provider.synthesised().is_empty(),
+            "los intermedios de una racha no se anuncian: {:?}",
+            h.provider.synthesised()
+        );
+
+        // El que cierra la racha si, y con la cantidad acumulada.
+        h.manager.handle_event(&racha(3, 5, true));
+        assert!(wait_for(|| !h.provider.synthesised().is_empty()).await);
+        assert_eq!(h.provider.synthesised()[0], "Nick 9 envio 5 x Rose");
+    }
+
+    #[tokio::test]
+    async fn los_regalos_y_follows_se_pueden_apagar() {
+        let h = harness(settings());
+        h.manager.start();
+        h.manager.set_read_gifts(false);
+        h.manager.set_read_follows(true);
+
+        h.manager.handle_event(&gift(1, "9", 1));
+        h.manager.handle_event(&Event::new(
+            2,
+            "sala".into(),
+            Some("follow-2".into()),
+            EventKind::FollowReceived { user: user("8") },
+        ));
+
+        assert!(wait_for(|| !h.provider.synthesised().is_empty()).await);
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert_eq!(
+            h.provider.synthesised(),
+            vec!["Nick 8 te sigue".to_string()],
+            "con los regalos apagados solo se lee el follow"
+        );
+    }
+
+    /// Un aviso de regalo no puede gastar el cooldown del chat de quien lo mando:
+    /// si no, regalar silenciaria a esa persona durante 20 s.
+    #[tokio::test]
+    async fn un_regalo_no_bloquea_el_chat_de_quien_lo_manda() {
+        let mut ajustes = settings();
+        // El cooldown por usuario es el del plan: 20 s.
+        ajustes.filters.user_cooldown = Duration::from_secs(20);
+        ajustes.filters.min_chars = 2;
+        let h = harness(ajustes);
+        h.manager.start();
+
+        h.manager.handle_event(&gift(1, "7", 1));
+        h.manager.handle_event(&chat(2, "7", "hola a todos"));
+
+        assert!(wait_for(|| h.provider.synthesised().len() >= 2).await);
+        let leidas = h.provider.synthesised();
+        assert!(
+            leidas.iter().any(|line| line.contains("envio")),
+            "el regalo se lee: {leidas:?}"
+        );
+        assert!(
+            leidas.iter().any(|line| line.contains("dice")),
+            "y el chat del mismo usuario sigue leyendose: {leidas:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Regresiones de robustez
+    // -----------------------------------------------------------------------
+
+    /// F1 visto desde el gestor: con una frase **sonando**, "saltar" y "pausar"
+    /// terminan la espera en curso y el volumen cambia al momento, sin esperar al
+    /// final de la locucion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn saltar_o_pausar_cortan_la_espera_en_curso_y_el_volumen_llega_ya() {
+        let sink = RodioLikeSink::new();
+        let (manager, _provider) = manager_with(settings(), sink.clone() as Arc<dyn AudioSink>);
+        manager.start();
+        manager.handle_event(&chat(1, "1", "primera frase que suena"));
+
+        assert!(
+            wait_for(|| sink.waiting()).await,
+            "la frase deberia estar sonando"
+        );
+        assert!(sink.is_playing());
+
+        // El volumen de una frase en curso cambia ya, no al terminarla.
+        manager.set_volume(0.4);
+        assert_eq!(sink.inner.volume(), 0.4, "el volumen debe aplicarse ya");
+
+        // "Saltar" corta la espera en curso: no hay que agotar la locucion.
+        let inicio = Instant::now();
+        manager.skip();
+        assert!(
+            wait_for(|| !sink.waiting()).await,
+            "saltar debe terminar la espera"
+        );
+        let tardanza = inicio.elapsed();
+        assert!(
+            tardanza < Duration::from_secs(1),
+            "y hacerlo ya, no al final de la frase: {tardanza:?}"
+        );
+        assert_eq!(sink.cut_waits(), 1, "el corte lo noto la espera en curso");
+        assert_eq!(manager.status().playing, None);
+
+        // "Pausar" tambien corta lo que suena.
+        manager.resume();
+        manager.handle_event(&chat(2, "2", "segunda frase que suena"));
+        assert!(
+            wait_for(|| sink.waiting() && sink.cut_waits() == 1).await,
+            "la segunda frase deberia estar sonando"
+        );
+        manager.pause();
+        assert!(
+            wait_for(|| !sink.waiting()).await,
+            "pausar debe cortar la espera en curso"
+        );
+        assert_eq!(sink.cut_waits(), 2, "la pausa tambien corta");
+        assert_eq!(manager.status().played, 2, "las dos frases llegaron a sonar");
+    }
+
+    /// F2: la espera del audio no puede secuestrar un hilo del runtime.
+    ///
+    /// El test corre en un runtime de **un solo hilo** a proposito: si el gestor
+    /// esperase la locucion dentro de su propia tarea, nada mas de este test
+    /// avanzaria hasta que la frase terminara.
+    #[tokio::test]
+    async fn la_espera_del_audio_no_secuestra_el_runtime() {
+        let sink = RodioLikeSink::new();
+        let (manager, _provider) = manager_with(settings(), sink.clone() as Arc<dyn AudioSink>);
+        manager.start();
+        manager.handle_event(&chat(1, "1", "una locucion larga"));
+
+        assert!(
+            wait_for(|| sink.waiting()).await,
+            "el gestor deberia estar esperando el final del audio"
+        );
+
+        // Este latido corre **mientras** suena la frase: con la espera dentro de
+        // la tarea del gestor, el unico worker del runtime estaria bloqueado y el
+        // plazo no se cumpliria.
+        let inicio = Instant::now();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let transcurrido = inicio.elapsed();
+        assert!(
+            transcurrido < Duration::from_secs(1),
+            "la espera bloqueo el runtime: el latido tardo {transcurrido:?}"
+        );
+        assert!(sink.waiting(), "la espera sigue en curso, pero sin bloquear nada");
+
+        // Y al terminar la locucion el bucle sigue con lo que haya.
+        sink.release();
+        assert!(wait_for(|| !sink.waiting()).await);
+        assert_eq!(manager.status().played, 1);
+    }
+
+    /// La poda se decide por frases atendidas (nada de temporizadores): la
+    /// funcion pura lo fija sin arrancar el gestor.
+    #[test]
+    fn la_poda_se_decide_por_frases_y_no_por_reloj() {
+        assert!(!prune_due(0, 100), "sin frases no hay nada que podar");
+        assert!(!prune_due(99, 100));
+        assert!(prune_due(100, 100));
+        assert!(prune_due(200, 100));
+        assert!(!prune_due(150, 100));
+        // Un periodo a cero no puede podar en cada frase (seria un bucle de E/S).
+        assert!(!prune_due(100, 0));
+    }
+
+    /// F3: la cache se poda al arrancar el bucle y despues cada cierto numero de
+    /// frases. Antes solo la podaba el CLI (`--tts-test`), asi que en la
+    /// aplicacion la carpeta crecia sin limite.
+    #[tokio::test]
+    async fn la_cache_se_poda_al_arrancar_y_cada_cierto_numero_de_frases() {
+        let h = harness(settings());
+        h.manager.start();
+        assert!(
+            wait_for(|| h.provider.prunes() >= 1).await,
+            "el bucle debe podar al arrancar: la cache puede venir de otras sesiones"
+        );
+
+        // Se adelanta el contador en lugar de leer 100 frases: la politica va
+        // atada a las frases, no al reloj.
+        h.manager.lock_counters().played = CACHE_PRUNE_EVERY - 1;
+        h.manager
+            .handle_event(&chat(1, "1", "la frase que dispara la poda"));
+        assert!(
+            wait_for(|| h.provider.prunes() >= 2).await,
+            "al cruzar el multiplo de frases deberia podar otra vez"
+        );
+    }
+
+    /// F10: la memoria de duplicados caduca **por tiempo**, no solo por
+    /// capacidad. Sin ventana, el mismo texto del mismo usuario no se volvia a
+    /// leer nunca mientras cupiera.
+    #[test]
+    fn la_memoria_de_duplicados_caduca_por_tiempo() {
+        let mut seen = Seen::default();
+        // Reloj sintetico: la ventana no se prueba esperando 30 s de verdad.
+        let ahora = Instant::now();
+        seen.remember("7", "hola a todos", Some("msg-1"), ahora);
+
+        // Dentro de la ventana el mensaje sigue siendo un duplicado, por las dos
+        // claves (el `source_id` de TikTok y el par usuario/texto).
+        let dentro = ahora + Duration::from_secs(1);
+        assert!(seen.contains("7", "hola a todos", Some("msg-1"), dentro));
+        assert!(seen.contains("7", "hola a todos", None, dentro));
+
+        // Pasado el plazo se puede volver a leer.
+        let fuera = ahora + SEEN_WINDOW + Duration::from_secs(1);
+        assert!(!seen.contains("7", "hola a todos", Some("msg-1"), fuera));
+        assert!(!seen.contains("7", "hola a todos", None, fuera));
+
+        // Y el mismo texto de otra persona es otra frase.
+        assert!(!seen.contains("8", "hola a todos", None, dentro));
+
+        // Refrescar la marca no duplica la entrada en el orden de desalojo: si
+        // no, un mensaje repetido expulsaria antes a otro.
+        seen.remember("7", "hola a todos", Some("msg-1"), dentro);
+        assert_eq!(seen.order_content.len(), 1);
+        assert_eq!(seen.order_sources.len(), 1);
+    }
+
+    /// La ventana temporal no puede haber aflojado el tope de memoria: un chat
+    /// inundado sigue acotado.
+    #[test]
+    fn la_memoria_de_duplicados_sigue_acotada() {
+        let mut seen = Seen::default();
+        let ahora = Instant::now();
+        for index in 0..SEEN_CAPACITY + 50 {
+            seen.remember(
+                "7",
+                &format!("frase {index}"),
+                Some(&format!("msg-{index}")),
+                ahora,
+            );
+        }
+
+        assert!(seen.content.len() <= SEEN_CAPACITY);
+        assert!(seen.sources.len() <= SEEN_CAPACITY);
+        assert!(seen.order_content.len() <= SEEN_CAPACITY);
+        assert!(seen.order_sources.len() <= SEEN_CAPACITY);
+        // Lo mas antiguo se ha desalojado.
+        assert!(!seen.contains("7", "frase 0", Some("msg-0"), ahora));
     }
 }

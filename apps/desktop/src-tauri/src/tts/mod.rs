@@ -96,6 +96,36 @@ pub fn chat_line(nickname: &str, content: &str, say_author: bool) -> String {
     format!("{nickname} dice: {}", content.trim())
 }
 
+/// Texto que se lee para un regalo: "Nick envio 5 x Rosa".
+///
+/// Aqui el autor **siempre** se dice: un regalo sin nombre no informa de nada.
+/// La cantidad es la del evento que cierra la racha, que es el unico que se lee
+/// (ver `TtsManager::wants`).
+pub fn gift_line(nickname: &str, gift: &crate::core::event::GiftInfo) -> String {
+    let nombre = gift.name.trim();
+    let nombre = if nombre.is_empty() { "un regalo" } else { nombre };
+    let nucleo = match gift.units() {
+        0 | 1 => nombre.to_string(),
+        unidades => format!("{unidades} x {nombre}"),
+    };
+    let nickname = nickname.trim();
+    if nickname.is_empty() {
+        format!("regalo: {nucleo}")
+    } else {
+        format!("{nickname} envio {nucleo}")
+    }
+}
+
+/// Texto que se lee para un follow: "Nick te sigue".
+pub fn follow_line(nickname: &str) -> String {
+    let nickname = nickname.trim();
+    if nickname.is_empty() {
+        "nuevo seguidor".to_string()
+    } else {
+        format!("{nickname} te sigue")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,6 +148,27 @@ mod tests {
         assert_eq!(chat_line("Carlos", "hola a todos", false), "hola a todos");
         // Sin apodo no se inventa un prefijo raro.
         assert_eq!(chat_line("   ", "hola", true), "hola");
+    }
+
+    #[test]
+    fn compone_los_avisos_de_regalo_y_de_follow() {
+        use crate::core::event::GiftInfo;
+
+        // Una racha de 5 rosas: el evento que la cierra vale 5 unidades.
+        let racha = GiftInfo::new("5655", "Rose", 1, true, 5, true, "g1");
+        assert_eq!(gift_line("Carlos", &racha), "Carlos envio 5 x Rose");
+
+        // Un regalo suelto no lleva cantidad.
+        let suelto = GiftInfo::new("5655", "Rose", 1, false, 1, false, "0");
+        assert_eq!(gift_line("Carlos", &suelto), "Carlos envio Rose");
+
+        // Sin nombre de regalo no se dice "envio " y ya esta.
+        let raro = GiftInfo::new("1", "  ", 1, false, 1, false, "0");
+        assert_eq!(gift_line("Carlos", &raro), "Carlos envio un regalo");
+        assert_eq!(gift_line("  ", &suelto), "regalo: Rose");
+
+        assert_eq!(follow_line("Carlos"), "Carlos te sigue");
+        assert_eq!(follow_line("  "), "nuevo seguidor");
     }
 
     #[test]

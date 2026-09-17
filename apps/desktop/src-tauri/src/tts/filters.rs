@@ -205,6 +205,21 @@ impl Filters {
         true
     }
 
+    /// Admision de un aviso que **no es chat** (regalo, follow): gasta el cupo
+    /// global, pero no toca el cooldown por usuario ni la memoria de textos
+    /// recientes.
+    ///
+    /// Es la costura que permite leer regalos sin que un regalo bloquee durante
+    /// 20 s el chat de quien lo mando, ni cuente como "mensaje repetido" si esa
+    /// persona escribe lo mismo en el chat.
+    pub fn admit_announcement(&mut self, now: Instant) -> bool {
+        if !self.consume_global_token(now) {
+            self.count(RejectReason::GlobalRateLimit);
+            return false;
+        }
+        true
+    }
+
     /// Contabiliza un descarte. Lo usa el pipeline, y tambien el llamante que
     /// decide no leer por un motivo propio (cola llena).
     pub fn count(&mut self, reason: RejectReason) {

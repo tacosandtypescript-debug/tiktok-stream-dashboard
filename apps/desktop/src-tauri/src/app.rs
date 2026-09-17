@@ -70,6 +70,13 @@ pub struct AppState {
     /// bus: no conoce nada de TikTok ni de Tauri.
     pub(crate) tts: Arc<TtsManager>,
     /// Proveedor de sintesis (sidecar edge-tts), compartido con el manager.
+    ///
+    /// El gestor guarda su propio clon y hoy nadie mas lo lee, pero se conserva
+    /// como unico punto de construccion del sidecar para lo que no pasa por el
+    /// gestor (por ejemplo un comando de voces o de salud, que son metodos del
+    /// trait `TtsProvider`). De ahi el `allow`: el campo sigue aqui a proposito,
+    /// no es codigo muerto olvidado.
+    #[allow(dead_code)]
     pub(crate) tts_provider: SharedTtsProvider,
     pub(crate) db_path: PathBuf,
     pub(crate) schema_version: u32,
@@ -170,10 +177,7 @@ impl AppState {
                 match receiver.recv().await {
                     Ok(event) => state.on_event(&event),
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        state
-                            .metrics
-                            .subscription_lagged
-                            .fetch_add(skipped, Ordering::Relaxed);
+                        state.note_lagged(skipped);
                         tracing::warn!(skipped, "el consumidor de estado va por detras");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -317,8 +321,10 @@ impl AppState {
                     user.clone(),
                     gift.clone(),
                 ));
-                if let Ok(mut board) = self.gifts.lock() {
-                    board.record(GiftEventView {
+                // La contabilidad de rachas vive **solo** en el tablero: el
+                // mismo numero que se enseña es el que se guarda.
+                let settlement = match self.gifts.lock() {
+                    Ok(mut board) => board.record(GiftEventView {
                         seq: event.seq,
                         timestamp_ms: event.timestamp_ms,
                         user: user.clone(),
@@ -330,17 +336,12 @@ impl AppState {
                         streakable: gift.streakable,
                         is_final: gift.is_final,
                         group_id: gift.group_id.clone(),
-                    });
-                }
+                    }),
+                    Err(_) => crate::feed::Settlement::NONE,
+                };
                 self.publish_gift_board(gift);
 
-                // Solo se contabiliza cuando la aportacion esta completa: los
-                // eventos de progreso de una racha son acumulativos.
-                let (units, diamonds) = if gift.commits() {
-                    (i64::from(gift.units()), i64::from(gift.diamonds()))
-                } else {
-                    (0, 0)
-                };
+                let (units, diamonds) = (settlement.units, settlement.diamonds);
                 if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
                     // Los regalos mueven dinero y rankings: nunca se descartan.
                     self.persist(
@@ -515,9 +516,20 @@ impl AppState {
         );
     }
 
+    /// Contabiliza los eventos que un consumidor del bus se ha saltado por ir
+    /// lento.
+    ///
+    /// Lo llaman los consumidores que pueden perder eventos (estado e interfaz):
+    /// asi el contador refleja **todo** lo que se perdio y no solo lo que perdio
+    /// uno de ellos.
+    pub fn note_lagged(&self, skipped: u64) {
+        self.metrics
+            .subscription_lagged
+            .fetch_add(skipped, Ordering::Relaxed);
+    }
+
     /// Vacia el feed de actividad (no toca el resumen de regalos).
-    pub fn clear_feed(&self) {
-        if let Ok(mut feed) = self.feed.lock() {
+    pub fn clear_feed(&self) {        if let Ok(mut feed) = self.feed.lock() {
             feed.clear();
         }
     }

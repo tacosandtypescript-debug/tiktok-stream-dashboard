@@ -176,7 +176,23 @@ impl TikTokProvider for NativeProvider {
 
     fn disconnect<'a>(&'a self) -> BoxFuture<'a, ()> {
         Box::pin(async move {
+            // El supervisor sale del bucle por cancelacion, asi que el
+            // `StreamDisconnected` que emitiria al caerse la conexion no se
+            // publica solo: sin esto la sesion quedaba abierta en la base (y
+            // `mark_crashed_streams` la marcaba como interrumpida al arrancar).
+            let estaba = self.status();
             self.stop_task().await;
+            if matches!(
+                estaba,
+                ProviderStatus::Connected | ProviderStatus::Connecting | ProviderStatus::Reconnecting
+            ) {
+                self.bus.publish(
+                    None,
+                    EventKind::StreamDisconnected {
+                        reason: "desconectado por el usuario".into(),
+                    },
+                );
+            }
             self.reporter.set(ProviderStatus::Stopped, None);
         })
     }
@@ -223,6 +239,11 @@ impl Supervisor {
     async fn run(&self, mut cancel: watch::Receiver<bool>) {
         let mut failures: u32 = 0;
         let mut delay = self.config.min_reconnect_delay;
+        // Motivo por el que el supervisor se rinde. Se guarda para **no** pisarlo
+        // con `Stopped` al salir: si no, tras "cuota inservible; detenido" el
+        // usuario veia "Desconectado" (igual que si nunca hubiera conectado) y
+        // volvia a pulsar Conectar, justo lo que se intenta evitar.
+        let mut terminal: Option<String> = None;
 
         loop {
             if *cancel.borrow() {
@@ -238,10 +259,10 @@ impl Supervisor {
                     tracing::warn!(%error, "no se pudo resolver la sala");
                     self.reporter.set(ProviderStatus::Error, Some(error.to_string()));
                     if failures >= self.config.max_consecutive_failures {
-                        self.reporter.set(
-                            ProviderStatus::Error,
-                            Some(format!("{} fallos consecutivos; detenido", failures)),
-                        );
+                        let detail = format!("{} fallos consecutivos; detenido", failures);
+                        self.reporter
+                            .set(ProviderStatus::Error, Some(detail.clone()));
+                        terminal = Some(detail);
                         break;
                     }
                     if self.sleep_or_cancel(&mut cancel, delay).await {
@@ -293,10 +314,11 @@ impl Supervisor {
                     self.reporter.set(ProviderStatus::Error, Some(error.to_string()));
                     failures += 1;
                     if failures >= self.config.max_consecutive_failures {
-                        self.reporter.set(
-                            ProviderStatus::Error,
-                            Some("cuota o firma inservible; detenido para no agotar el dia".into()),
-                        );
+                        let detail =
+                            "cuota o firma inservible; detenido para no agotar el dia".to_string();
+                        self.reporter
+                            .set(ProviderStatus::Error, Some(detail.clone()));
+                        terminal = Some(detail);
                         break;
                     }
                     // Con cuota agotada se espera mucho mas: reintentar rapido
@@ -357,7 +379,10 @@ impl Supervisor {
             delay = next_delay(delay, &self.config);
         }
 
-        self.reporter.set(ProviderStatus::Stopped, None);
+        match terminal {
+            Some(detail) => self.reporter.set(ProviderStatus::Error, Some(detail)),
+            None => self.reporter.set(ProviderStatus::Stopped, None),
+        }
     }
 
     /// Conecta el WebSocket y procesa frames hasta que falle o se cancele.

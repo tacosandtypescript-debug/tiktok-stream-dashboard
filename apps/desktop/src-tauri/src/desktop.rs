@@ -94,9 +94,12 @@ struct TtsPatch {
     enabled: Option<bool>,
     volume: Option<f32>,
     rate: Option<String>,
+    pitch: Option<String>,
     say_author: Option<bool>,
     voice_es: Option<String>,
     voice_en: Option<String>,
+    read_gifts: Option<bool>,
+    read_follows: Option<bool>,
 }
 
 #[tauri::command]
@@ -116,6 +119,15 @@ fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) {
     }
     if let Some(rate) = patch.rate {
         state.tts.set_rate(&rate);
+    }
+    if let Some(pitch) = patch.pitch {
+        state.tts.set_pitch(&pitch);
+    }
+    if let Some(value) = patch.read_gifts {
+        state.tts.set_read_gifts(value);
+    }
+    if let Some(value) = patch.read_follows {
+        state.tts.set_read_follows(value);
     }
     if let Some(say_author) = patch.say_author {
         state.tts.set_say_author(say_author);
@@ -264,8 +276,13 @@ fn spawn_ui_bridge(app: tauri::AppHandle, state: Arc<AppState>) {
                         tracing::debug!(%error, "no se pudo emitir el evento a la interfaz");
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // Ya contabilizado por el consumidor de estado.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    // Los tres consumidores comparten el mismo contador: si el
+                    // puente a la interfaz se salta eventos, el chat y la
+                    // actividad quedan con huecos y el panel de diagnostico tiene
+                    // que poder verlo (antes solo lo sumaba el estado, asi que
+                    // `subscription_lagged` subestimaba lo perdido).
+                    state.note_lagged(skipped);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

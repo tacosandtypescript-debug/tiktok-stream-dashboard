@@ -8,6 +8,7 @@ import {
   type GiftEventView,
   type GifterEntry,
   type GiftTypeSummary,
+  type Metrics,
   type Snapshot,
   type WireEvent,
 } from "./api";
@@ -54,6 +55,7 @@ const HANDLED_TYPES = new Set([
   "provider.status",
   "stream.connected",
   "stream.disconnected",
+  "stream.waiting",
   "chat.message",
   "gift.received",
   "like.updated",
@@ -83,6 +85,22 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  /** Métricas en vivo de la página Developer (solo se sondea con esa pestaña abierta). */
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+
+  /**
+   * Estados en los que el motor ya tiene una sesión en curso.
+   *
+   * Sin esto el botón Conectar seguía activo y rotulado «Conectar» mientras
+   * reconectaba: pulsarlo mataba el supervisor, reiniciaba el backoff y gastaba
+   * cuota de firma antes de tiempo.
+   */
+  const sessionBusy =
+    status === "starting" ||
+    status === "connecting" ||
+    status === "connected" ||
+    status === "reconnecting" ||
+    status === "waiting_for_live";
 
   const totalsRef = useRef(totals);
   totalsRef.current = totals;
@@ -91,13 +109,33 @@ export function App() {
   const lastReportRef = useRef(0);
   const sessionActive = snapshot?.started_at_ms != null && status !== "stopped";
 
+  /**
+   * Fusiona una foto del motor con lo que ya se ha pintado en vivo.
+   *
+   * El snapshot se construye en Rust antes de que el invoke resuelva, así que
+   * puede ser **más viejo** que los eventos ya aplicados. Reemplazar a ciegas
+   * hacía desaparecer mensajes recién llegados (y volver a aparecer al pulsar
+   * Conectar). Se conserva lo que tenga `seq` mayor que la foto.
+   */
+  const mergeSnapshot = useCallback(
+    <T extends { seq: number }>(previous: T[], incoming: T[], window: number, newestFirst: boolean) => {
+      const ultimo = incoming.length > 0 ? (newestFirst ? incoming[0].seq : incoming[incoming.length - 1].seq) : 0;
+      const vistos = new Set(incoming.map((item) => item.seq));
+      const masNuevos = previous.filter((item) => item.seq > ultimo && !vistos.has(item.seq));
+      const merged = newestFirst ? [...masNuevos, ...incoming] : [...incoming, ...masNuevos];
+      return merged.length > window ? (newestFirst ? merged.slice(0, window) : merged.slice(merged.length - window)) : merged;
+    },
+    [],
+  );
+
   const applySnapshot = useCallback((next: Snapshot) => {
     setSnapshot(next);
     setStatus(next.status);
     setDetail(null);
-    setChat(next.chat);
-    setFeed(next.events);
-    setGifts(next.gifts);
+    // Fusionado, no reemplazo: ver `mergeSnapshot`.
+    setChat((previous) => mergeSnapshot(previous, next.chat, CHAT_WINDOW, false));
+    setFeed((previous) => mergeSnapshot(previous, next.events, FEED_WINDOW, true));
+    setGifts((previous) => mergeSnapshot(previous, next.gifts, GIFT_WINDOW, true));
     // Los agregados vienen calculados del motor: la interfaz no los recalcula,
     // asi la contabilidad de rachas vive en un solo sitio.
     setTopGifters(next.top_gifters);
@@ -112,23 +150,16 @@ export function App() {
       comments: next.metrics.chat_messages,
       follows: next.metrics.follows,
     });
-  }, []);
+  }, [mergeSnapshot]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     let announced = false;
 
-    api
-      .snapshot()
-      .then((initial) => {
-        if (!cancelled) {
-          applySnapshot(initial);
-          setHandle(initial.handle);
-        }
-      })
-      .catch((cause: unknown) => setError(String(cause)));
-
+    // Se escucha ANTES de pedir la foto del motor: al revés, los eventos
+    // publicados mientras el invoke resuelve no llegarían nunca (Tauri no los
+    // reproduce) y el chat parecería perder mensajes.
     onDashEvent((event: WireEvent) => {
       // La primera vez se avisa a Rust: deja constancia en el log de que el flujo
       // en vivo funciona, sin necesidad de mirar la pantalla.
@@ -198,6 +229,11 @@ export function App() {
             kind: "info",
             detail: `conexión cerrada · ${event.reason}`,
           });
+          break;
+        case "stream.waiting":
+          // El motor sigue sondeando sin gastar cuota: el motivo se ve en la
+          // cabecera (el feed ya lo escribe Rust, aquí no se duplica).
+          setDetail(event.detail);
           break;
         case "chat.message":
           setChat((previous) => {
@@ -306,6 +342,18 @@ export function App() {
       })
       .catch((cause: unknown) => setError(String(cause)));
 
+    // La foto llega después de empezar a escuchar; `applySnapshot` la fusiona
+    // con lo que ya haya entrado en vivo en vez de reemplazarlo.
+    api
+      .snapshot()
+      .then((initial) => {
+        if (!cancelled) {
+          applySnapshot(initial);
+          setHandle(initial.handle);
+        }
+      })
+      .catch((cause: unknown) => setError(String(cause)));
+
     return () => {
       cancelled = true;
       unlisten?.();
@@ -320,38 +368,73 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [sessionActive]);
 
-  // Diagnostico temporal del chat. Comprueba los dos ultimos eslabones que no se
-  // pueden ver desde Rust: si React llego a repintar la lista y **quien** la
-  // desplaza de verdad (la propia lista o el contenedor de la pagina).
+  // Diagnóstico temporal del chat. Comprueba los dos últimos eslabones que no se
+  // pueden ver desde Rust: si React llegó a repintar la lista y **quién** la
+  // desplaza de verdad (la propia lista o el contenedor de la página).
+  //
+  // Solo cuenta como «pintado» si hay una lista montada: si el usuario está en
+  // otra pestaña no hay nada que pintar, y contarlo invalidaba el aviso de
+  // «recibe mensajes pero no renderiza ninguna lista».
   useEffect(() => {
     if (chat.length === 0) return;
     const pagina = document.querySelector<HTMLElement>("main");
     const listas = Array.from(document.querySelectorAll<HTMLElement>("ul.chat"));
-    const dom = listas.length === 0
-      ? "sin lista montada"
-      : listas
-          .map((lista) => {
-            const desborda = lista.scrollHeight > lista.clientHeight + 2;
-            const alFinal =
-              lista.scrollHeight - lista.clientHeight - Math.round(lista.scrollTop) < 8;
-            const nombre = lista.classList.contains("compact") ? "ul.chat.compact" : "ul.chat";
-            return (
-              `${nombre} ${lista.clientHeight}/${lista.scrollHeight} top=${Math.round(lista.scrollTop)}` +
-              ` desborda=${desborda ? "si" : "no"} alFinal=${alFinal ? "si" : "no"}`
-            );
-          })
-          .join(" | ") +
-        (pagina
-          ? ` || main ${pagina.clientHeight}/${pagina.scrollHeight} top=${Math.round(pagina.scrollTop)}`
-          : "");
+    const dom =
+      `tab=${tab} ` +
+      (listas.length === 0
+        ? "sin lista montada"
+        : listas
+            .map((lista) => {
+              const desborda = lista.scrollHeight > lista.clientHeight + 2;
+              const alFinal =
+                lista.scrollHeight - lista.clientHeight - Math.round(lista.scrollTop) < 8;
+              const nombre = lista.classList.contains("compact") ? "ul.chat.compact" : "ul.chat";
+              return (
+                `${nombre} ${lista.clientHeight}/${lista.scrollHeight} top=${Math.round(lista.scrollTop)}` +
+                ` desborda=${desborda ? "si" : "no"} alFinal=${alFinal ? "si" : "no"}`
+              );
+            })
+            .join(" | ") +
+          (pagina
+            ? ` || main ${pagina.clientHeight}/${pagina.scrollHeight} top=${Math.round(pagina.scrollTop)}`
+            : ""));
     void api
       .uiChat({
-        rendered_len: chat.length,
-        rendered_seq: chat[chat.length - 1]?.seq,
+        ...(listas.length > 0
+          ? { rendered_len: chat.length, rendered_seq: chat[chat.length - 1]?.seq }
+          : {}),
         dom,
       })
       .catch(() => undefined);
-  }, [chat]);
+  }, [chat, tab]);
+
+  // La página Developer enseña contadores del motor: sin este sondeo se quedaba
+  // congelada con la foto del arranque (y `api.metrics` no se usaba en ningún
+  // sitio). Solo late mientras esa pestaña está abierta.
+  useEffect(() => {
+    if (tab !== "developer") return;
+    let active = true;
+    const tick = () => {
+      void api
+        .metrics()
+        .then((next) => {
+          if (active) setMetrics(next);
+        })
+        .catch(() => undefined);
+      void api
+        .snapshot()
+        .then((next) => {
+          if (active) applySnapshot(next);
+        })
+        .catch(() => undefined);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [tab, applySnapshot]);
 
   const run = useCallback(
     async (action: () => Promise<Snapshot>) => {
@@ -390,8 +473,14 @@ export function App() {
             spellCheck={false}
             disabled={busy}
           />
-          <button type="submit" disabled={busy || handle.trim().length === 0}>
-            {busy ? t.connect.connecting : t.connect.button}
+          <button
+            type="submit"
+            disabled={busy || sessionBusy || handle.trim().length === 0}
+            title={sessionBusy ? t.connect.activeHint : undefined}
+          >
+            {busy || status === "starting" || status === "connecting"
+              ? t.connect.connecting
+              : t.connect.button}
           </button>
           <button
             type="button"
@@ -405,8 +494,12 @@ export function App() {
 
         <div className="status-box">
           <strong>{t.status[status] ?? status}</strong>
+          {/* El motivo se muestra siempre: antes quedaba oculto en cuanto había
+              un handle, así que un error o una espera no se veían. */}
           <span title={detail ?? undefined}>
-            {snapshot?.handle ? `@${snapshot.handle}` : detail ?? ""}
+            {[snapshot?.handle ? `@${snapshot.handle}` : "", detail ?? ""]
+              .filter((part) => part.length > 0)
+              .join(" · ")}
           </span>
         </div>
       </header>
@@ -467,7 +560,7 @@ export function App() {
           {tab === "developer" ? (
             <Developer
               snapshot={snapshot}
-              metrics={snapshot?.metrics ?? null}
+              metrics={metrics ?? snapshot?.metrics ?? null}
               busy={busy}
               onSimulate={() => void run(() => api.simulate("simulado"))}
               onNative={() => void run(() => api.useNativeProvider())}

@@ -169,6 +169,26 @@ export function Tts({ initial }: Props) {
         </Card>
 
         <div className="stack">
+          <Card title={t.tts.sources}>
+            <p className="hint">{t.tts.sourcesHint}</p>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={status.settings.read_gifts}
+                onChange={(event) => update({ read_gifts: event.target.checked })}
+              />
+              <span>{t.tts.readGifts}</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={status.settings.read_follows}
+                onChange={(event) => update({ read_follows: event.target.checked })}
+              />
+              <span>{t.tts.readFollows}</span>
+            </label>
+          </Card>
+
           <Card title={t.tts.volume}>
             <div className="control">
               <input

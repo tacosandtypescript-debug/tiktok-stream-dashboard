@@ -196,8 +196,12 @@ pub struct GiftEventView {
 }
 
 impl GiftEventView {
-    /// Diamantes que aporta la fila. Para una racha abierta es lo acumulado
-    /// hasta ahora, que es lo que tiene sentido mostrar.
+    /// Diamantes que aporta **esta fila**: su incremento por el valor unitario.
+    ///
+    /// `repeat_count` es lo que suma este evento a la racha, no el acumulado
+    /// (verificado contra los eventos reales guardados: una racha de dos rosas
+    /// llega como dos eventos con `repeat_count = 1`). Lo que aporta la racha
+    /// entera lo lleva la fila que la cierra.
     pub fn total_diamonds(&self) -> i64 {
         i64::from(self.diamond_count) * i64::from(self.repeat_count.max(1))
     }
@@ -208,6 +212,34 @@ impl GiftEventView {
     }
 }
 
+/// Aportacion que hay que contabilizar al registrar un evento.
+///
+/// Casi siempre es cero: mientras una racha sigue abierta no se contabiliza
+/// nada. Se llena en el evento que la cierra y cuando hay que liquidar una racha
+/// que se quedo sin cierre.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Settlement {
+    pub units: i64,
+    pub diamonds: i64,
+}
+
+impl Settlement {
+    pub const NONE: Self = Self {
+        units: 0,
+        diamonds: 0,
+    };
+}
+
+/// Racha abierta a la espera de cierre.
+#[derive(Debug, Clone)]
+struct PendingGift {
+    user: UserRef,
+    gift_id: String,
+    gift_name: String,
+    units: i64,
+    diamonds: i64,
+}
+
 /// Resumen de regalos de la sesion: recientes, top de gifters y por tipo.
 #[derive(Debug, Default)]
 pub struct GiftBoard {
@@ -216,6 +248,11 @@ pub struct GiftBoard {
     per_gift: HashMap<String, GiftTypeSummary>,
     total_gifts: i64,
     total_diamonds: i64,
+    /// Rachas abiertas por `group_id`: lo recibido y aun no contabilizado.
+    open: HashMap<String, PendingGift>,
+    /// Ultima racha de cada usuario, para liquidarla si empieza otra sin que
+    /// aquella recibiera su cierre.
+    open_by_user: HashMap<String, String>,
 }
 
 impl GiftBoard {
@@ -226,49 +263,109 @@ impl GiftBoard {
         }
     }
 
-    /// Registra un regalo.
+    /// Registra un regalo y devuelve lo que hay que contabilizar por él.
     ///
     /// El evento se guarda **siempre** para poder mostrarlo, pero solo se
-    /// contabiliza cuando cierra su aportacion: los eventos de progreso de una
-    /// racha son acumulativos y sumarlos daria 1+2+3 en lugar de 3.
-    pub fn record(&mut self, view: GiftEventView) {
+    /// contabiliza cuando su aportacion esta completa. La aportacion de una
+    /// racha es la **suma de sus incrementos**, no el valor del ultimo evento:
+    /// `repeat_count` es un incremento por mensaje. Contar solo el ultimo
+    /// infravaloraba los diamantes a la mitad en una racha de dos rosas.
+    pub fn record(&mut self, view: GiftEventView) -> Settlement {
         if self.recent.len() >= GIFT_CAPACITY {
             self.recent.pop_front();
         }
-        let commits = view.commits();
         let units = i64::from(view.repeat_count.max(1));
         let diamonds = i64::from(view.diamond_count) * units;
+        let user_id = view.user.id.clone();
         let user = view.user.clone();
         let gift_id = view.gift_id.clone();
         let gift_name = view.gift_name.clone();
+        let group_id = view.group_id.clone();
+        let commits = view.commits();
         self.recent.push_back(view);
 
-        if !commits {
-            return;
+        // Un regalo no acumulable no tiene racha: se contabiliza tal cual.
+        if !commits && (group_id.is_empty() || group_id == "0") {
+            self.settle(PendingGift {
+                user,
+                gift_id,
+                gift_name,
+                units,
+                diamonds,
+            });
+            return Settlement { units, diamonds };
         }
 
-        self.total_gifts += units;
-        self.total_diamonds += diamonds;
+        // Si este usuario ha empezado otra racha, la anterior se quedo sin
+        // cierre: se liquida lo que llevaba en lugar de perderlo (35 de 176
+        // rachas del historico no reciben `repeat_end`).
+        if let Some(previo) = self.open_by_user.get(&user_id).cloned() {
+            if previo != group_id {
+                if let Some(pendiente) = self.open.remove(&previo) {
+                    self.settle(pendiente);
+                }
+            }
+        }
+
+        let pendiente = self
+            .open
+            .entry(group_id.clone())
+            .or_insert_with(|| PendingGift {
+                user,
+                gift_id,
+                gift_name,
+                units: 0,
+                diamonds: 0,
+            });
+        pendiente.units += units;
+        pendiente.diamonds += diamonds;
+        self.open_by_user.insert(user_id.clone(), group_id.clone());
+
+        if !commits {
+            return Settlement::NONE;
+        }
+
+        self.open_by_user.remove(&user_id);
+        match self.open.remove(&group_id) {
+            Some(pendiente) => {
+                let liquidado = Settlement {
+                    units: pendiente.units,
+                    diamonds: pendiente.diamonds,
+                };
+                self.settle(pendiente);
+                liquidado
+            }
+            None => Settlement::NONE,
+        }
+    }
+
+    /// Contabiliza una aportacion ya completa.
+    fn settle(&mut self, pendiente: PendingGift) {
+        self.total_gifts += pendiente.units;
+        self.total_diamonds += pendiente.diamonds;
 
         let entry = self
             .per_user
-            .entry(user.id.clone())
+            .entry(pendiente.user.id.clone())
             .or_insert_with(|| GifterEntry {
-                user,
+                user: pendiente.user.clone(),
                 diamonds: 0,
                 gifts: 0,
             });
-        entry.diamonds += diamonds;
-        entry.gifts += units;
+        entry.diamonds += pendiente.diamonds;
+        entry.gifts += pendiente.units;
 
-        let summary = self.per_gift.entry(gift_id.clone()).or_insert_with(|| GiftTypeSummary {
-            gift_id,
-            gift_name,
-            count: 0,
-            diamonds: 0,
-        });
-        summary.count += units;
-        summary.diamonds += diamonds;
+        let summary = self
+            .per_gift
+            .entry(pendiente.gift_id.clone())
+            .or_insert_with(|| GiftTypeSummary {
+                gift_id: pendiente.gift_id.clone(),
+                gift_name: pendiente.gift_name.clone(),
+                count: 0,
+                diamonds: 0,
+            });
+        summary.count += pendiente.units;
+        summary.diamonds += pendiente.diamonds;
     }
 
     pub fn recent(&self, count: usize) -> Vec<GiftEventView> {
@@ -305,8 +402,17 @@ impl GiftBoard {
         self.recent.clear();
         self.per_user.clear();
         self.per_gift.clear();
+        // Las rachas abiertas tambien se olvidan: una sesion nueva no liquida
+        // diamantes de la anterior.
+        self.open.clear();
+        self.open_by_user.clear();
         self.total_gifts = 0;
         self.total_diamonds = 0;
+    }
+
+    /// Rachas abiertas ahora mismo (diagnostico y tests).
+    pub fn open_streaks(&self) -> usize {
+        self.open.len()
     }
 }
 
@@ -384,15 +490,21 @@ mod tests {
     #[test]
     fn el_progreso_de_una_racha_no_se_suma_ronda_a_ronda() {
         let mut board = GiftBoard::new(10);
-        // Una racha de 3 rosas llega como tres eventos acumulativos, y solo el
-        // ultimo cierra: la aportacion son 3 rosas, no 1+2+3.
-        board.record(gift(1, "1", "Carlos", 1, 1, false));
-        board.record(gift(2, "1", "Carlos", 1, 2, false));
+        // Una racha de 3 rosas: tres eventos de **un** incremento cada uno (es
+        // lo que llega de verdad: misma racha, `repeat_count = 1` en todos) y
+        // solo el ultimo cierra. La aportacion son 3 rosas.
+        assert_eq!(board.record(gift(1, "1", "Carlos", 1, 1, false)), Settlement::NONE);
+        assert_eq!(board.record(gift(2, "1", "Carlos", 1, 1, false)), Settlement::NONE);
         assert_eq!(board.total_diamonds(), 0, "mientras la racha sigue abierta no cuenta");
-        board.record(gift(3, "1", "Carlos", 1, 3, true));
+        assert_eq!(board.open_streaks(), 1);
 
+        assert_eq!(
+            board.record(gift(3, "1", "Carlos", 1, 1, true)),
+            Settlement { units: 3, diamonds: 3 }
+        );
         assert_eq!(board.total_diamonds(), 3, "3 rosas de 1 diamante");
         assert_eq!(board.total_gifts(), 3, "3 unidades, no 6");
+        assert_eq!(board.open_streaks(), 0, "la racha ya esta liquidada");
 
         let resumen = board.by_gift(5);
         assert_eq!(resumen.len(), 1);
@@ -401,6 +513,56 @@ mod tests {
 
         // Y los tres eventos siguen visibles en la lista.
         assert_eq!(board.recent(10).len(), 3);
+    }
+
+    /// Regresion medida con datos reales: una racha de dos rosas llega como dos
+    /// eventos con `repeat_count = 1`, y contar solo el ultimo daba la mitad de
+    /// los diamantes (4 en vez de 8 en la sesion del 17/09).
+    #[test]
+    fn una_racha_suma_todos_sus_incrementos() {
+        let mut board = GiftBoard::new(10);
+        board.record(gift(1, "1", "Carlos", 1, 1, false));
+        let liquidado = board.record(gift(2, "1", "Carlos", 1, 1, true));
+
+        assert_eq!(liquidado, Settlement { units: 2, diamonds: 2 }, "dos rosas, no una");
+        assert_eq!(board.total_diamonds(), 2);
+        assert_eq!(board.total_gifts(), 2);
+    }
+
+    /// Si el incremento llega agrupado (un solo evento con `repeat_count = 5`),
+    /// la racha vale 5 y se contabiliza de una vez.
+    #[test]
+    fn un_incremento_mayor_que_uno_cuenta_entero() {
+        let mut board = GiftBoard::new(10);
+        let liquidado = board.record(gift(1, "1", "Carlos", 1, 5, true));
+        assert_eq!(liquidado, Settlement { units: 5, diamonds: 5 });
+        assert_eq!(board.total_diamonds(), 5);
+    }
+
+    /// 35 de 176 rachas del historico no reciben nunca `repeat_end`. Antes esas
+    /// aportaciones se perdian enteras; ahora se liquidan cuando el mismo
+    /// usuario empieza otra racha.
+    #[test]
+    fn una_racha_sin_cierre_se_liquida_al_empezar_otra() {
+        let mut board = GiftBoard::new(10);
+        let mut primera = gift(1, "1", "Carlos", 1, 1, false);
+        primera.group_id = "g1".into();
+        let mut segunda = gift(2, "1", "Carlos", 1, 1, false);
+        segunda.group_id = "g2".into();
+
+        assert_eq!(board.record(primera), Settlement::NONE);
+        assert_eq!(board.record(segunda), Settlement::NONE);
+
+        // Al abrir la segunda, la primera (que nunca cerro) se contabiliza.
+        assert_eq!(board.total_gifts(), 1, "la racha abandonada no se pierde");
+        assert_eq!(board.total_diamonds(), 1);
+
+        // Y cerrar la segunda liquida solo lo suyo.
+        let mut cierre = gift(3, "1", "Carlos", 1, 1, true);
+        cierre.group_id = "g2".into();
+        assert_eq!(board.record(cierre), Settlement { units: 2, diamonds: 2 });
+        assert_eq!(board.total_diamonds(), 3, "1 de la abandonada + 2 de esta");
+        assert_eq!(board.open_streaks(), 0);
     }
 
     #[test]
