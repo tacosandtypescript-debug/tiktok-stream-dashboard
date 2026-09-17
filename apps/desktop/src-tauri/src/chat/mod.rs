@@ -163,7 +163,10 @@ mod tests {
 
         // Se conservan los tres ultimos, en orden.
         let recent = buffer.recent(10);
-        assert_eq!(recent.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![3, 4, 5]);
+        assert_eq!(
+            recent.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
     }
 
     #[test]
@@ -173,7 +176,10 @@ mod tests {
             buffer.push(entry(seq, "hola", "Carlos"));
         }
         let recent = buffer.recent(3);
-        assert_eq!(recent.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![8, 9, 10]);
+        assert_eq!(
+            recent.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![8, 9, 10]
+        );
         assert_eq!(buffer.recent(0).len(), 0);
     }
 
@@ -192,7 +198,11 @@ mod tests {
         assert_eq!(por_usuario.len(), 1, "la busqueda ignora acentos");
         assert_eq!(por_usuario[0].seq, 2);
 
-        assert_eq!(buffer.search("  ", 5).len(), 3, "busqueda vacia = recientes");
+        assert_eq!(
+            buffer.search("  ", 5).len(),
+            3,
+            "busqueda vacia = recientes"
+        );
     }
 
     #[test]

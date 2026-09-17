@@ -33,6 +33,7 @@ use dashboard::feed::{FeedKind, FEED_CAPACITY, GIFT_CAPACITY};
 const RAFAGA_CHAT: usize = 5_000;
 /// Regalos de la rafaga. Mas que la capacidad del resumen a proposito.
 const RAFAGA_REGALOS: usize = 2_000;
+const _: () = assert!(CHAT_CAPACITY < RAFAGA_CHAT && FEED_CAPACITY < RAFAGA_REGALOS);
 /// Cada cuantos eventos se cede el turno al consumidor en la variante con bus.
 const LOTE: usize = 64;
 /// Plazo maximo para que el consumidor aplique el centinela.
@@ -163,12 +164,10 @@ fn evento_conexion() -> Event {
 #[test]
 fn una_rafaga_deja_los_buffers_acotados_y_no_pierde_regalos() {
     assert_eq!(FEED_CAPACITY, 150, "capacidad de actividad documentada");
-    assert_eq!(GIFT_CAPACITY, 150, "capacidad del resumen de regalos documentada");
-    assert!(
-        CHAT_CAPACITY < RAFAGA_CHAT && FEED_CAPACITY < RAFAGA_REGALOS,
-        "la rafaga debe superar con holgura las capacidades, o no prueba nada"
+    assert_eq!(
+        GIFT_CAPACITY, 150,
+        "capacidad del resumen de regalos documentada"
     );
-
     let db = DbTemp::nueva("rafaga");
     let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
     let inicio = Instant::now();
@@ -310,7 +309,11 @@ fn una_rafaga_deja_los_buffers_acotados_y_no_pierde_regalos() {
         "los regalos son criticos: no puede faltar ninguno \
          (escritos={escritos}, descartados={descartados})"
     );
-    assert_eq!(abiertas, Some(1), "la sesion sigue abierta mientras corre el directo");
+    assert_eq!(
+        abiertas,
+        Some(1),
+        "la sesion sigue abierta mientras corre el directo"
+    );
 
     // Se informa de los descartes en lugar de exigir cero: perder chat es
     // aceptable y esta documentado, perder la cuenta no.
@@ -370,7 +373,8 @@ struct Banco {
 impl Banco {
     fn arrancar(db: &DbTemp, capacidad: usize) -> Self {
         let estado = Arc::new(
-            AppState::open(db.path(), 0).expect("el estado deberia abrir la base de datos temporal"),
+            AppState::open(db.path(), 0)
+                .expect("el estado deberia abrir la base de datos temporal"),
         );
         let metricas = Arc::new(Metrics::default());
         let bus = Arc::new(EventBus::new(capacidad, metricas.clone()));
@@ -419,8 +423,10 @@ impl Banco {
             nickname: marca.clone(),
         };
         assert!(
-            self.bus
-                .publish(Some(marca.clone()), EventKind::FollowReceived { user: centinela }),
+            self.bus.publish(
+                Some(marca.clone()),
+                EventKind::FollowReceived { user: centinela }
+            ),
             "el centinela no deberia ser un duplicado"
         );
 
@@ -515,7 +521,10 @@ async fn la_rafaga_por_el_bus_tambien_deja_el_estado_acotado() {
         del_bus.gifts, RAFAGA_REGALOS as u64,
         "y todos los regalos publicados"
     );
-    assert_eq!(del_bus.duplicates_dropped, 0, "la rafaga no lleva duplicados");
+    assert_eq!(
+        del_bus.duplicates_dropped, 0,
+        "la rafaga no lleva duplicados"
+    );
     assert!(
         snapshot.chat.len() <= CHAT_CAPACITY,
         "el chat se paso: {} > {CHAT_CAPACITY}",

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::event::UserRef;
 // Los tipos del tablero viven en el protocolo porque viajan a la interfaz.
-pub use crate::core::event::{GifterEntry, GiftTypeSummary};
+pub use crate::core::event::{GiftTypeSummary, GifterEntry};
 
 /// Eventos que se muestran en la columna de actividad.
 ///
@@ -75,7 +75,12 @@ impl FeedItem {
         }
     }
 
-    pub fn gift(seq: u64, timestamp_ms: i64, user: UserRef, gift: crate::core::event::GiftInfo) -> Self {
+    pub fn gift(
+        seq: u64,
+        timestamp_ms: i64,
+        user: UserRef,
+        gift: crate::core::event::GiftInfo,
+    ) -> Self {
         Self {
             seq,
             timestamp_ms,
@@ -114,7 +119,13 @@ impl FeedItem {
         }
     }
 
-    pub fn likes(seq: u64, timestamp_ms: i64, user: Option<UserRef>, count: i64, total: i64) -> Self {
+    pub fn likes(
+        seq: u64,
+        timestamp_ms: i64,
+        user: Option<UserRef>,
+        count: i64,
+        total: i64,
+    ) -> Self {
         Self {
             seq,
             timestamp_ms,
@@ -451,7 +462,11 @@ impl GiftBoard {
 
     pub fn by_gift(&self, count: usize) -> Vec<GiftTypeSummary> {
         let mut entries: Vec<GiftTypeSummary> = self.per_gift.values().cloned().collect();
-        entries.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.gift_name.cmp(&b.gift_name)));
+        entries.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.gift_name.cmp(&b.gift_name))
+        });
         entries.truncate(count);
         entries
     }
@@ -502,7 +517,14 @@ mod tests {
         }
     }
 
-    fn gift(seq: u64, user_id: &str, nickname: &str, diamonds: i32, repeat: i32, final_: bool) -> GiftEventView {
+    fn gift(
+        seq: u64,
+        user_id: &str,
+        nickname: &str,
+        diamonds: i32,
+        repeat: i32,
+        final_: bool,
+    ) -> GiftEventView {
         GiftEventView {
             seq,
             timestamp_ms: seq as i64,
@@ -567,12 +589,19 @@ mod tests {
             board.record(gift(2, "1", "Carlos", 1, 1, false)).current,
             Settlement::NONE
         );
-        assert_eq!(board.total_diamonds(), 0, "mientras la racha sigue abierta no cuenta");
+        assert_eq!(
+            board.total_diamonds(),
+            0,
+            "mientras la racha sigue abierta no cuenta"
+        );
         assert_eq!(board.open_streaks(), 1);
 
         assert_eq!(
             board.record(gift(3, "1", "Carlos", 1, 1, true)).current,
-            Settlement { units: 3, diamonds: 3 }
+            Settlement {
+                units: 3,
+                diamonds: 3
+            }
         );
         assert_eq!(board.total_diamonds(), 3, "3 rosas de 1 diamante");
         assert_eq!(board.total_gifts(), 3, "3 unidades, no 6");
@@ -598,7 +627,10 @@ mod tests {
 
         assert_eq!(
             liquidado.current,
-            Settlement { units: 2, diamonds: 2 },
+            Settlement {
+                units: 2,
+                diamonds: 2
+            },
             "dos rosas, no una"
         );
         assert_eq!(board.total_diamonds(), 2);
@@ -611,7 +643,13 @@ mod tests {
     fn un_incremento_mayor_que_uno_cuenta_entero() {
         let mut board = GiftBoard::new(10);
         let liquidado = board.record(gift(1, "1", "Carlos", 1, 5, true));
-        assert_eq!(liquidado.current, Settlement { units: 5, diamonds: 5 });
+        assert_eq!(
+            liquidado.current,
+            Settlement {
+                units: 5,
+                diamonds: 5
+            }
+        );
         assert_eq!(board.total_diamonds(), 5);
     }
 
@@ -651,7 +689,13 @@ mod tests {
         let mut cierre = gift(3, "1", "Carlos", 1, 1, true);
         cierre.group_id = "g2".into();
         let cierre = board.record(cierre);
-        assert_eq!(cierre.current, Settlement { units: 2, diamonds: 2 });
+        assert_eq!(
+            cierre.current,
+            Settlement {
+                units: 2,
+                diamonds: 2
+            }
+        );
         assert!(
             cierre.abandoned.is_empty(),
             "cerrar la racha vigente no abandona ninguna"
@@ -690,7 +734,11 @@ mod tests {
         assert_eq!(ana.units, 2, "dos unidades, no el valor de la ultima");
         assert_eq!(ana.diamonds, 10, "2 TikTok de 5 diamantes");
 
-        assert_eq!(board.total_diamonds(), 11, "todo lo pendiente se contabiliza");
+        assert_eq!(
+            board.total_diamonds(),
+            11,
+            "todo lo pendiente se contabiliza"
+        );
         assert_eq!(board.total_gifts(), 3);
         assert_eq!(board.open_streaks(), 0, "no queda ninguna racha abierta");
         // El ranking se actualiza con lo liquidado.
@@ -754,7 +802,10 @@ mod tests {
         assert_eq!(suscripcion.months, Some(3));
 
         let aviso = FeedItem::info(6, 600, "el servidor cerro la conexion");
-        assert_eq!(aviso.detail.as_deref(), Some("el servidor cerro la conexion"));
+        assert_eq!(
+            aviso.detail.as_deref(),
+            Some("el servidor cerro la conexion")
+        );
     }
 
     #[test]

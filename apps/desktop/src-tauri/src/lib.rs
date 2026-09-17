@@ -33,7 +33,10 @@ mod desktop;
 /// (o los tests de integracion) puedan usarlo.
 pub fn init() -> anyhow::Result<()> {
     telemetry::init()?;
-    tracing::info!("TikTok LIVE Stream Dashboard v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "TikTok LIVE Stream Dashboard v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     Ok(())
 }
 
@@ -212,7 +215,8 @@ pub fn self_test(seconds: u64, live: Option<&str>) -> anyhow::Result<()> {
                         .provider
                         .write()
                         .map_err(|_| anyhow::anyhow!("cerrojo envenenado"))?;
-                    *guard = state.simulated.clone() as std::sync::Arc<dyn providers::TikTokProvider>;
+                    *guard =
+                        state.simulated.clone() as std::sync::Arc<dyn providers::TikTokProvider>;
                 }
                 state.simulated.set_interval(Duration::from_millis(50));
                 state

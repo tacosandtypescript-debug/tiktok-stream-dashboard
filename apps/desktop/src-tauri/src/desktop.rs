@@ -190,7 +190,8 @@ fn tts_voices() -> Vec<crate::tts::Voice> {
 /// muestre una lista ficticia.
 #[tauri::command]
 fn tts_devices() -> Result<Vec<String>, String> {
-    crate::tts::player::list_devices().map_err(|error| format!("no se pudieron listar los dispositivos: {error:#}"))
+    crate::tts::player::list_devices()
+        .map_err(|error| format!("no se pudieron listar los dispositivos: {error:#}"))
 }
 
 /// Selecciona una salida TTS de forma transaccional desde el punto de vista de

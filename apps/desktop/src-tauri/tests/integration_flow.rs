@@ -243,12 +243,9 @@ impl Banco {
 
         let mut intentos = 0u32;
         loop {
-            let visto = self
-                .estado
-                .snapshot()
-                .events
-                .iter()
-                .any(|item| item.user.as_ref().map(|user| user.nickname.as_str()) == Some(marca.as_str()));
+            let visto = self.estado.snapshot().events.iter().any(|item| {
+                item.user.as_ref().map(|user| user.nickname.as_str()) == Some(marca.as_str())
+            });
             if visto {
                 return;
             }
@@ -400,11 +397,18 @@ fn un_streak_de_regalos_cuenta_unidades_y_aparece_entero_en_el_resumen() {
     // Todos los eventos llegan al resumen y al feed, incluido el progreso: la
     // lista y la actividad son un registro, no un acumulador.
     // (`metrics.gifts` lo incrementa el bus, y aqui se aplica con `on_event`.)
-    assert_eq!(snapshot.metrics.gifts, 0, "las metricas del bus no cuentan esto");
+    assert_eq!(
+        snapshot.metrics.gifts, 0,
+        "las metricas del bus no cuentan esto"
+    );
     assert_eq!(snapshot.gifts.len(), 4, "ninguno se pierde en la lista");
     let finales: Vec<&dashboard::feed::GiftEventView> =
         snapshot.gifts.iter().filter(|view| view.is_final).collect();
-    assert_eq!(finales.len(), 2, "solo cierran la racha el ultimo y el suelto");
+    assert_eq!(
+        finales.len(),
+        2,
+        "solo cierran la racha el ultimo y el suelto"
+    );
     let del_grupo = snapshot
         .gifts
         .iter()
@@ -428,7 +432,10 @@ fn un_streak_de_regalos_cuenta_unidades_y_aparece_entero_en_el_resumen() {
         .iter()
         .find(|resumen| resumen.gift_name == "Rose")
         .expect("el resumen por tipo deberia incluir Rose");
-    assert_eq!(rosas.count, 3, "la racha cierra en 3: son 3 unidades, no 1+2+3");
+    assert_eq!(
+        rosas.count, 3,
+        "la racha cierra en 3: son 3 unidades, no 1+2+3"
+    );
     assert_eq!(rosas.diamonds, 3, "una rosa vale un diamante");
     let tiktok = snapshot
         .gifts_by_type
@@ -505,7 +512,8 @@ fn los_diamantes_de_un_streak_no_se_suman_ronda_a_ronda() {
     );
     // El ranking tiene que mirar los diamantes, no los eventos.
     assert_eq!(
-        snapshot.top_gifters[0].user.nickname, "Lucas",
+        snapshot.top_gifters[0].user.nickname,
+        "Lucas",
         "5 diamantes sueltos mandan sobre los 3 de la rosa final: {:?}",
         snapshot
             .top_gifters
@@ -654,8 +662,14 @@ fn solo_los_likes_notables_y_los_follows_aparecen_en_la_actividad() {
     // cambia con ella en lugar de quedarse obsoleto en silencio.
     let pequeno = 3;
     let grande = 250;
-    assert!(!like_is_notable(pequeno), "el incremento debe estar bajo el umbral");
-    assert!(like_is_notable(grande), "el incremento debe superar el umbral");
+    assert!(
+        !like_is_notable(pequeno),
+        "el incremento debe estar bajo el umbral"
+    );
+    assert!(
+        like_is_notable(grande),
+        "el incremento debe superar el umbral"
+    );
 
     estado.on_event(&Event::new(
         3,
@@ -682,7 +696,10 @@ fn solo_los_likes_notables_y_los_follows_aparecen_en_la_actividad() {
     // Se aplica con `on_event`, asi que los contadores del bus siguen a cero;
     // lo que se comprueba aqui es que solo el like grande llega a la actividad.
     assert_eq!(snapshot.metrics.follows, 0);
-    assert_eq!(snapshot.metrics.like_events, 0, "las metricas del bus no cuentan esto");
+    assert_eq!(
+        snapshot.metrics.like_events, 0,
+        "las metricas del bus no cuentan esto"
+    );
     assert_eq!(snapshot.metrics.likes_total, 0);
     assert_eq!(
         snapshot
@@ -724,9 +741,8 @@ fn solo_los_likes_notables_y_los_follows_aparecen_en_la_actividad() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn el_bus_descarta_el_mismo_source_id_antes_de_llegar_al_estado() {
     let db = DbTemp::nueva("flujo-duplicado");
-    let estado = Arc::new(
-        AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"),
-    );
+    let estado =
+        Arc::new(AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"));
     // La sala la fija el bus, como hace el provider al conectar.
     let mut banco = Banco::nuevo(estado.clone(), 64);
     banco.bus.set_room(SALA);
@@ -769,7 +785,9 @@ async fn el_bus_descarta_el_mismo_source_id_antes_de_llegar_al_estado() {
         "el duplicado debe descartarse en el bus"
     );
 
-    banco.sincronizar("la conexion, el chat y su duplicado").await;
+    banco
+        .sincronizar("la conexion, el chat y su duplicado")
+        .await;
 
     let snapshot = estado.snapshot();
     assert_eq!(
@@ -813,9 +831,8 @@ async fn el_bus_descarta_el_mismo_source_id_antes_de_llegar_al_estado() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn la_desconexion_cierra_la_sesion_en_la_base_de_datos() {
     let db = DbTemp::nueva("flujo-cierre");
-    let estado = Arc::new(
-        AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"),
-    );
+    let estado =
+        Arc::new(AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"));
     let mut banco = Banco::nuevo(estado.clone(), 64);
     banco.bus.set_room(SALA);
     let carlos = usuario("1", "Carlos");
@@ -867,7 +884,10 @@ async fn la_desconexion_cierra_la_sesion_en_la_base_de_datos() {
         snapshot.stream_id.is_none(),
         "al desconectar, el motor suelta la sesion"
     );
-    assert!(snapshot.started_at_ms.is_none(), "y deja de contar duracion");
+    assert!(
+        snapshot.started_at_ms.is_none(),
+        "y deja de contar duracion"
+    );
 
     estado.shutdown();
 
@@ -980,9 +1000,8 @@ fn el_pico_de_espectadores_y_los_likes_se_guardan_al_cerrar_la_sesion() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn la_sesion_guarda_el_handle_con_el_que_se_conecta() {
     let db = DbTemp::nueva("flujo-handle");
-    let estado = Arc::new(
-        AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"),
-    );
+    let estado =
+        Arc::new(AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal"));
     let _consumer = tokio::spawn(estado.consumer_future());
     // Se usa el simulador para no tocar la red; el camino que se prueba
     // (motor -> handle -> base) es el mismo que el del proveedor real.

@@ -42,24 +42,104 @@ pub const DEFAULT_VOICE: &str = "es-ES-ElviraNeural";
 
 const CATALOG: &[(&str, &str, Language, Gender)] = &[
     // Espanol: Espana
-    ("es-ES-ElviraNeural", "Elvira (España)", Language::Es, Gender::Female),
-    ("es-ES-AlvaroNeural", "Álvaro (España)", Language::Es, Gender::Male),
-    ("es-ES-XimenaNeural", "Ximena (España)", Language::Es, Gender::Female),
+    (
+        "es-ES-ElviraNeural",
+        "Elvira (España)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-ES-AlvaroNeural",
+        "Álvaro (España)",
+        Language::Es,
+        Gender::Male,
+    ),
+    (
+        "es-ES-XimenaNeural",
+        "Ximena (España)",
+        Language::Es,
+        Gender::Female,
+    ),
     // Espanol: Latinoamerica
-    ("es-MX-DaliaNeural", "Dalia (México)", Language::Es, Gender::Female),
-    ("es-MX-JorgeNeural", "Jorge (México)", Language::Es, Gender::Male),
-    ("es-AR-ElenaNeural", "Elena (Argentina)", Language::Es, Gender::Female),
-    ("es-AR-TomasNeural", "Tomás (Argentina)", Language::Es, Gender::Male),
-    ("es-CO-SalomeNeural", "Salomé (Colombia)", Language::Es, Gender::Female),
-    ("es-CO-GonzaloNeural", "Gonzalo (Colombia)", Language::Es, Gender::Male),
-    ("es-PE-CamilaNeural", "Camila (Perú)", Language::Es, Gender::Female),
-    ("es-CL-CatalinaNeural", "Catalina (Chile)", Language::Es, Gender::Female),
-    ("es-VE-PaolaNeural", "Paola (Venezuela)", Language::Es, Gender::Female),
-    ("es-US-PalomaNeural", "Paloma (EE. UU.)", Language::Es, Gender::Female),
+    (
+        "es-MX-DaliaNeural",
+        "Dalia (México)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-MX-JorgeNeural",
+        "Jorge (México)",
+        Language::Es,
+        Gender::Male,
+    ),
+    (
+        "es-AR-ElenaNeural",
+        "Elena (Argentina)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-AR-TomasNeural",
+        "Tomás (Argentina)",
+        Language::Es,
+        Gender::Male,
+    ),
+    (
+        "es-CO-SalomeNeural",
+        "Salomé (Colombia)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-CO-GonzaloNeural",
+        "Gonzalo (Colombia)",
+        Language::Es,
+        Gender::Male,
+    ),
+    (
+        "es-PE-CamilaNeural",
+        "Camila (Perú)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-CL-CatalinaNeural",
+        "Catalina (Chile)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-VE-PaolaNeural",
+        "Paola (Venezuela)",
+        Language::Es,
+        Gender::Female,
+    ),
+    (
+        "es-US-PalomaNeural",
+        "Paloma (EE. UU.)",
+        Language::Es,
+        Gender::Female,
+    ),
     // Ingles
-    ("en-US-AriaNeural", "Aria (EE. UU.)", Language::En, Gender::Female),
-    ("en-US-GuyNeural", "Guy (EE. UU.)", Language::En, Gender::Male),
-    ("en-GB-SoniaNeural", "Sonia (Reino Unido)", Language::En, Gender::Female),
+    (
+        "en-US-AriaNeural",
+        "Aria (EE. UU.)",
+        Language::En,
+        Gender::Female,
+    ),
+    (
+        "en-US-GuyNeural",
+        "Guy (EE. UU.)",
+        Language::En,
+        Gender::Male,
+    ),
+    (
+        "en-GB-SoniaNeural",
+        "Sonia (Reino Unido)",
+        Language::En,
+        Gender::Female,
+    ),
 ];
 
 pub fn catalog() -> Vec<Voice> {
@@ -100,8 +180,20 @@ pub fn detect_language(text: &str) -> Language {
         letters += 1;
         if matches!(
             character,
-            'á' | 'é' | 'í' | 'ó' | 'ú' | 'ü' | 'ñ' | '¿' | '¡'
-                | 'Á' | 'É' | 'Í' | 'Ó' | 'Ú' | 'Ñ'
+            'á' | 'é'
+                | 'í'
+                | 'ó'
+                | 'ú'
+                | 'ü'
+                | 'ñ'
+                | '¿'
+                | '¡'
+                | 'Á'
+                | 'É'
+                | 'Í'
+                | 'Ó'
+                | 'Ú'
+                | 'Ñ'
         ) {
             spanish_markers += 2;
         }

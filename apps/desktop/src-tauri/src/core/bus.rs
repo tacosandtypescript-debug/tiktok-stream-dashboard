@@ -106,7 +106,9 @@ impl EventBus {
                 .map(|mut dedupe| dedupe.insert(&dedupe_key))
                 .unwrap_or(true);
             if !is_new {
-                self.metrics.duplicates_dropped.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .duplicates_dropped
+                    .fetch_add(1, Ordering::Relaxed);
                 return false;
             }
         }
@@ -116,7 +118,9 @@ impl EventBus {
         let event = Arc::new(Event::new(seq, room_id, source_id, kind));
         // `send` falla solo si no hay receptores; no es un error.
         let _ = self.sender.send(event);
-        self.metrics.events_published.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .events_published
+            .fetch_add(1, Ordering::Relaxed);
         true
     }
 
@@ -197,7 +201,10 @@ mod tests {
         let mut rx = bus.subscribe();
 
         assert!(bus.publish(Some("msg-1".into()), chat("1")));
-        assert!(!bus.publish(Some("msg-1".into()), chat("1")), "duplicado aceptado");
+        assert!(
+            !bus.publish(Some("msg-1".into()), chat("1")),
+            "duplicado aceptado"
+        );
         // Sin source_id no hay deduplicacion posible.
         assert!(bus.publish(None, chat("1")));
 
@@ -250,7 +257,10 @@ mod tests {
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.like_events, 2);
         assert_eq!(snapshot.likes_total, 1_008);
-        assert_ne!(snapshot.likes_total, 11, "no se deben sumar los incrementos");
+        assert_ne!(
+            snapshot.likes_total, 11,
+            "no se deben sumar los incrementos"
+        );
     }
 
     #[tokio::test]
@@ -278,6 +288,6 @@ mod tests {
         }
         assert!(dedupe.seen.len() <= DEDUPE_CAPACITY);
         // El mas antiguo ya se olvido; el mas reciente sigue presente.
-        assert!(dedupe.insert(&format!("id-{}", DEDUPE_CAPACITY + 99)) == false);
+        assert!(!dedupe.insert(&format!("id-{}", DEDUPE_CAPACITY + 99)));
     }
 }

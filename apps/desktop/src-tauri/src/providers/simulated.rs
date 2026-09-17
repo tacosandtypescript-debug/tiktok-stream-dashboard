@@ -284,7 +284,8 @@ mod tests {
         let mut kinds = Vec::new();
         let deadline = tokio::time::Instant::now() + plazo;
         while kinds.len() < minimo && tokio::time::Instant::now() < deadline {
-            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await
+            {
                 kinds.push(event.kind.clone());
             }
         }
@@ -325,7 +326,8 @@ mod tests {
         let mut like_events = 0;
         let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         while like_events < 2 && tokio::time::Instant::now() < deadline {
-            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await
+            {
                 if let EventKind::LikeUpdated { total, .. } = event.kind {
                     last_total = Some(total);
                     like_events += 1;
@@ -353,7 +355,8 @@ mod tests {
         let mut grupos: Vec<(String, bool)> = Vec::new();
         let deadline = tokio::time::Instant::now() + Duration::from_millis(300);
         while grupos.len() < 3 && tokio::time::Instant::now() < deadline {
-            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(60), rx.recv()).await
+            {
                 if let EventKind::GiftReceived { gift, .. } = event.kind.clone() {
                     if gift.streakable {
                         grupos.push((gift.group_id, gift.is_final));
@@ -363,9 +366,16 @@ mod tests {
         }
         provider.disconnect().await;
 
-        assert_eq!(grupos.len(), 3, "se esperan tres eventos del streak: {grupos:?}");
+        assert_eq!(
+            grupos.len(),
+            3,
+            "se esperan tres eventos del streak: {grupos:?}"
+        );
         assert_eq!(grupos[0].0, grupos[2].0, "el streak comparte group_id");
-        assert!(!grupos[0].1 && !grupos[1].1, "los dos primeros son progreso");
+        assert!(
+            !grupos[0].1 && !grupos[1].1,
+            "los dos primeros son progreso"
+        );
         assert!(grupos[2].1, "el ultimo cierra el streak");
     }
 }

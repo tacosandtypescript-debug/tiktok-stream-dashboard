@@ -11,7 +11,7 @@ pub mod provider;
 pub mod queue;
 pub mod voices;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
 pub use manager::{TtsManager, TtsNowPlaying, TtsSettings, TtsStatus};
@@ -48,7 +48,7 @@ pub fn sidecar_filename() -> String {
     format!("{}-{}{}", SIDECAR_NAME, sidecar_target_triple(), extension)
 }
 
-fn sidecar_candidates(root: &PathBuf) -> Vec<PathBuf> {
+fn sidecar_candidates(root: &Path) -> Vec<PathBuf> {
     let filename = sidecar_filename();
     let mut candidates = Vec::new();
 
@@ -63,7 +63,11 @@ fn sidecar_candidates(root: &PathBuf) -> Vec<PathBuf> {
             // Release/installed layout: alongside the dashboard or in the
             // resources directory used by Tauri's NSIS bundle.
             candidates.push(directory.join(&filename));
-            candidates.push(directory.join(SIDECAR_NAME).with_extension(if cfg!(windows) { "exe" } else { "" }));
+            candidates.push(
+                directory
+                    .join(SIDECAR_NAME)
+                    .with_extension(if cfg!(windows) { "exe" } else { "" }),
+            );
             candidates.push(directory.join("resources").join(&filename));
         }
     }
@@ -72,7 +76,10 @@ fn sidecar_candidates(root: &PathBuf) -> Vec<PathBuf> {
     // tooling cache are all deterministic and remain outside the repository's
     // tracked source files.
     candidates.push(root.join("apps/desktop/src-tauri/binaries").join(&filename));
-    candidates.push(root.join("apps/desktop/src-tauri/target/release").join(&filename));
+    candidates.push(
+        root.join("apps/desktop/src-tauri/target/release")
+            .join(&filename),
+    );
     candidates.push(root.join(".tooling/tts-provider").join(&filename));
 
     candidates
@@ -115,8 +122,10 @@ pub fn find_repo_root() -> PathBuf {
 /// Tauri incluye el ejecutable de PyInstaller mediante `externalBin`.
 pub fn default_config() -> TtsConfig {
     let root = find_repo_root();
-    let mut config = TtsConfig::default();
-    config.script = root.join(SIDECAR_SCRIPT);
+    let mut config = TtsConfig {
+        script: root.join(SIDECAR_SCRIPT),
+        ..TtsConfig::default()
+    };
 
     let candidates = sidecar_candidates(&root);
     if let Some(executable) = candidates.iter().find(|candidate| candidate.exists()) {
@@ -164,7 +173,11 @@ pub fn chat_line(nickname: &str, content: &str, say_author: bool) -> String {
 /// (ver `TtsManager::wants`).
 pub fn gift_line(nickname: &str, gift: &crate::core::event::GiftInfo) -> String {
     let nombre = gift.name.trim();
-    let nombre = if nombre.is_empty() { "un regalo" } else { nombre };
+    let nombre = if nombre.is_empty() {
+        "un regalo"
+    } else {
+        nombre
+    };
     let nucleo = match gift.units() {
         0 | 1 => nombre.to_string(),
         unidades => format!("{unidades} x {nombre}"),
@@ -205,7 +218,10 @@ mod tests {
 
     #[test]
     fn compone_la_linea_que_se_lee() {
-        assert_eq!(chat_line("Carlos", "hola a todos", true), "Carlos dice: hola a todos");
+        assert_eq!(
+            chat_line("Carlos", "hola a todos", true),
+            "Carlos dice: hola a todos"
+        );
         assert_eq!(chat_line("Carlos", "hola a todos", false), "hola a todos");
         // Sin apodo no se inventa un prefijo raro.
         assert_eq!(chat_line("   ", "hola", true), "hola");

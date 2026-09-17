@@ -34,12 +34,9 @@ fn main() {
         let voice = value_of(&args, "--voice");
         let rate = value_of(&args, "--rate");
         let pitch = value_of(&args, "--pitch");
-        if let Err(error) = dashboard::tts_probe(
-            &text,
-            voice.as_deref(),
-            rate.as_deref(),
-            pitch.as_deref(),
-        ) {
+        if let Err(error) =
+            dashboard::tts_probe(&text, voice.as_deref(), rate.as_deref(), pitch.as_deref())
+        {
             eprintln!("prueba de TTS fallida: {error:#}");
             std::process::exit(1);
         }

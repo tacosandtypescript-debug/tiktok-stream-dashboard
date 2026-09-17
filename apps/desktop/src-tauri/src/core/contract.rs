@@ -39,11 +39,13 @@ fn serialized(kind: EventKind) -> Value {
     serde_json::to_value(&event).expect("el evento debe serializar")
 }
 
+type ContractCase = (&'static str, EventKind, Vec<(&'static str, &'static str)>);
+
 /// Comprueba que el evento lleva el tipo plano y los campos que la interfaz lee.
 #[test]
 fn todos_los_eventos_llevan_el_tipo_plano_y_sus_campos() {
     // (tipo esperado, evento, campos que la interfaz lee)
-    let casos: Vec<(&str, EventKind, Vec<(&str, &str)>)> = vec![
+    let casos: Vec<ContractCase> = vec![
         (
             "stream.connected",
             EventKind::StreamConnected {
@@ -177,7 +179,13 @@ fn todos_los_eventos_llevan_el_tipo_plano_y_sus_campos() {
             "el campo `type` debe ir en la raiz y valer {esperado}: {json}"
         );
         // La envoltura del protocolo sigue presente.
-        for clave in ["protocol_version", "event_id", "seq", "timestamp_ms", "room_id"] {
+        for clave in [
+            "protocol_version",
+            "event_id",
+            "seq",
+            "timestamp_ms",
+            "room_id",
+        ] {
             assert!(json.get(clave).is_some(), "falta {clave} en {json}");
         }
         // Y los campos que la interfaz lee, con el tipo JSON correcto.

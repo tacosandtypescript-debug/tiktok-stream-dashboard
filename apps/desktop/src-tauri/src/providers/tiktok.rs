@@ -204,7 +204,9 @@ impl TikTokProvider for NativeProvider {
             self.stop_task().await;
             if matches!(
                 estaba,
-                ProviderStatus::Connected | ProviderStatus::Connecting | ProviderStatus::Reconnecting
+                ProviderStatus::Connected
+                    | ProviderStatus::Connecting
+                    | ProviderStatus::Reconnecting
             ) {
                 self.bus.publish(
                     None,
@@ -332,7 +334,8 @@ impl Supervisor {
                     failures += 1;
                     self.metrics.provider_errors.fetch_add(1, Ordering::Relaxed);
                     tracing::warn!(%error, "no se pudo resolver la sala");
-                    self.reporter.set(ProviderStatus::Error, Some(error.to_string()));
+                    self.reporter
+                        .set(ProviderStatus::Error, Some(error.to_string()));
                     if failures >= self.config.max_consecutive_failures {
                         let detail = format!("{} fallos consecutivos; detenido", failures);
                         self.reporter
@@ -379,7 +382,8 @@ impl Supervisor {
             delay = self.config.min_reconnect_delay;
 
             // --- Etapa 2: payload firmado (consume 1 unidad de cuota) ------
-            self.reporter.set(ProviderStatus::Connecting, Some("firmando conexion".into()));
+            self.reporter
+                .set(ProviderStatus::Connecting, Some("firmando conexion".into()));
             self.metrics.sign_requests.fetch_add(1, Ordering::Relaxed);
             let signed = match tokio::select! {
                 result = fetch_signed(&self.http, &self.config, &room.room_id, cursor.as_deref()) => result,
@@ -394,11 +398,14 @@ impl Supervisor {
                 Err(error) => {
                     let rate_limited = error.to_string().contains("LIMITE");
                     if rate_limited {
-                        self.metrics.sign_rate_limited.fetch_add(1, Ordering::Relaxed);
+                        self.metrics
+                            .sign_rate_limited
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     self.metrics.provider_errors.fetch_add(1, Ordering::Relaxed);
                     tracing::warn!(%error, rate_limited, "fallo la firma");
-                    self.reporter.set(ProviderStatus::Error, Some(error.to_string()));
+                    self.reporter
+                        .set(ProviderStatus::Error, Some(error.to_string()));
                     failures += 1;
                     if failures >= self.config.max_consecutive_failures {
                         let detail =
@@ -427,21 +434,21 @@ impl Supervisor {
                 cursor = Some(signed.envelope.cursor.clone());
             }
 
-        // --- Etapas 3 y 4: WebSocket + decodificacion ------------------
-        // Traza temporal: que nos ha dado el servidor de firma exactamente.
-        // El `push_server` decide si habra eventos en vivo: se registra siempre.
-        tracing::info!(
-            push_server = %signed.envelope.push_server,
-            cursor = %signed.envelope.cursor,
-            need_ack = signed.envelope.need_ack,
-            is_first = signed.envelope.is_first,
-            heartbeat_duration = signed.envelope.heartbeat_duration,
-            fetch_interval = signed.envelope.fetch_interval,
-            route_params = signed.envelope.route_params.len(),
-            mensajes = signed.envelope.messages.len(),
-            internal_ext = signed.envelope.internal_ext.len(),
-            "sobre firmado recibido"
-        );
+            // --- Etapas 3 y 4: WebSocket + decodificacion ------------------
+            // Traza temporal: que nos ha dado el servidor de firma exactamente.
+            // El `push_server` decide si habra eventos en vivo: se registra siempre.
+            tracing::info!(
+                push_server = %signed.envelope.push_server,
+                cursor = %signed.envelope.cursor,
+                need_ack = signed.envelope.need_ack,
+                is_first = signed.envelope.is_first,
+                heartbeat_duration = signed.envelope.heartbeat_duration,
+                fetch_interval = signed.envelope.fetch_interval,
+                route_params = signed.envelope.route_params.len(),
+                mensajes = signed.envelope.messages.len(),
+                internal_ext = signed.envelope.internal_ext.len(),
+                "sobre firmado recibido"
+            );
             match self.pump(&mut cancel, &signed, &room, &mut cursor).await {
                 Ok(PumpExit::Cancelled) => break,
                 Ok(PumpExit::Terminal(reason)) => {
@@ -465,7 +472,8 @@ impl Supervisor {
                             reason: reason.clone(),
                         },
                     );
-                    self.reporter.set(ProviderStatus::Reconnecting, Some(reason));
+                    self.reporter
+                        .set(ProviderStatus::Reconnecting, Some(reason));
                 }
                 Err(error) => {
                     if *cancel.borrow() {
@@ -482,7 +490,8 @@ impl Supervisor {
                             reason: reason.clone(),
                         },
                     );
-                    self.reporter.set(ProviderStatus::Reconnecting, Some(reason));
+                    self.reporter
+                        .set(ProviderStatus::Reconnecting, Some(reason));
                 }
             }
             if self.sleep_or_cancel(&mut cancel, delay).await {
@@ -542,7 +551,8 @@ impl Supervisor {
         self.metrics.ws_connects.fetch_add(1, Ordering::Relaxed);
         tracing::info!(status = response.status().as_u16(), "WebSocket conectado");
 
-        self.reporter.set(ProviderStatus::Connected, Some(room.room_id.clone()));
+        self.reporter
+            .set(ProviderStatus::Connected, Some(room.room_id.clone()));
         self.bus.publish(
             None,
             EventKind::StreamConnected {
@@ -729,7 +739,6 @@ impl Supervisor {
             }
         }
     }
-
 }
 
 /// Traduce un mensaje de TikTok a eventos del protocolo interno.
@@ -737,189 +746,189 @@ impl Supervisor {
 /// Es una funcion libre y no un metodo del supervisor para que los contract
 /// tests puedan alimentarla con frames grabados sin montar un proveedor.
 pub(crate) fn translate_message(method: &str, payload: &[u8], sink: &mut EventSink) {
-        match method {
-            "WebcastChatMessage" => match WebcastChatMessage::decode(payload) {
-                Ok(message) => {
-                    let Some(user) = user_ref(&message.user) else {
-                        return;
-                    };
-                    // TikTok manda los mensajes que son **solo** emote con
-                    // `content` vacio (un espacio) y los emotes aparte: mirar
-                    // solo el texto los descartaba enteros. Solo se descarta lo
-                    // que no trae ni texto ni emotes.
-                    let emote_count = message.emotes.len() as u32;
-                    if message.content.trim().is_empty() && emote_count == 0 {
-                        return;
-                    }
-                    let id = message.common.as_ref().map(source_id);
-                    // Traza por mensaje: util para seguir uno concreto de punta a
-                    // punta, pero a nivel debug porque una sala grande escribe
-                    // decenas por segundo.
-                    tracing::debug!(
-                        id = id.as_deref().unwrap_or("-"),
-                        autor = %user.unique_id,
-                        texto = %message.content,
-                        emotes = emote_count,
-                        "chat decodificado"
-                    );
-                    sink.push(
-                        id,
-                        EventKind::ChatMessage {
-                            user,
-                            content: message.content,
-                            emote_count,
-                        },
-                    );
+    match method {
+        "WebcastChatMessage" => match WebcastChatMessage::decode(payload) {
+            Ok(message) => {
+                let Some(user) = user_ref(&message.user) else {
+                    return;
+                };
+                // TikTok manda los mensajes que son **solo** emote con
+                // `content` vacio (un espacio) y los emotes aparte: mirar
+                // solo el texto los descartaba enteros. Solo se descarta lo
+                // que no trae ni texto ni emotes.
+                let emote_count = message.emotes.len() as u32;
+                if message.content.trim().is_empty() && emote_count == 0 {
+                    return;
                 }
-                Err(error) => tracing::debug!(%error, "chat no decodificable"),
-            },
-
-            // Entradas en la sala: el mensaje mas frecuente de TikTok. Sin esta
-            // rama se descartaba en silencio (el `other =>` de abajo).
-            "WebcastMemberMessage" => match WebcastMemberMessage::decode(payload) {
-                Ok(message) => {
-                    let Some(user) = user_ref(&message.user) else {
-                        return;
-                    };
-                    sink.push(
-                        message.common.as_ref().map(source_id),
-                        EventKind::MemberJoined { user },
-                    );
-                }
-                Err(error) => tracing::debug!(%error, "entrada en la sala no decodificable"),
-            },
-
-            // Fin del directo: cierra la sesion en el momento en vez de
-            // esperar a que caiga el WebSocket (o al siguiente arranque, donde
-            // `mark_crashed_streams` la marcaba como interrumpida).
-            "WebcastControlMessage" => match WebcastControlMessage::decode(payload) {
-                Ok(message) => {
-                    let reason = match message.action {
-                        WebcastControlMessage::STREAM_ENDED => "el directo ha terminado",
-                        WebcastControlMessage::STREAM_SUSPENDED => "el directo se ha suspendido",
-                        other => {
-                            // Pausa, reanudacion y desconocidos no cierran nada.
-                            tracing::trace!(action = other, "control sin fin de directo");
-                            return;
-                        }
-                    };
-                    sink.push(
-                        message.common.as_ref().map(source_id),
-                        EventKind::StreamDisconnected {
-                            reason: reason.to_string(),
-                        },
-                    );
-                }
-                Err(error) => tracing::debug!(%error, "control no decodificable"),
-            },
-
-            "WebcastImDeleteMessage" => match WebcastImDeleteMessage::decode(payload) {
-                Ok(message) => {
-                    if message.delete_msg_ids.is_empty() {
-                        tracing::trace!("aviso de borrado sin mensajes; se ignora");
-                        return;
-                    }
-                    for msg_id in &message.delete_msg_ids {
-                        // El `source_id` del evento va vacio a proposito: un
-                        // mismo aviso puede borrar varios mensajes, y repetir el
-                        // id del aviso haria que el bus descartase los
-                        // siguientes como duplicados. El mensaje borrado viaja
-                        // en `target_source_id`, que se llama asi para no chocar
-                        // con el `source_id` del sobre al serializar aplanado.
-                        sink.push(
-                            None,
-                            EventKind::ChatMessageDeleted {
-                                target_source_id: msg_id.to_string(),
-                            },
-                        );
-                    }
-                }
-                Err(error) => tracing::debug!(%error, "borrado de comentarios no decodificable"),
-            },
-
-            "WebcastGiftMessage" => match WebcastGiftMessage::decode(payload) {
-                Ok(message) => {
-                    let Some(user) = user_ref(&message.user) else {
-                        return;
-                    };
-                    let gift = gift_info(&message);
-                    sink.push(
-                        message.common.as_ref().map(source_id),
-                        EventKind::GiftReceived { user, gift },
-                    );
-                }
-                Err(error) => tracing::debug!(%error, "regalo no decodificable"),
-            },
-
-            "WebcastLikeMessage" => match WebcastLikeMessage::decode(payload) {
-                Ok(message) => sink.push(
-                    message.common.as_ref().map(source_id),
-                    EventKind::LikeUpdated {
-                        user: user_ref(&message.user),
-                        count: i64::from(message.count),
-                        total: message.total,
+                let id = message.common.as_ref().map(source_id);
+                // Traza por mensaje: util para seguir uno concreto de punta a
+                // punta, pero a nivel debug porque una sala grande escribe
+                // decenas por segundo.
+                tracing::debug!(
+                    id = id.as_deref().unwrap_or("-"),
+                    autor = %user.unique_id,
+                    texto = %message.content,
+                    emotes = emote_count,
+                    "chat decodificado"
+                );
+                sink.push(
+                    id,
+                    EventKind::ChatMessage {
+                        user,
+                        content: message.content,
+                        emote_count,
                     },
-                ),
-                Err(error) => tracing::debug!(%error, "like no decodificable"),
-            },
+                );
+            }
+            Err(error) => tracing::debug!(%error, "chat no decodificable"),
+        },
 
-            "WebcastRoomUserSeqMessage" => {
-                match WebcastRoomUserSeqMessage::decode(payload) {
-                    // OJO: `total` son los espectadores actuales y `total_user`
-                    // los acumulados. Verificado contra la API de TikTok.
-                    Ok(message) => sink.observe_viewers(message.total, message.total_user),
-                    Err(error) => tracing::debug!(%error, "viewers no decodificable"),
+        // Entradas en la sala: el mensaje mas frecuente de TikTok. Sin esta
+        // rama se descartaba en silencio (el `other =>` de abajo).
+        "WebcastMemberMessage" => match WebcastMemberMessage::decode(payload) {
+            Ok(message) => {
+                let Some(user) = user_ref(&message.user) else {
+                    return;
+                };
+                sink.push(
+                    message.common.as_ref().map(source_id),
+                    EventKind::MemberJoined { user },
+                );
+            }
+            Err(error) => tracing::debug!(%error, "entrada en la sala no decodificable"),
+        },
+
+        // Fin del directo: cierra la sesion en el momento en vez de
+        // esperar a que caiga el WebSocket (o al siguiente arranque, donde
+        // `mark_crashed_streams` la marcaba como interrumpida).
+        "WebcastControlMessage" => match WebcastControlMessage::decode(payload) {
+            Ok(message) => {
+                let reason = match message.action {
+                    WebcastControlMessage::STREAM_ENDED => "el directo ha terminado",
+                    WebcastControlMessage::STREAM_SUSPENDED => "el directo se ha suspendido",
+                    other => {
+                        // Pausa, reanudacion y desconocidos no cierran nada.
+                        tracing::trace!(action = other, "control sin fin de directo");
+                        return;
+                    }
+                };
+                sink.push(
+                    message.common.as_ref().map(source_id),
+                    EventKind::StreamDisconnected {
+                        reason: reason.to_string(),
+                    },
+                );
+            }
+            Err(error) => tracing::debug!(%error, "control no decodificable"),
+        },
+
+        "WebcastImDeleteMessage" => match WebcastImDeleteMessage::decode(payload) {
+            Ok(message) => {
+                if message.delete_msg_ids.is_empty() {
+                    tracing::trace!("aviso de borrado sin mensajes; se ignora");
+                    return;
+                }
+                for msg_id in &message.delete_msg_ids {
+                    // El `source_id` del evento va vacio a proposito: un
+                    // mismo aviso puede borrar varios mensajes, y repetir el
+                    // id del aviso haria que el bus descartase los
+                    // siguientes como duplicados. El mensaje borrado viaja
+                    // en `target_source_id`, que se llama asi para no chocar
+                    // con el `source_id` del sobre al serializar aplanado.
+                    sink.push(
+                        None,
+                        EventKind::ChatMessageDeleted {
+                            target_source_id: msg_id.to_string(),
+                        },
+                    );
                 }
             }
+            Err(error) => tracing::debug!(%error, "borrado de comentarios no decodificable"),
+        },
 
-            "WebcastSocialMessage" => match WebcastSocialMessage::decode(payload) {
-                Ok(message) => {
-                    let Some(user) = user_ref(&message.user) else {
-                        return;
-                    };
-                    // El discriminador fiable es `common.display_text.key`
-                    // (contiene "follow" o "share"), no el campo `action`.
-                    let clave = message
-                        .common
-                        .as_ref()
-                        .map(|common| common.display_key().to_ascii_lowercase())
-                        .unwrap_or_default();
-                    let id = message.common.as_ref().map(source_id);
-                    if clave.contains("share") {
-                        sink.push(id, EventKind::ShareReceived { user });
-                    } else if clave.contains("follow") {
-                        sink.push(id, EventKind::FollowReceived { user });
-                    } else {
-                        tracing::debug!(clave = %clave, "social sin follow ni share; se ignora");
-                    }
-                }
-                Err(error) => tracing::debug!(%error, "social no decodificable"),
-            },
+        "WebcastGiftMessage" => match WebcastGiftMessage::decode(payload) {
+            Ok(message) => {
+                let Some(user) = user_ref(&message.user) else {
+                    return;
+                };
+                let gift = gift_info(&message);
+                sink.push(
+                    message.common.as_ref().map(source_id),
+                    EventKind::GiftReceived { user, gift },
+                );
+            }
+            Err(error) => tracing::debug!(%error, "regalo no decodificable"),
+        },
 
-            "WebcastSubNotifyMessage" => match WebcastSubNotifyMessage::decode(payload) {
-                Ok(message) => {
-                    // Solo se emite con meses implicados: los enums de tipo de
-                    // suscripcion no estan verificados en directo, pero
-                    // `sub_month` si es inequivoco.
-                    if message.sub_month <= 0 {
-                        tracing::trace!("aviso de suscripcion sin meses; se ignora");
-                        return;
-                    }
-                    if let Some(user) = user_ref(&message.user) {
-                        sink.push(
-                            message.common.as_ref().map(source_id),
-                            EventKind::SubscribeReceived {
-                                user,
-                                months: message.sub_month,
-                            },
-                        );
-                    }
-                }
-                Err(error) => tracing::debug!(%error, "suscripcion no decodificable"),
-            },
+        "WebcastLikeMessage" => match WebcastLikeMessage::decode(payload) {
+            Ok(message) => sink.push(
+                message.common.as_ref().map(source_id),
+                EventKind::LikeUpdated {
+                    user: user_ref(&message.user),
+                    count: i64::from(message.count),
+                    total: message.total,
+                },
+            ),
+            Err(error) => tracing::debug!(%error, "like no decodificable"),
+        },
 
-            other => tracing::trace!(method = other, "mensaje no modelado"),
+        "WebcastRoomUserSeqMessage" => {
+            match WebcastRoomUserSeqMessage::decode(payload) {
+                // OJO: `total` son los espectadores actuales y `total_user`
+                // los acumulados. Verificado contra la API de TikTok.
+                Ok(message) => sink.observe_viewers(message.total, message.total_user),
+                Err(error) => tracing::debug!(%error, "viewers no decodificable"),
+            }
         }
+
+        "WebcastSocialMessage" => match WebcastSocialMessage::decode(payload) {
+            Ok(message) => {
+                let Some(user) = user_ref(&message.user) else {
+                    return;
+                };
+                // El discriminador fiable es `common.display_text.key`
+                // (contiene "follow" o "share"), no el campo `action`.
+                let clave = message
+                    .common
+                    .as_ref()
+                    .map(|common| common.display_key().to_ascii_lowercase())
+                    .unwrap_or_default();
+                let id = message.common.as_ref().map(source_id);
+                if clave.contains("share") {
+                    sink.push(id, EventKind::ShareReceived { user });
+                } else if clave.contains("follow") {
+                    sink.push(id, EventKind::FollowReceived { user });
+                } else {
+                    tracing::debug!(clave = %clave, "social sin follow ni share; se ignora");
+                }
+            }
+            Err(error) => tracing::debug!(%error, "social no decodificable"),
+        },
+
+        "WebcastSubNotifyMessage" => match WebcastSubNotifyMessage::decode(payload) {
+            Ok(message) => {
+                // Solo se emite con meses implicados: los enums de tipo de
+                // suscripcion no estan verificados en directo, pero
+                // `sub_month` si es inequivoco.
+                if message.sub_month <= 0 {
+                    tracing::trace!("aviso de suscripcion sin meses; se ignora");
+                    return;
+                }
+                if let Some(user) = user_ref(&message.user) {
+                    sink.push(
+                        message.common.as_ref().map(source_id),
+                        EventKind::SubscribeReceived {
+                            user,
+                            months: message.sub_month,
+                        },
+                    );
+                }
+            }
+            Err(error) => tracing::debug!(%error, "suscripcion no decodificable"),
+        },
+
+        other => tracing::trace!(method = other, "mensaje no modelado"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -997,7 +1006,13 @@ impl EventSink {
                 .unwrap_or(self.events.len());
             self.events.insert(
                 index,
-                (None, EventKind::ViewerUpdated { current, cumulative }),
+                (
+                    None,
+                    EventKind::ViewerUpdated {
+                        current,
+                        cumulative,
+                    },
+                ),
             );
             self.last_viewer_emit = Some(std::time::Instant::now());
             self.last_emitted_viewers = Some((current, cumulative));
@@ -1023,7 +1038,13 @@ impl EventSink {
                 .viewer_updates_emitted
                 .fetch_add(1, Ordering::Relaxed);
             self.last_emitted_viewers = Some((current, cumulative));
-            self.push(None, EventKind::ViewerUpdated { current, cumulative });
+            self.push(
+                None,
+                EventKind::ViewerUpdated {
+                    current,
+                    cumulative,
+                },
+            );
         } else {
             self.metrics
                 .viewer_updates_coalesced
@@ -1038,7 +1059,9 @@ impl EventSink {
 /// importante devolver los mensajes y no solo el ACK: en la primera conexion
 /// real se detecto que, al descartarlos aqui, los frames se decodificaban
 /// correctamente pero ningun evento llegaba al bus.
-fn decode_frame(raw: &[u8]) -> Result<(Option<Vec<u8>>, Vec<BaseProtoMessage>, Option<String>)> {
+type DecodedFrame = (Option<Vec<u8>>, Vec<BaseProtoMessage>, Option<String>);
+
+fn decode_frame(raw: &[u8]) -> Result<DecodedFrame> {
     let frame = WebcastPushFrame::decode(raw).context("decodificando WebcastPushFrame")?;
 
     if frame.payload_type != "msg" {
@@ -1285,8 +1308,7 @@ fn parse_live_html(html: &str) -> Result<RoomInfo> {
     let json_text = extract_script_json(html, "SIGI_STATE").ok_or_else(|| {
         anyhow!("no se encontro SIGI_STATE en la pagina: puede que TikTok este bloqueando las peticiones")
     })?;
-    let json: Value =
-        serde_json::from_str(&json_text).context("SIGI_STATE no es JSON valido")?;
+    let json: Value = serde_json::from_str(&json_text).context("SIGI_STATE no es JSON valido")?;
 
     let user = json
         .pointer("/LiveRoom/liveRoomUserInfo/user")
@@ -1316,10 +1338,7 @@ fn parse_live_html(html: &str) -> Result<RoomInfo> {
 }
 
 /// Resuelve la sala por la via de respaldo (HTML).
-async fn resolve_room_html(
-    http: &reqwest::Client,
-    handle: &str,
-) -> Result<RoomInfo> {
+async fn resolve_room_html(http: &reqwest::Client, handle: &str) -> Result<RoomInfo> {
     let url = format!("{TIKTOK_WEB}/@{handle}/live");
     let response = http
         .get(&url)
@@ -1354,9 +1373,9 @@ async fn resolve_room(
                     tracing::info!(room_id = %room.room_id, live = room.live, "sala resuelta por HTML");
                     Ok(room)
                 }
-                Err(html_error) => bail!(
-                    "no se pudo resolver la sala: API ({api_error}) y HTML ({html_error})"
-                ),
+                Err(html_error) => {
+                    bail!("no se pudo resolver la sala: API ({api_error}) y HTML ({html_error})")
+                }
             }
         }
     }
@@ -1410,7 +1429,9 @@ async fn resolve_room_api(
 
     // `roomId` sigue poblado aunque el usuario este offline: la unica senal
     // fiable es `liveRoom.status == 4`.
-    let live_status = json.pointer("/data/liveRoom/status").and_then(Value::as_i64);
+    let live_status = json
+        .pointer("/data/liveRoom/status")
+        .and_then(Value::as_i64);
 
     Ok(RoomInfo {
         room_id,
@@ -1478,7 +1499,10 @@ async fn fetch_signed(
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("(sin mensaje)");
-        let label = json.get("limit_label").and_then(Value::as_str).unwrap_or("");
+        let label = json
+            .get("limit_label")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         bail!("LIMITE del servidor de firma {label}: {message}");
     }
     if !status.is_success() {
@@ -1619,7 +1643,11 @@ mod tests {
     #[test]
     fn el_chat_con_texto_cuenta_cero_emotes() {
         let mut sink = sink_de_prueba();
-        translate_message("WebcastChatMessage", &chat_proto("hola a todos", 0), &mut sink);
+        translate_message(
+            "WebcastChatMessage",
+            &chat_proto("hola a todos", 0),
+            &mut sink,
+        );
 
         match &sink.drain()[0].1 {
             EventKind::ChatMessage { emote_count, .. } => assert_eq!(*emote_count, 0),
@@ -1792,7 +1820,8 @@ mod tests {
     }
 
     #[test]
-    fn la_url_de_firma_codifica_el_user_agent() {        // Regresion: enviarlo en crudo hace que el servidor de firma responda
+    fn la_url_de_firma_codifica_el_user_agent() {
+        // Regresion: enviarlo en crudo hace que el servidor de firma responda
         // `400 Invalid user agent provided` y no se pueda conectar a nada.
         let config = ProviderConfig::default();
         let url = sign_url(&config, "7686381796992322334", None);
@@ -1803,7 +1832,9 @@ mod tests {
         assert!(url.contains("platform=web"));
         assert!(url.contains("client_enter=true"));
         assert!(
-            url.contains("user_agent=Mozilla%2F5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29"),
+            url.contains(
+                "user_agent=Mozilla%2F5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29"
+            ),
             "el user_agent debe ir codificado: {url}"
         );
         assert!(!url.contains(' '), "una URL con espacios da HTTP 400");
@@ -1829,9 +1860,11 @@ mod tests {
 
     #[test]
     fn la_url_del_ws_codifica_route_params_y_duplica_version_code() {
-        let mut envelope = ProtoMessageFetchResult::default();
-        envelope.push_server = "wss://example.test/webcast/im/ws/".into();
-        envelope.cursor = "1789625530246_1_1_1_0_0".into();
+        let mut envelope = ProtoMessageFetchResult {
+            push_server: "wss://example.test/webcast/im/ws/".into(),
+            cursor: "1789625530246_1_1_1_0_0".into(),
+            ..ProtoMessageFetchResult::default()
+        };
         envelope.route_params.insert(
             "user_agent".into(),
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64)".into(),
@@ -1841,7 +1874,8 @@ mod tests {
             .expect("url construida");
 
         assert!(url.starts_with("wss://example.test/webcast/im/ws/?"));
-        assert!(url.contains("user_agent=Mozilla%2F5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29"));
+        assert!(url
+            .contains("user_agent=Mozilla%2F5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29"));
         assert!(url.contains("room_id=7686341765710269205"));
         assert!(url.contains("compress=gzip"));
         assert!(url.contains("version_code=180800"));
@@ -1948,8 +1982,14 @@ mod tests {
 
         let events = sink.drain_final();
         assert_eq!(events.len(), 3);
-        assert!(matches!(events[0].1, EventKind::ViewerUpdated { current: 100, .. }));
-        assert!(matches!(events[1].1, EventKind::ViewerUpdated { current: 102, .. }));
+        assert!(matches!(
+            events[0].1,
+            EventKind::ViewerUpdated { current: 100, .. }
+        ));
+        assert!(matches!(
+            events[1].1,
+            EventKind::ViewerUpdated { current: 102, .. }
+        ));
         assert!(matches!(events[2].1, EventKind::StreamDisconnected { .. }));
         assert_eq!(metrics.snapshot().viewer_updates_emitted, 2);
     }
@@ -1967,7 +2007,9 @@ mod tests {
     async fn la_firma_respeta_el_timeout_http_con_un_servidor_lento() {
         use tokio::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener local");
         let address = listener.local_addr().expect("direccion local");
         let server = tokio::spawn(async move {
             let (_socket, _) = listener.accept().await.expect("conexion local");
@@ -2103,7 +2145,10 @@ mod tests {
         let first = next_delay(Duration::from_secs(30), &config);
         assert!(first >= Duration::from_secs(24) && first <= Duration::from_secs(72));
         let capped = next_delay(Duration::from_secs(600), &config);
-        assert!(capped <= Duration::from_secs(144), "el tope es 120 s con jitter");
+        assert!(
+            capped <= Duration::from_secs(144),
+            "el tope es 120 s con jitter"
+        );
     }
 
     #[test]
@@ -2141,7 +2186,10 @@ mod tests {
         let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
 
         // tag 1 (varint) = room_id
-        assert!(hex.starts_with("08"), "room_id debe abrir el mensaje: {hex}");
+        assert!(
+            hex.starts_with("08"),
+            "room_id debe abrir el mensaje: {hex}"
+        );
         // tag 4 = live_id = 12  -> clave 0x20, valor 0x0c
         assert!(hex.contains("200c"), "live_id va en el tag 4: {hex}");
         // tag 5 = identity -> clave 0x2a, largo 8, "audience"
@@ -2150,9 +2198,15 @@ mod tests {
             "identity va en el tag 5: {hex}"
         );
         // tag 9 = filter_welcome_msg -> clave 0x4a, largo 1, "0"
-        assert!(hex.contains("4a0130"), "filter_welcome_msg va en el tag 9: {hex}");
+        assert!(
+            hex.contains("4a0130"),
+            "filter_welcome_msg va en el tag 9: {hex}"
+        );
         // El tag 3 es una cadena (live_region), nunca un varint: 0x18 = tag 3 varint.
-        assert!(!hex.contains("18"), "el tag 3 es live_region (string): {hex}");
+        assert!(
+            !hex.contains("18"),
+            "el tag 3 es live_region (string): {hex}"
+        );
     }
 
     /// Smoke test de ciclo de vida contra un WebSocket local: no usa TikTok ni
@@ -2164,7 +2218,9 @@ mod tests {
         use tokio::net::TcpListener;
         use tokio_tungstenite::accept_async;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener local");
         let address = listener.local_addr().expect("direccion local");
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.expect("conexion local");
@@ -2245,9 +2301,14 @@ mod tests {
             }
         }
         assert!(
-            observed.iter().any(|event| event.kind.name() == "stream.connected"),
+            observed
+                .iter()
+                .any(|event| event.kind.name() == "stream.connected"),
             "el pump debe publicar stream.connected: {:?}",
-            observed.iter().map(|event| event.kind.name()).collect::<Vec<_>>()
+            observed
+                .iter()
+                .map(|event| event.kind.name())
+                .collect::<Vec<_>>()
         );
         let disconnected = observed
             .iter()
@@ -2264,7 +2325,9 @@ mod tests {
     async fn pump_cancela_un_handshake_pendiente() {
         use tokio::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener local");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener local");
         let address = listener.local_addr().expect("direccion local");
         let server = tokio::spawn(async move {
             let (_socket, _) = listener.accept().await.expect("conexion local");

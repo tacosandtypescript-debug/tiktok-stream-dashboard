@@ -62,13 +62,19 @@ mod tests {
         drop(probe);
 
         let first = InstanceGuard::acquire_on(port).expect("sin error de E/S");
-        assert!(first.is_some(), "la primera instancia debe obtener la guarda");
+        assert!(
+            first.is_some(),
+            "la primera instancia debe obtener la guarda"
+        );
 
         let second = InstanceGuard::acquire_on(port).expect("sin error de E/S");
         assert!(second.is_none(), "la segunda instancia debe ser rechazada");
 
         drop(first);
         let third = InstanceGuard::acquire_on(port).expect("sin error de E/S");
-        assert!(third.is_some(), "al liberar, la guarda vuelve a estar disponible");
+        assert!(
+            third.is_some(),
+            "al liberar, la guarda vuelve a estar disponible"
+        );
     }
 }

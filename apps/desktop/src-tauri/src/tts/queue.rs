@@ -78,7 +78,9 @@ impl TtsItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PushOutcome {
     /// Aceptado. `evicted` es el id del mensaje que salio para hacerle sitio.
-    Queued { evicted: Option<u64> },
+    Queued {
+        evicted: Option<u64>,
+    },
     Rejected(RejectReason),
 }
 
@@ -169,20 +171,26 @@ impl TtsQueue {
                 .iter()
                 .enumerate()
                 .filter(|(_, existing)| existing.priority >= priority::HIGH_THRESHOLD)
-                .map(|(index, existing)| (index, existing.effective_priority(now, self.aging_per_10s)))
+                .map(|(index, existing)| {
+                    (index, existing.effective_priority(now, self.aging_per_10s))
+                })
                 .min_by_key(|(_, value)| *value)
         } else if is_high {
             self.items
                 .iter()
                 .enumerate()
-                .map(|(index, existing)| (index, existing.effective_priority(now, self.aging_per_10s)))
+                .map(|(index, existing)| {
+                    (index, existing.effective_priority(now, self.aging_per_10s))
+                })
                 .min_by_key(|(_, value)| *value)
         } else {
             self.items
                 .iter()
                 .enumerate()
                 .filter(|(_, existing)| existing.priority < priority::HIGH_THRESHOLD)
-                .map(|(index, existing)| (index, existing.effective_priority(now, self.aging_per_10s)))
+                .map(|(index, existing)| {
+                    (index, existing.effective_priority(now, self.aging_per_10s))
+                })
                 .min_by_key(|(_, value)| *value)
         };
 

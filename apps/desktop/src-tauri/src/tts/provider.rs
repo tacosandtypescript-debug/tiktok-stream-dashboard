@@ -449,7 +449,7 @@ impl EdgeTtsSidecar {
     /// Detiene el sidecar si esta vivo. Es idempotente.
     pub async fn stop(&self) {
         let mut guard = self.inner.lock().await;
-        stop_sidecar(&mut *guard).await;
+        stop_sidecar(&mut guard).await;
     }
 
     /// Envia una peticion y espera su respuesta.
@@ -499,7 +499,7 @@ impl EdgeTtsSidecar {
                 }
             }) => result,
             _ = cancel.cancelled() => {
-                stop_sidecar(&mut *guard).await;
+                stop_sidecar(&mut guard).await;
                 Ok(Err(anyhow!("síntesis cancelada")))
             }
         };
@@ -507,7 +507,7 @@ impl EdgeTtsSidecar {
         match result {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(error)) if cancel.is_cancelled() => {
-                stop_sidecar(&mut *guard).await;
+                stop_sidecar(&mut guard).await;
                 Err(error)
             }
             Ok(Err(error)) => {
@@ -753,7 +753,12 @@ pub fn cache_key(voice: &str, rate: &str, pitch: &str, text: &str) -> String {
 ///
 /// Devuelve cuantos borro. La cache **no puede** crecer sin limite
 /// (docs/plan-review.md §50).
-pub fn prune_cache(dir: &Path, max_bytes: u64, max_age: Duration, now: std::time::SystemTime) -> usize {
+pub fn prune_cache(
+    dir: &Path,
+    max_bytes: u64,
+    max_age: Duration,
+    now: std::time::SystemTime,
+) -> usize {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return 0,
@@ -766,7 +771,9 @@ pub fn prune_cache(dir: &Path, max_bytes: u64, max_age: Duration, now: std::time
         if !path.is_file() {
             continue;
         }
-        let Ok(metadata) = entry.metadata() else { continue };
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
         let modified = metadata.modified().unwrap_or(now);
         total += metadata.len();
         files.push((path, metadata.len(), modified));
@@ -819,20 +826,20 @@ mod tests {
         let base = cache_key("es-ES-ElviraNeural", "+0%", "+0Hz", "hola");
         assert_eq!(base.len(), 16);
         // Estable: el mismo contenido da la misma clave (cache reutilizable).
-        assert_eq!(
-            base,
-            cache_key("es-ES-ElviraNeural", "+0%", "+0Hz", "hola")
-        );
+        assert_eq!(base, cache_key("es-ES-ElviraNeural", "+0%", "+0Hz", "hola"));
         // Cualquier cambio produce otra entrada.
         assert_ne!(base, cache_key("es-ES-AlvaroNeural", "+0%", "+0Hz", "hola"));
-        assert_ne!(base, cache_key("es-ES-ElviraNeural", "+10%", "+0Hz", "hola"));
-        assert_ne!(base, cache_key("es-ES-ElviraNeural", "+0%", "+5Hz", "hola"));
-        assert_ne!(base, cache_key("es-ES-ElviraNeural", "+0%", "+0Hz", "hola!"));
-        // Y no confunde campos distintos con el mismo texto concatenado.
         assert_ne!(
-            cache_key("a", "b", "c", "d"),
-            cache_key("ab", "c", "d", "")
+            base,
+            cache_key("es-ES-ElviraNeural", "+10%", "+0Hz", "hola")
         );
+        assert_ne!(base, cache_key("es-ES-ElviraNeural", "+0%", "+5Hz", "hola"));
+        assert_ne!(
+            base,
+            cache_key("es-ES-ElviraNeural", "+0%", "+0Hz", "hola!")
+        );
+        // Y no confunde campos distintos con el mismo texto concatenado.
+        assert_ne!(cache_key("a", "b", "c", "d"), cache_key("ab", "c", "d", ""));
     }
 
     #[test]
@@ -863,7 +870,10 @@ mod tests {
 
         // Con 2 KB de tope, se borran al menos 3.
         let removed = prune_cache(&dir, 2_000, Duration::from_secs(3600), now);
-        assert!(removed >= 3, "se esperaban al menos 3 borrados, hubo {removed}");
+        assert!(
+            removed >= 3,
+            "se esperaban al menos 3 borrados, hubo {removed}"
+        );
         let restante: u64 = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
@@ -944,7 +954,8 @@ mod tests {
         assert!(!error.ok);
         assert_eq!(error.error.as_deref(), Some("texto vacio"));
 
-        let pong: SidecarResponse = serde_json::from_str(r#"{"id": 1, "ok": true, "cmd": "pong"}"#).unwrap();
+        let pong: SidecarResponse =
+            serde_json::from_str(r#"{"id": 1, "ok": true, "cmd": "pong"}"#).unwrap();
         assert!(pong.ok);
 
         let voices: SidecarResponse =
@@ -958,7 +969,8 @@ mod tests {
     /// interfaz del proveedor, asi que la cache solo la podaba el CLI.
     #[test]
     fn el_proveedor_poda_su_propia_carpeta_con_sus_topes() {
-        let dir = std::env::temp_dir().join(format!("ttdash-provider-cache-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ttdash-provider-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for index in 1..=3 {
@@ -968,10 +980,12 @@ mod tests {
         // en el mismo instante que `now` y no parecerian caducados.
         std::thread::sleep(Duration::from_millis(5));
 
-        let mut config = TtsConfig::default();
-        config.cache_dir = dir.clone();
         // Todo caduca: es la forma de comprobar el cableado sin esperar 7 dias.
-        config.cache_max_age = Duration::from_secs(0);
+        let config = TtsConfig {
+            cache_dir: dir.clone(),
+            cache_max_age: Duration::from_secs(0),
+            ..TtsConfig::default()
+        };
         let provider = EdgeTtsSidecar::new(config);
 
         assert_eq!(provider.prune_cache(), 3, "deberia podar su propia carpeta");

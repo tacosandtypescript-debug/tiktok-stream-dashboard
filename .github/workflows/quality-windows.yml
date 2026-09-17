@@ -1,0 +1,76 @@
+name: Windows quality gates
+
+on:
+  push:
+    branches: [main, integration, 'codex/**']
+  pull_request:
+    branches: [main, integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-msvc:
+    name: Windows / MSVC / Rust + frontend + release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: '1'
+      CI: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.12.10'
+          enable-cache: true
+          cache-dependency-glob: services/tts-provider/requirements.lock
+
+      - name: Fetch locked Rust dependencies
+        shell: pwsh
+        run: |
+          . ./scripts/env.ps1
+          cargo fetch --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Install locked frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Install locked Python sidecar dependencies
+        shell: pwsh
+        run: ./scripts/setup.ps1
+
+      - name: Run complete reproducible gates
+        shell: pwsh
+        run: ./scripts/build.ps1
+
+      - name: Upload release evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-stream-dashboard-windows-release
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/release/tiktok-stream-dashboard.exe
+            apps/desktop/src-tauri/target/release/tiktok-tts-provider-x86_64-pc-windows-msvc.exe

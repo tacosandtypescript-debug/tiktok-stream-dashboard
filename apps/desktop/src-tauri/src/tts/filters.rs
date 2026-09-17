@@ -235,9 +235,7 @@ impl Filters {
     /// Registra que una frase se ha aceptado y va a leerse.
     pub fn commit(&mut self, user_id: &str, text: &str, now: Instant) {
         self.prune_last_users(now);
-        if !self.last_user.contains_key(user_id)
-            && self.last_user.len() >= LAST_USER_CAPACITY
-        {
+        if !self.last_user.contains_key(user_id) && self.last_user.len() >= LAST_USER_CAPACITY {
             if let Some((oldest, _)) = self
                 .last_user
                 .iter()
@@ -261,7 +259,7 @@ impl Filters {
     pub fn rejected_counts(&self) -> Vec<(&'static str, u64)> {
         let mut counts: Vec<(&'static str, u64)> =
             self.rejected.iter().map(|(k, v)| (*k, *v)).collect();
-        counts.sort_by(|a, b| b.1.cmp(&a.1));
+        counts.sort_by_key(|item| std::cmp::Reverse(item.1));
         counts
     }
 
@@ -356,10 +354,9 @@ impl Filters {
 
     fn check_duplicate(&mut self, text: &str, now: Instant) -> Option<RejectReason> {
         let lower = text.to_lowercase();
-        let duplicate = self
-            .recent
-            .iter()
-            .any(|recent| recent.text == lower && now.duration_since(recent.at) <= self.config.duplicate_window);
+        let duplicate = self.recent.iter().any(|recent| {
+            recent.text == lower && now.duration_since(recent.at) <= self.config.duplicate_window
+        });
         if duplicate {
             return self.reject(RejectReason::Duplicate);
         }
@@ -508,9 +505,11 @@ mod tests {
 
     #[test]
     fn descarta_palabras_y_usuarios_bloqueados() {
-        let mut config = FilterConfig::default();
-        config.blocked_words = vec!["spoiler".into()];
-        config.blocked_users = vec!["999".into()];
+        let config = FilterConfig {
+            blocked_words: vec!["spoiler".into()],
+            blocked_users: vec!["999".into()],
+            ..FilterConfig::default()
+        };
         let mut filters = Filters::new(config, now());
 
         assert_eq!(

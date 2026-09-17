@@ -384,7 +384,9 @@ impl RodioSink {
     /// un `cpal::Stream` entre hilos no es portable, y el hilo debe ser su dueno.
     /// Por el mismo canal viaja el reproductor ya creado, que si es `Send + Sync`
     /// y lo comparten las dos partes.
-    fn spawn(start: impl FnOnce() -> anyhow::Result<Started> + Send + 'static) -> anyhow::Result<Self> {
+    fn spawn(
+        start: impl FnOnce() -> anyhow::Result<Started> + Send + 'static,
+    ) -> anyhow::Result<Self> {
         let (command_tx, command_rx) = mpsc::sync_channel::<Command>(COMMAND_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(String, Arc<dyn Device>), String>>();
         let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -396,7 +398,11 @@ impl RodioSink {
         let thread = thread::Builder::new()
             .name("tts-audio".into())
             .spawn(move || match start() {
-                Ok(Started { stream, name, device }) => {
+                Ok(Started {
+                    stream,
+                    name,
+                    device,
+                }) => {
                     // El reproductor se publica al proceso antes de entrar en el
                     // bucle: a partir de aqui `stop()` y `set_volume()` no
                     // dependen del canal.
@@ -469,9 +475,7 @@ impl RodioSink {
                 // romper el bucle no.
                 Ok(())
             }
-            Err(TrySendError::Disconnected(_)) => {
-                Err(anyhow::anyhow!("el hilo de audio termino"))
-            }
+            Err(TrySendError::Disconnected(_)) => Err(anyhow::anyhow!("el hilo de audio termino")),
         }
     }
 }
@@ -496,20 +500,24 @@ fn open_player(device: Option<&str>) -> anyhow::Result<Started> {
             let host = rodio::cpal::default_host();
             let chosen = host
                 .output_devices()
-                .map_err(|error| anyhow::anyhow!("no se pudieron listar los dispositivos: {error}"))?
-                .find(|candidate| candidate.name().map(|current| current == name).unwrap_or(false));
+                .map_err(|error| {
+                    anyhow::anyhow!("no se pudieron listar los dispositivos: {error}")
+                })?
+                .find(|candidate| {
+                    candidate
+                        .name()
+                        .map(|current| current == name)
+                        .unwrap_or(false)
+                });
             match chosen {
                 Some(chosen) => {
-                    let (stream, handle) = OutputStream::try_from_device(&chosen).map_err(|error| {
-                        anyhow::anyhow!("no se pudo abrir el dispositivo {name}: {error}")
-                    })?;
+                    let (stream, handle) =
+                        OutputStream::try_from_device(&chosen).map_err(|error| {
+                            anyhow::anyhow!("no se pudo abrir el dispositivo {name}: {error}")
+                        })?;
                     (stream, name.to_string(), handle)
                 }
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "no existe el dispositivo de salida {name}"
-                    ))
-                }
+                None => return Err(anyhow::anyhow!("no existe el dispositivo de salida {name}")),
             }
         }
     };
@@ -519,7 +527,9 @@ fn open_player(device: Option<&str>) -> anyhow::Result<Started> {
     Ok(Started {
         stream: Some(stream),
         name,
-        device: Arc::new(RodioDevice { sink: Arc::new(sink) }),
+        device: Arc::new(RodioDevice {
+            sink: Arc::new(sink),
+        }),
     })
 }
 
@@ -1030,7 +1040,10 @@ mod tests {
         let generation = control.generation();
         assert!(control.is_current(generation));
         control.cut();
-        assert!(!control.is_current(generation), "un stop cancela el play pendiente");
+        assert!(
+            !control.is_current(generation),
+            "un stop cancela el play pendiente"
+        );
         assert!(control.is_current(control.generation()));
     }
 
@@ -1093,7 +1106,10 @@ mod tests {
             let sink = sink.clone();
             thread::spawn(move || sink.wait())
         };
-        assert!(fake.wait_until(|state| state.waiting), "la frase esta sonando");
+        assert!(
+            fake.wait_until(|state| state.waiting),
+            "la frase esta sonando"
+        );
 
         // Con el hilo ocupado esperando, llega al canal otra frase y, detras, un
         // "saltar": el corte tiene que invalidar tambien la orden pendiente. Si
@@ -1124,7 +1140,10 @@ mod tests {
         sink.stop();
 
         assert!(!sink.is_playing(), "no puede quedar nada sonando");
-        assert!(!fake.lock().playing, "el reproductor tiene que haber parado");
+        assert!(
+            !fake.lock().playing,
+            "el reproductor tiene que haber parado"
+        );
     }
 
     #[test]

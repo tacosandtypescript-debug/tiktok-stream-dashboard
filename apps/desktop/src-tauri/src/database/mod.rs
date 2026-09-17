@@ -1329,7 +1329,12 @@ mod tests {
             .expect("stream");
 
         let comentario = comment(1);
-        assert_eq!(database.write_batch(&[comentario.clone()]).unwrap(), 1);
+        assert_eq!(
+            database
+                .write_batch(std::slice::from_ref(&comentario))
+                .unwrap(),
+            1
+        );
         assert_eq!(database.write_batch(&[comentario]).unwrap(), 0);
         assert_eq!(
             database

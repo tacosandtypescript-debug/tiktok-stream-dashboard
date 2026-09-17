@@ -13,8 +13,8 @@ pub mod tiktok;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 

@@ -279,7 +279,7 @@ enum Dispatch {
 /// Es una funcion pura a proposito: la politica (frases, no reloj) se puede
 /// fijar en un test sin esperar a nada ni arrancar el gestor.
 fn prune_due(played: u64, every: u64) -> bool {
-    every > 0 && played > 0 && played % every == 0
+    every > 0 && played > 0 && played.is_multiple_of(every)
 }
 
 pub struct TtsManager {
@@ -649,7 +649,11 @@ impl TtsManager {
             }
         };
         let name = replacement.device().to_string();
-        let volume = self.settings.read().unwrap_or_else(|e| e.into_inner()).volume;
+        let volume = self
+            .settings
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .volume;
         replacement.set_volume(volume);
 
         let replacement: Arc<dyn AudioSink> = Arc::new(replacement);
@@ -751,7 +755,11 @@ impl TtsManager {
             let queue = self.lock_queue();
             (queue.preview(now, 50), queue.len(), queue.dropped())
         };
-        let playing = self.playing.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let playing = self
+            .playing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let paused = *self.lock_paused();
         let counters = self.counters.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -759,11 +767,8 @@ impl TtsManager {
         // streamer son la misma pregunta ("por que no se lee esto"). Cada motivo
         // lo cuenta un solo sitio (el filtro o el gestor), asi que la suma no
         // duplica nada.
-        let mut rejections: HashMap<&'static str, u64> = self
-            .lock_filters()
-            .rejected_counts()
-            .into_iter()
-            .collect();
+        let mut rejections: HashMap<&'static str, u64> =
+            self.lock_filters().rejected_counts().into_iter().collect();
         for (reason, count) in &counters.rejections {
             *rejections.entry(reason).or_insert(0) += count;
         }
@@ -984,7 +989,11 @@ impl TtsManager {
         }));
         tracing::debug!(id = item.id, bytes = audio.bytes, "leyendo frase");
 
-        let volume = self.settings.read().unwrap_or_else(|e| e.into_inner()).volume;
+        let volume = self
+            .settings
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .volume;
         // El read lock cubre la llamada a `play`: una seleccion concurrente no
         // puede sustituir el sink entre tomar la referencia y encolar el audio.
         // Si la seleccion ocurre justo despues, detiene este sink viejo antes
@@ -1111,14 +1120,14 @@ impl TtsManager {
     // -----------------------------------------------------------------------
 
     fn enabled(&self) -> bool {
-        self.settings.read().unwrap_or_else(|e| e.into_inner()).enabled
+        self.settings
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .enabled
     }
 
     fn sink(&self) -> Arc<dyn AudioSink> {
-        self.sink
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        self.sink.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn say_author(&self) -> bool {
@@ -1729,14 +1738,18 @@ mod tests {
         h.manager.start();
 
         // Un enlace y una palabra bloqueada: los descartan los filtros.
-        h.manager.handle_event(&chat(1, "1", "mira https://spam.example"));
+        h.manager
+            .handle_event(&chat(1, "1", "mira https://spam.example"));
         h.manager.handle_event(&chat(2, "2", "a"));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert!(h.provider.synthesised().is_empty(), "nada llega al sidecar");
         let status = h.manager.status();
         let motivos: Vec<&str> = status.rejections.iter().map(|(m, _)| *m).collect();
-        assert!(motivos.contains(&"contiene un enlace"), "motivos: {motivos:?}");
+        assert!(
+            motivos.contains(&"contiene un enlace"),
+            "motivos: {motivos:?}"
+        );
         assert!(motivos.contains(&"demasiado corto"), "motivos: {motivos:?}");
         assert!(status.rejections.iter().all(|(_, n)| *n >= 1));
     }
@@ -1808,7 +1821,10 @@ mod tests {
             wait_for(|| !provider.synthesised().is_empty()).await,
             "el bucle deberia estar reproduciendo la primera frase"
         );
-        assert!(wait_for(|| sink.waiting()).await, "la frase deberia estar sonando");
+        assert!(
+            wait_for(|| sink.waiting()).await,
+            "la frase deberia estar sonando"
+        );
 
         // Con el bucle entretenido en el reproductor, la cola se llena de chat
         // normal (prioridad 10) y despues entra un regalo prioritario. Hoy los
@@ -1966,7 +1982,11 @@ mod tests {
         h.manager.mute_user("6");
         h.manager.handle_event(&chat(3, "6", "esto no llega"));
         assert_eq!(h.manager.status().queued_len, 0);
-        assert!(h.provider.synthesised().iter().all(|text| !text.contains("esto no llega")));
+        assert!(h
+            .provider
+            .synthesised()
+            .iter()
+            .all(|text| !text.contains("esto no llega")));
     }
 
     #[test]
@@ -2020,11 +2040,8 @@ mod tests {
         for index in 0..5000u64 {
             // Usuarios distintos: el cooldown por usuario no debe enmascarar la
             // prueba de saturacion.
-            h.manager.handle_event(&chat(
-                index + 1,
-                &format!("u{index}"),
-                "mensaje distinto",
-            ));
+            h.manager
+                .handle_event(&chat(index + 1, &format!("u{index}"), "mensaje distinto"));
         }
 
         let status = h.manager.status();
@@ -2096,7 +2113,10 @@ mod tests {
         assert!(status.paused);
         assert_eq!(status.played, 0, "en pausa no se lee");
         assert_eq!(status.queued_len, 1, "la frase sigue esperando");
-        assert!(h.sink.inner.stops() >= 1, "la pausa silencia el dispositivo");
+        assert!(
+            h.sink.inner.stops() >= 1,
+            "la pausa silencia el dispositivo"
+        );
 
         h.manager.resume();
         assert!(
@@ -2358,7 +2378,11 @@ mod tests {
             "pausar debe cortar la espera en curso"
         );
         assert_eq!(sink.cut_waits(), 2, "la pausa tambien corta");
-        assert_eq!(manager.status().played, 2, "las dos frases llegaron a sonar");
+        assert_eq!(
+            manager.status().played,
+            2,
+            "las dos frases llegaron a sonar"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2382,7 +2406,10 @@ mod tests {
             "skip debe llegar al proveedor, no solo al reproductor"
         );
         let status = manager.status();
-        assert_eq!(status.synth_failures, 0, "cancelar no es un fallo del proveedor");
+        assert_eq!(
+            status.synth_failures, 0,
+            "cancelar no es un fallo del proveedor"
+        );
         assert_eq!(status.played, 0);
         assert_eq!(status.playing, None);
         manager.shutdown().await;
@@ -2464,7 +2491,10 @@ mod tests {
             transcurrido < Duration::from_secs(1),
             "la espera bloqueo el runtime: el latido tardo {transcurrido:?}"
         );
-        assert!(sink.waiting(), "la espera sigue en curso, pero sin bloquear nada");
+        assert!(
+            sink.waiting(),
+            "la espera sigue en curso, pero sin bloquear nada"
+        );
 
         // Y al terminar la locucion el bucle sigue con lo que haya.
         sink.release();

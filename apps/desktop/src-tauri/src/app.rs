@@ -17,8 +17,8 @@ use crate::core::event::Event;
 use crate::core::{EventBus, EventKind, Metrics, MetricsSnapshot, PROTOCOL_VERSION};
 use crate::database::{database_path, Database, DbWriter, WriteJob};
 use crate::feed::{
-    like_is_notable, EventFeed, FeedItem, FeedKind, GiftBoard, GiftEventView, GifterEntry,
-    GiftTypeSummary, FEED_CAPACITY,
+    like_is_notable, EventFeed, FeedItem, FeedKind, GiftBoard, GiftEventView, GiftTypeSummary,
+    GifterEntry, FEED_CAPACITY,
 };
 use crate::providers::{NativeProvider, ProviderConfig, SimulatedProvider, TikTokProvider};
 use crate::telemetry;
@@ -125,7 +125,8 @@ impl AppState {
         // TTS: sintesis por sidecar y reproduccion por el sink de reserva, que
         // degrada a silencio si no hay tarjeta de sonido en lugar de impedir
         // arrancar la aplicacion.
-        let tts_provider: SharedTtsProvider = Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
+        let tts_provider: SharedTtsProvider =
+            Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
         let sink: Arc<dyn AudioSink> = Arc::new(FallbackSink::with_device(
             tts_settings.audio_device.as_deref(),
         ));
@@ -218,7 +219,9 @@ impl AppState {
     /// ejecuta en el hilo principal **sin** runtime de Tokio, asi que llamar a
     /// `tokio::spawn` desde ahi panica. El llamante decide donde ejecutarlo:
     /// `tauri::async_runtime` en la aplicacion, `tokio::spawn` en los tests.
-    pub fn consumer_future(self: &Arc<Self>) -> impl std::future::Future<Output = ()> + Send + 'static {
+    pub fn consumer_future(
+        self: &Arc<Self>,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
         let state = self.clone();
         // La suscripcion se hace **aqui**, no dentro del bloque async: si
         // esperase al primer `poll`, todo lo publicado entre el spawn y el
@@ -508,11 +511,7 @@ impl AppState {
                 self.persist_social(event, "subscribe", user);
             }
 
-            EventKind::LikeUpdated {
-                user,
-                count,
-                total,
-            } => {
+            EventKind::LikeUpdated { user, count, total } => {
                 // Solo las rafagas grandes van al feed: si no, lo inundan.
                 if like_is_notable(*count) {
                     self.push_feed(FeedItem::likes(
@@ -549,9 +548,7 @@ impl AppState {
             // que la interfaz lo tache en pantalla. La marca no es critica: si
             // se pierde, el historico conserva el mensaje, que es el estado
             // anterior y no rompe nada.
-            EventKind::ChatMessageDeleted {
-                target_source_id,
-            } => {
+            EventKind::ChatMessageDeleted { target_source_id } => {
                 if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
                     self.persist(
                         WriteJob::ChatDeleted {
@@ -752,7 +749,8 @@ impl AppState {
     }
 
     /// Vacia el feed de actividad (no toca el resumen de regalos).
-    pub fn clear_feed(&self) {        if let Ok(mut feed) = self.feed.lock() {
+    pub fn clear_feed(&self) {
+        if let Ok(mut feed) = self.feed.lock() {
             feed.clear();
         }
     }
@@ -776,9 +774,17 @@ impl AppState {
             traza.last_received_seq = seq;
             // Los primeros mensajes se registran uno a uno para poder seguirlos.
             if traza.received <= 5 {
-                tracing::info!(seq, recibidos = traza.received, "chat recibido por la interfaz");
+                tracing::info!(
+                    seq,
+                    recibidos = traza.received,
+                    "chat recibido por la interfaz"
+                );
             } else if traza.received % 25 == 0 {
-                tracing::info!(seq, recibidos = traza.received, "chat recibido por la interfaz");
+                tracing::info!(
+                    seq,
+                    recibidos = traza.received,
+                    "chat recibido por la interfaz"
+                );
             }
             // Aviso inequivoco: llegan mensajes y React no ha pintado ninguna
             // lista **en varios segundos**. Se mide el tiempo, no el numero de
@@ -858,12 +864,13 @@ impl AppState {
     }
 
     /// Tipos de evento reconocidos por la interfaz, ordenados por cantidad.
-    pub fn ui_event_counts(&self) -> Vec<(String, u64)> {        let mut lista: Vec<(String, u64)> = self
+    pub fn ui_event_counts(&self) -> Vec<(String, u64)> {
+        let mut lista: Vec<(String, u64)> = self
             .ui_events
             .lock()
             .map(|mapa| mapa.iter().map(|(k, v)| (k.clone(), *v)).collect())
             .unwrap_or_default();
-        lista.sort_by(|a, b| b.1.cmp(&a.1));
+        lista.sort_by_key(|item| std::cmp::Reverse(item.1));
         lista
     }
 
@@ -980,10 +987,7 @@ impl AppState {
         let Some(writer) = writer.as_ref() else {
             anyhow::bail!("el escritor de base de datos ya esta cerrado");
         };
-        if !writer.send_critical(
-            WriteJob::TtsProfile { settings_json },
-            WRITER_BLOCK_TIMEOUT,
-        ) {
+        if !writer.send_critical(WriteJob::TtsProfile { settings_json }, WRITER_BLOCK_TIMEOUT) {
             anyhow::bail!("no se pudo encolar el perfil TTS para persistirlo");
         }
         Ok(())
@@ -1160,12 +1164,14 @@ mod tests {
         let path = temp_db_path("tts-profile");
         let mut database = Database::open(&path).expect("base");
         database.migrate().expect("migraciones");
-        let mut settings = TtsSettings::default();
-        settings.enabled = false;
-        settings.voice_es = "es-MX-DaliaNeural".into();
-        settings.rate = "+25%".into();
-        settings.pitch = "-4Hz".into();
-        settings.audio_device = Some("Cable Input".into());
+        let mut settings = TtsSettings {
+            enabled: false,
+            voice_es: "es-MX-DaliaNeural".into(),
+            rate: "+25%".into(),
+            pitch: "-4Hz".into(),
+            audio_device: Some("Cable Input".into()),
+            ..TtsSettings::default()
+        };
         settings.filters.max_chars = 99;
         let json = serde_json::to_string(&settings).expect("json");
         database
@@ -1262,13 +1268,12 @@ mod tests {
             let mut guard = state.provider.write().expect("cerrojo de proveedor");
             *guard = state.simulated.clone() as Arc<dyn TikTokProvider>;
         }
-        state.simulated.set_interval(std::time::Duration::from_millis(5));
+        state
+            .simulated
+            .set_interval(std::time::Duration::from_millis(5));
         // Se conecta por el camino de la aplicacion: `AppState::connect` es el
         // que recuerda el handle que acaba en `streams.handle`.
-        state
-            .connect("prueba")
-            .await
-            .expect("arranca el simulador");
+        state.connect("prueba").await.expect("arranca el simulador");
 
         // Se espera a que el consumidor procese un numero suficiente de eventos.
         // El plazo es generoso a proposito: en la suite completa hay otros tests
