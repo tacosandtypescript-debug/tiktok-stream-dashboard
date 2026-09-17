@@ -74,8 +74,10 @@ pub struct ProviderConfig {
     /// Tiempo maximo para completar el handshake WebSocket.
     pub ws_connect_timeout: Duration,
     /// Tiempo maximo para una escritura en el WebSocket. La lectura siempre
-    /// esta protegida por el canal de cancelacion y el heartbeat.
+    /// esta protegida por el canal de cancelacion y un timeout de inactividad.
     pub ws_io_timeout: Duration,
+    /// Tiempo maximo sin recibir ningun frame del WebSocket.
+    pub ws_read_timeout: Duration,
 }
 
 impl Default for ProviderConfig {
@@ -97,6 +99,7 @@ impl Default for ProviderConfig {
             http_timeout: Duration::from_secs(30),
             ws_connect_timeout: Duration::from_secs(15),
             ws_io_timeout: Duration::from_secs(10),
+            ws_read_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -636,7 +639,14 @@ impl Supervisor {
                     .context("timeout enviando heartbeat")?
                     .context("enviando heartbeat")?;
                 }
-                incoming = read.next() => {
+                incoming = tokio::time::timeout(self.config.ws_read_timeout, read.next()) => {
+                    let incoming = match incoming {
+                        Ok(incoming) => incoming,
+                        Err(error) => {
+                            self.publish_sink(&mut sink, true);
+                            return Err(anyhow!("timeout leyendo WebSocket: {error}"));
+                        }
+                    };
                     match incoming {
                         None => {
                             self.publish_sink(&mut sink, true);
