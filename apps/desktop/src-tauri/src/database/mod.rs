@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
 /// Version de esquema actual. Subirla obliga a anadir la migracion.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Filas por transaccion. Mas grande = menos I/O, mas memoria en vuelo.
 const BATCH_SIZE: usize = 200;
@@ -136,6 +136,32 @@ const MIGRATIONS: &[(u32, &str)] = &[
     ALTER TABLE gift_events ADD COLUMN image_url TEXT NOT NULL DEFAULT '';
     "#,
     ),
+    (
+        4,
+        r#"
+    -- TTS profiles are intentionally extensible: settings live in JSON so a
+    -- new TTS option does not require a destructive schema change. The stable
+    -- row id `default` gives existing installations a profile to use.
+    CREATE TABLE IF NOT EXISTS tts_profiles (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        settings_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings_json)),
+        is_default    INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tts_profiles_name
+        ON tts_profiles(name);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tts_profiles_default
+        ON tts_profiles(is_default) WHERE is_default = 1;
+    INSERT OR IGNORE INTO tts_profiles
+        (id, name, settings_json, is_default, created_at, updated_at)
+    VALUES
+        ('default', 'Predeterminado', '{}', 1,
+         CAST(strftime('%s', 'now') AS INTEGER) * 1000,
+         CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    "#,
+    ),
 ];
 
 /// Directorio de datos de la aplicacion.
@@ -155,7 +181,11 @@ pub fn data_dir() -> PathBuf {
 
 /// Constructor puro de `data_dir`, para poder probarlo sin tocar el entorno
 /// del proceso (que en tests es compartido y por tanto racy).
-fn resolve_data_dir(custom: Option<&str>, local_app_data: Option<&str>, home: Option<&str>) -> PathBuf {
+fn resolve_data_dir(
+    custom: Option<&str>,
+    local_app_data: Option<&str>,
+    home: Option<&str>,
+) -> PathBuf {
     if let Some(custom) = custom {
         if !custom.trim().is_empty() {
             return PathBuf::from(custom);
@@ -276,6 +306,23 @@ pub enum WriteJob {
     Shutdown,
 }
 
+impl WriteJob {
+    /// Trabajos cuya perdida cambia los totales economicos o el historico de
+    /// la sesion. Se usa para identificar un fallo de transaccion, distinto de
+    /// un descarte normal por saturacion de la cola.
+    fn is_critical(&self) -> bool {
+        matches!(
+            self,
+            Self::StreamStarted { .. }
+                | Self::StreamEnded { .. }
+                | Self::Gift { .. }
+                | Self::GiftSettlement { .. }
+                | Self::Follow { .. }
+                | Self::Social { .. }
+        )
+    }
+}
+
 /// Conexion configurada. Una sola instancia por proceso.
 pub struct Database {
     conn: Connection,
@@ -287,8 +334,8 @@ impl Database {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creando {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("abriendo {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("abriendo {}", path.display()))?;
         let database = Self { conn };
         database.apply_pragmas()?;
         Ok(database)
@@ -399,9 +446,8 @@ impl Database {
                    (id, handle, room_id, title, started_at, crashed)
                  VALUES (?1, ?2, ?3, ?4, ?5, 0)",
             )?;
-            let mut stream_end = tx.prepare_cached(
-                "UPDATE streams SET ended_at = ?2, crashed = ?3 WHERE id = ?1",
-            )?;
+            let mut stream_end =
+                tx.prepare_cached("UPDATE streams SET ended_at = ?2, crashed = ?3 WHERE id = ?1")?;
             let mut bump = tx.prepare_cached(
                 "UPDATE streams SET comment_count = comment_count + 1 WHERE id = ?1",
             )?;
@@ -422,7 +468,9 @@ impl Database {
             let mut close_streak = tx.prepare_cached(
                 "UPDATE gift_events SET is_final = 1
                   WHERE id = (SELECT MAX(id) FROM gift_events
-                               WHERE stream_id = ?1 AND group_id = ?2 AND is_final = 0)",
+                               WHERE stream_id = ?1 AND group_id = ?2 AND is_final = 0)
+                    AND NOT EXISTS (SELECT 1 FROM gift_events
+                                    WHERE stream_id = ?1 AND group_id = ?2 AND is_final = 1)",
             )?;
             // `MAX` con dos argumentos es una funcion escalar de SQLite: deja el
             // pico anterior si el nuevo es menor. `COALESCE` respeta la columna
@@ -430,7 +478,7 @@ impl Database {
             let mut stream_progress = tx.prepare_cached(
                 "UPDATE streams
                     SET peak_viewers = MAX(peak_viewers, COALESCE(?2, peak_viewers)),
-                        like_total    = COALESCE(?3, like_total)
+                        like_total    = MAX(like_total, COALESCE(?3, like_total))
                   WHERE id = ?1",
             )?;
 
@@ -443,9 +491,8 @@ impl Database {
                         title,
                         started_at,
                     } => {
-                        written += stream_start.execute(params![
-                            stream_id, handle, room_id, title, started_at
-                        ])?;
+                        written += stream_start
+                            .execute(params![stream_id, handle, room_id, title, started_at])?;
                     }
                     WriteJob::StreamEnded {
                         stream_id,
@@ -463,10 +510,18 @@ impl Database {
                         source_id,
                     } => {
                         user.execute(params![user_id, user_id, nickname, timestamp_ms])?;
-                        written += comment.execute(params![
-                            stream_id, user_id, nickname, content, timestamp_ms, source_id
+                        let inserted = comment.execute(params![
+                            stream_id,
+                            user_id,
+                            nickname,
+                            content,
+                            timestamp_ms,
+                            source_id
                         ])?;
-                        bump.execute(params![stream_id])?;
+                        written += inserted;
+                        if inserted > 0 {
+                            bump.execute(params![stream_id])?;
+                        }
                     }
                     WriteJob::ChatDeleted {
                         stream_id,
@@ -494,7 +549,7 @@ impl Database {
                         committed_diamonds,
                     } => {
                         user.execute(params![user_id, user_id, "", timestamp_ms])?;
-                        written += gift.execute(params![
+                        let inserted = gift.execute(params![
                             stream_id,
                             user_id,
                             gift_id,
@@ -507,9 +562,11 @@ impl Database {
                             timestamp_ms,
                             source_id
                         ])?;
+                        written += inserted;
                         // Solo se suman las aportaciones completas: los progresos
-                        // de una racha llegan con 0.
-                        if *committed_units > 0 || *committed_diamonds > 0 {
+                        // de una racha llegan con 0. El `INSERT OR IGNORE` es la
+                        // frontera de idempotencia: un replay no vuelve a sumar.
+                        if inserted > 0 && (*committed_units > 0 || *committed_diamonds > 0) {
                             bump_gift.execute(params![
                                 stream_id,
                                 committed_units,
@@ -523,8 +580,10 @@ impl Database {
                         units,
                         diamonds,
                     } => {
-                        written += close_streak.execute(params![stream_id, group_id])?;
-                        if *units > 0 || *diamonds > 0 {
+                        let closed = close_streak.execute(params![stream_id, group_id])?;
+                        written += closed;
+                        // Solo la primera liquidacion cambia el historico.
+                        if closed > 0 && (*units > 0 || *diamonds > 0) {
                             written += bump_gift.execute(params![stream_id, units, diamonds])?;
                         }
                     }
@@ -533,8 +592,11 @@ impl Database {
                         peak_viewers,
                         like_total,
                     } => {
-                        written +=
-                            stream_progress.execute(params![stream_id, peak_viewers, like_total])?;
+                        written += stream_progress.execute(params![
+                            stream_id,
+                            peak_viewers,
+                            like_total
+                        ])?;
                     }
                     WriteJob::Follow {
                         stream_id,
@@ -543,9 +605,8 @@ impl Database {
                         source_id,
                     } => {
                         user.execute(params![user_id, user_id, "", timestamp_ms])?;
-                        written += follow.execute(params![
-                            stream_id, user_id, timestamp_ms, source_id
-                        ])?;
+                        written +=
+                            follow.execute(params![stream_id, user_id, timestamp_ms, source_id])?;
                     }
                     WriteJob::Social {
                         stream_id,
@@ -616,6 +677,8 @@ pub struct DbWriter {
     dropped: Arc<AtomicU64>,
     join: Mutex<Option<std::thread::JoinHandle<()>>>,
     written: Arc<AtomicU64>,
+    write_errors: Arc<AtomicU64>,
+    critical_write_errors: Arc<AtomicU64>,
 }
 
 impl DbWriter {
@@ -625,8 +688,11 @@ impl DbWriter {
         let (tx, rx) = sync_channel::<WriteJob>(capacity);
         let dropped = Arc::new(AtomicU64::new(0));
         let written = Arc::new(AtomicU64::new(0));
-        let thread_dropped = dropped.clone();
         let thread_written = written.clone();
+        let write_errors = Arc::new(AtomicU64::new(0));
+        let critical_write_errors = Arc::new(AtomicU64::new(0));
+        let thread_write_errors = write_errors.clone();
+        let thread_critical_write_errors = critical_write_errors.clone();
 
         let join = std::thread::Builder::new()
             .name("db-writer".into())
@@ -643,7 +709,13 @@ impl DbWriter {
                             Ok(job) => Some(job),
                             Err(RecvTimeoutError::Timeout) => None,
                             Err(RecvTimeoutError::Disconnected) => {
-                                flush(&mut database, &mut batch, &thread_written);
+                                flush(
+                                    &mut database,
+                                    &mut batch,
+                                    &thread_written,
+                                    &thread_write_errors,
+                                    &thread_critical_write_errors,
+                                );
                                 break;
                             }
                         }
@@ -651,7 +723,13 @@ impl DbWriter {
 
                     match first {
                         Some(WriteJob::Shutdown) => {
-                            flush(&mut database, &mut batch, &thread_written);
+                            flush(
+                                &mut database,
+                                &mut batch,
+                                &thread_written,
+                                &thread_write_errors,
+                                &thread_critical_write_errors,
+                            );
                             tracing::info!("escritor de base de datos detenido");
                             break;
                         }
@@ -661,7 +739,13 @@ impl DbWriter {
                             while batch.len() < BATCH_SIZE {
                                 match rx.try_recv() {
                                     Ok(WriteJob::Shutdown) => {
-                                        flush(&mut database, &mut batch, &thread_written);
+                                        flush(
+                                            &mut database,
+                                            &mut batch,
+                                            &thread_written,
+                                            &thread_write_errors,
+                                            &thread_critical_write_errors,
+                                        );
                                         tracing::info!("escritor de base de datos detenido");
                                         return;
                                     }
@@ -670,18 +754,24 @@ impl DbWriter {
                                 }
                             }
                             if batch.len() >= BATCH_SIZE {
-                                flush(&mut database, &mut batch, &thread_written);
+                                flush(
+                                    &mut database,
+                                    &mut batch,
+                                    &thread_written,
+                                    &thread_write_errors,
+                                    &thread_critical_write_errors,
+                                );
                             }
                         }
-                        None => flush(&mut database, &mut batch, &thread_written),
-                    }
-
-                    // Los lotes incompletos no esperan indefinidamente.
-                    if !batch.is_empty() {
-                        flush(&mut database, &mut batch, &thread_written);
+                        None => flush(
+                            &mut database,
+                            &mut batch,
+                            &thread_written,
+                            &thread_write_errors,
+                            &thread_critical_write_errors,
+                        ),
                     }
                 }
-                let _ = thread_dropped;
             })
             .expect("no se pudo arrancar el hilo escritor");
 
@@ -690,6 +780,8 @@ impl DbWriter {
             dropped,
             join: Mutex::new(Some(join)),
             written,
+            write_errors,
+            critical_write_errors,
         }
     }
 
@@ -744,6 +836,16 @@ impl DbWriter {
         self.written.load(Ordering::Relaxed)
     }
 
+    /// Numero de lotes que fallaron por un error SQLite.
+    pub fn write_errors(&self) -> u64 {
+        self.write_errors.load(Ordering::Relaxed)
+    }
+
+    /// Numero de trabajos criticos incluidos en lotes fallidos.
+    pub fn critical_write_errors(&self) -> u64 {
+        self.critical_write_errors.load(Ordering::Relaxed)
+    }
+
     /// Cierra el escritor y espera a que vacie la cola.
     ///
     /// Toma `&self` para poder consultar los contadores despues del cierre.
@@ -757,7 +859,13 @@ impl DbWriter {
     }
 }
 
-fn flush(database: &mut Database, batch: &mut Vec<WriteJob>, written: &AtomicU64) {
+fn flush(
+    database: &mut Database,
+    batch: &mut Vec<WriteJob>,
+    written: &AtomicU64,
+    write_errors: &AtomicU64,
+    critical_write_errors: &AtomicU64,
+) {
     if batch.is_empty() {
         return;
     }
@@ -765,7 +873,17 @@ fn flush(database: &mut Database, batch: &mut Vec<WriteJob>, written: &AtomicU64
         Ok(rows) => {
             written.fetch_add(rows as u64, Ordering::Relaxed);
         }
-        Err(error) => tracing::error!(%error, filas = batch.len(), "fallo el lote de escritura"),
+        Err(error) => {
+            let critical = batch.iter().filter(|job| job.is_critical()).count() as u64;
+            write_errors.fetch_add(1, Ordering::Relaxed);
+            critical_write_errors.fetch_add(critical, Ordering::Relaxed);
+            tracing::error!(
+                %error,
+                filas = batch.len(),
+                criticos = critical,
+                "fallo el lote de escritura; se perdieron los trabajos del lote"
+            );
+        }
     }
     batch.clear();
 }
@@ -816,7 +934,10 @@ mod tests {
             Path::new("C:\\Local").join("TikTokStreamDashboard")
         );
         // Sin ninguna variable, se cae a una ruta relativa en lugar de fallar.
-        assert_eq!(resolve_data_dir(None, None, None), PathBuf::from(".").join("data"));
+        assert_eq!(
+            resolve_data_dir(None, None, None),
+            PathBuf::from(".").join("data")
+        );
     }
 
     #[test]
@@ -899,15 +1020,15 @@ mod tests {
             ])
             .expect("regalos");
 
-        assert_eq!(database.count("gift_events").unwrap(), 2, "se guardan los dos eventos");
+        assert_eq!(
+            database.count("gift_events").unwrap(),
+            2,
+            "se guardan los dos eventos"
+        );
         let diamantes = database
             .query_i64("SELECT diamond_total FROM streams WHERE id = 's1'", 0)
             .unwrap();
-        assert_eq!(
-            diamantes,
-            Some(3),
-            "la racha son 3 rosas, no 1+3 diamantes"
-        );
+        assert_eq!(diamantes, Some(3), "la racha son 3 rosas, no 1+3 diamantes");
         let unidades = database
             .query_i64("SELECT gift_count FROM streams WHERE id = 's1'", 0)
             .unwrap();
@@ -935,11 +1056,11 @@ mod tests {
         );
     }
 
-    /// La migracion v3 anade `image_url` a una base que ya existia con la v2.
+    /// La migracion v3 anade `image_url`; la v4 crea el perfil TTS inicial.
     #[test]
-    fn la_migracion_v3_anade_el_icono_del_regalo() {
+    fn las_migraciones_actuales_anaden_icono_y_perfil_tts() {
         let database = open();
-        assert_eq!(database.schema_version(), 3, "el esquema llega a la v3");
+        assert_eq!(database.schema_version(), 4, "el esquema llega a la v4");
         // La columna existe y su valor por defecto es vacio (no NULL): las filas
         // antiguas siguen siendo legibles.
         let columnas = database
@@ -949,12 +1070,42 @@ mod tests {
             )
             .unwrap();
         assert_eq!(columnas, Some(1), "gift_events debe tener image_url");
+        assert_eq!(database.count("tts_profiles").unwrap(), 1);
+        assert_eq!(
+            database
+                .query_string("SELECT id FROM tts_profiles WHERE is_default = 1", 0)
+                .unwrap()
+                .as_deref(),
+            Some("default")
+        );
+        assert_eq!(
+            database
+                .query_string(
+                    "SELECT settings_json FROM tts_profiles WHERE id = 'default'",
+                    0
+                )
+                .unwrap()
+                .as_deref(),
+            Some("{}")
+        );
+        // El perfil admite opciones futuras sin otra migracion de columnas.
+        database
+            .conn
+            .execute(
+                "INSERT INTO tts_profiles
+                    (id, name, settings_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                params!["custom", "Personalizado", r#"{"new_option":true}"#],
+            )
+            .unwrap();
+        assert_eq!(database.count("tts_profiles").unwrap(), 2);
     }
 
     /// El caso real de la migracion: una instalacion que ya tenia datos en la v2
-    /// se actualiza sin perder las filas de regalos que ya estaban guardadas.
+    /// se actualiza sin perder las filas de regalos que ya estaban guardadas ni
+    /// duplicar el perfil predeterminado.
     #[test]
-    fn una_base_de_la_v2_se_actualiza_a_la_v3_sin_perder_regalos() {
+    fn una_base_anterior_se_actualiza_a_la_v4_sin_perder_regalos() {
         let database = Database::open_in_memory().expect("base en memoria");
         // Se aplica el esquema hasta la v2, como una instalacion anterior.
         database
@@ -992,8 +1143,12 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(database.migrate().expect("migrando"), 3);
-        assert_eq!(database.count("gift_events").unwrap(), 1, "no se pierde la fila");
+        assert_eq!(database.migrate().expect("migrando"), 4);
+        assert_eq!(
+            database.count("gift_events").unwrap(),
+            1,
+            "no se pierde la fila"
+        );
         assert_eq!(
             database
                 .query_string("SELECT image_url FROM gift_events", 0)
@@ -1002,8 +1157,10 @@ mod tests {
             Some(""),
             "las filas anteriores quedan con el icono vacio, no nulas"
         );
+        assert_eq!(database.count("tts_profiles").unwrap(), 1);
         // Y aplicar la migracion otra vez no rompe nada.
-        assert_eq!(database.migrate().expect("segunda pasada"), 3);
+        assert_eq!(database.migrate().expect("segunda pasada"), 4);
+        assert_eq!(database.count("tts_profiles").unwrap(), 1);
     }
 
     /// El pico de espectadores se guarda con `MAX` y el total de likes con el
@@ -1046,6 +1203,13 @@ mod tests {
                     peak_viewers: None,
                     like_total: Some(1200),
                 },
+                // Un frameo retrasado no puede hacer retroceder el total
+                // absoluto ya persistido.
+                WriteJob::StreamProgress {
+                    stream_id: "s1".into(),
+                    peak_viewers: None,
+                    like_total: Some(700),
+                },
             ])
             .expect("progreso");
 
@@ -1061,7 +1225,7 @@ mod tests {
                 .query_i64("SELECT like_total FROM streams WHERE id = 's1'", 0)
                 .unwrap(),
             Some(1200),
-            "los likes son el total absoluto del ultimo volcado"
+            "los likes son un total absoluto monotono"
         );
         assert_eq!(
             database
@@ -1069,6 +1233,66 @@ mod tests {
                 .unwrap(),
             Some(0),
             "el progreso no toca otros contadores"
+        );
+    }
+
+    #[test]
+    fn los_contadores_de_comentarios_y_regalos_son_idempotentes() {
+        let mut database = open();
+        database
+            .write_batch(&[WriteJob::StreamStarted {
+                stream_id: "s1".into(),
+                handle: "usuario".into(),
+                room_id: "123".into(),
+                title: String::new(),
+                started_at: 1,
+            }])
+            .expect("stream");
+
+        let comentario = comment(1);
+        assert_eq!(database.write_batch(&[comentario.clone()]).unwrap(), 1);
+        assert_eq!(database.write_batch(&[comentario]).unwrap(), 0);
+        assert_eq!(
+            database
+                .query_i64("SELECT comment_count FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(1),
+            "un replay no vuelve a contar el comentario"
+        );
+
+        let regalo = WriteJob::Gift {
+            stream_id: "s1".into(),
+            user_id: "u1".into(),
+            gift_id: "5655".into(),
+            gift_name: "Rose".into(),
+            image_url: String::new(),
+            diamond_count: 2,
+            repeat_count: 3,
+            is_final: true,
+            group_id: "g1".into(),
+            timestamp_ms: 10,
+            source_id: Some("gift-1".into()),
+            committed_units: 3,
+            committed_diamonds: 6,
+        };
+        assert_eq!(
+            database.write_batch(std::slice::from_ref(&regalo)).unwrap(),
+            1
+        );
+        assert_eq!(database.write_batch(&[regalo]).unwrap(), 0);
+        assert_eq!(
+            database
+                .query_i64("SELECT gift_count FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(3),
+            "un replay no vuelve a contar las unidades"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT diamond_total FROM streams WHERE id = 's1'", 0)
+                .unwrap(),
+            Some(6),
+            "un replay no vuelve a contar los diamantes"
         );
     }
 
@@ -1122,6 +1346,15 @@ mod tests {
                 diamonds: 2,
             }])
             .expect("liquidacion");
+
+        database
+            .write_batch(&[WriteJob::GiftSettlement {
+                stream_id: "s1".into(),
+                group_id: "g1".into(),
+                units: 2,
+                diamonds: 2,
+            }])
+            .expect("liquidacion repetida");
 
         assert_eq!(
             database
@@ -1269,6 +1502,78 @@ mod tests {
         assert_eq!(check.count("streams").unwrap(), 1);
 
         drop(check);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn el_escritor_espera_la_ventana_para_completar_un_lote() {
+        let path = std::env::temp_dir().join(format!(
+            "ttdash-writer-batch-{}-{}.db",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let database = Database::open(&path).expect("base en disco");
+        database.migrate().expect("migraciones");
+        let writer = DbWriter::start(database, 8);
+        assert!(writer.try_send(WriteJob::StreamStarted {
+            stream_id: "s1".into(),
+            handle: "usuario".into(),
+            room_id: "123".into(),
+            title: String::new(),
+            started_at: 1,
+        }));
+
+        // Un lote incompleto no debe convertirse en una transaccion por cada
+        // mensaje: permanece abierto hasta el timeout o hasta llenarse.
+        std::thread::sleep(Duration::from_millis(25));
+        assert_eq!(writer.written(), 0, "el lote se vacio antes de tiempo");
+        std::thread::sleep(BATCH_TIMEOUT + Duration::from_millis(25));
+        assert_eq!(writer.written(), 1, "el timeout debe vaciar el lote");
+        writer.close();
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn un_error_de_transaccion_se_cuenta_y_marca_los_trabajos_criticos() {
+        let path = std::env::temp_dir().join(format!(
+            "ttdash-writer-error-{}-{}.db",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let database = Database::open(&path).expect("base en disco");
+        database.migrate().expect("migraciones");
+        let writer = DbWriter::start(database, 8);
+        assert!(writer.try_send(WriteJob::Gift {
+            // No existe el stream: la transaccion debe fallar por foreign key.
+            stream_id: "missing".into(),
+            user_id: "u1".into(),
+            gift_id: "5655".into(),
+            gift_name: "Rose".into(),
+            image_url: String::new(),
+            diamond_count: 1,
+            repeat_count: 1,
+            is_final: true,
+            group_id: "g1".into(),
+            timestamp_ms: 10,
+            source_id: Some("gift-error".into()),
+            committed_units: 1,
+            committed_diamonds: 1,
+        }));
+        writer.close();
+
+        assert_eq!(writer.write_errors(), 1);
+        assert_eq!(writer.critical_write_errors(), 1);
+        assert_eq!(writer.written(), 0);
+
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("db-wal"));
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
