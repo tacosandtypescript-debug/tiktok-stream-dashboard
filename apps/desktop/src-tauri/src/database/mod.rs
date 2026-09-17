@@ -246,6 +246,18 @@ pub enum WriteJob {
         /// Ultimo total absoluto de likes, o `None` si no hubo likes.
         like_total: Option<i64>,
     },
+    /// Tombstone de un comentario borrado en TikTok.
+    ///
+    /// No se borra la fila: se marca **cuando** dejo de estar visible, para que
+    /// el historico conserve el texto y el rastro (docs/plan-review.md: "ImDelete
+    /// -> tombstone, no borrado fisico"). Un aviso de TikTok puede borrar varios
+    /// mensajes, asi que llega una orden por mensaje.
+    ChatDeleted {
+        stream_id: String,
+        /// `msg_id` de TikTok del mensaje borrado.
+        source_id: String,
+        deleted_at: i64,
+    },
     Follow {
         stream_id: String,
         user_id: String,
@@ -393,6 +405,12 @@ impl Database {
             let mut bump = tx.prepare_cached(
                 "UPDATE streams SET comment_count = comment_count + 1 WHERE id = ?1",
             )?;
+            // `deleted_at IS NULL` lo hace idempotente: un segundo aviso del
+            // mismo mensaje no reescribe cuando se borro.
+            let mut comment_deleted = tx.prepare_cached(
+                "UPDATE comments SET deleted_at = ?1
+                  WHERE stream_id = ?2 AND source_id = ?3 AND deleted_at IS NULL",
+            )?;
             let mut bump_gift = tx.prepare_cached(
                 "UPDATE streams SET gift_count = gift_count + ?2,
                                     diamond_total = diamond_total + ?3
@@ -449,6 +467,16 @@ impl Database {
                             stream_id, user_id, nickname, content, timestamp_ms, source_id
                         ])?;
                         bump.execute(params![stream_id])?;
+                    }
+                    WriteJob::ChatDeleted {
+                        stream_id,
+                        source_id,
+                        deleted_at,
+                    } => {
+                        // No suma a `written` como una fila nueva: es una marca
+                        // sobre una fila que ya existe (y puede no existir, si el
+                        // mensaje salio de la ventana antes de llegar el aviso).
+                        comment_deleted.execute(params![deleted_at, stream_id, source_id])?;
                     }
                     WriteJob::Gift {
                         stream_id,
@@ -1134,6 +1162,79 @@ mod tests {
             2,
             "no se inventa una fila de regalo para ajustar"
         );
+    }
+
+    #[test]
+    fn el_borrado_deja_tombstone_y_no_borra_la_fila() {
+        let mut database = open();
+        database
+            .write_batch(&[
+                WriteJob::StreamStarted {
+                    stream_id: "s1".into(),
+                    handle: "carlos".into(),
+                    room_id: "r1".into(),
+                    title: "directo".into(),
+                    started_at: 1,
+                },
+                WriteJob::Comment {
+                    stream_id: "s1".into(),
+                    user_id: "u1".into(),
+                    nickname: "Carlos".into(),
+                    content: "hola".into(),
+                    timestamp_ms: 10,
+                    source_id: Some("m1".into()),
+                },
+            ])
+            .expect("comentario");
+
+        database
+            .write_batch(&[WriteJob::ChatDeleted {
+                stream_id: "s1".into(),
+                source_id: "m1".into(),
+                deleted_at: 99,
+            }])
+            .expect("borrado");
+
+        assert_eq!(
+            database
+                .query_i64("SELECT COUNT(*) FROM comments", 0)
+                .unwrap(),
+            Some(1),
+            "el borrado es un tombstone: la fila se conserva"
+        );
+        assert_eq!(
+            database
+                .query_i64("SELECT deleted_at FROM comments WHERE source_id = 'm1'", 0)
+                .unwrap(),
+            Some(99),
+            "y queda marcada con cuando se borro"
+        );
+
+        // Un segundo aviso (o el mismo repetido) no reescribe la marca.
+        database
+            .write_batch(&[WriteJob::ChatDeleted {
+                stream_id: "s1".into(),
+                source_id: "m1".into(),
+                deleted_at: 12345,
+            }])
+            .expect("borrado repetido");
+        assert_eq!(
+            database
+                .query_i64("SELECT deleted_at FROM comments WHERE source_id = 'm1'", 0)
+                .unwrap(),
+            Some(99),
+            "la marca es idempotente"
+        );
+
+        // Un id que no esta en la tabla no rompe nada.
+        database
+            .write_batch(&[WriteJob::ChatDeleted {
+                stream_id: "s1".into(),
+                source_id: "no-existe".into(),
+                deleted_at: 200,
+            }])
+            .expect("borrado de algo que ya no esta");
+        assert_eq!(database.count("comments").unwrap(), 1);
     }
 
     #[test]

@@ -382,7 +382,7 @@ impl AppState {
                 ));
                 // La contabilidad de rachas vive **solo** en el tablero: el
                 // mismo numero que se enseña es el que se guarda.
-                let settlement = match self.gifts.lock() {
+                let outcome = match self.gifts.lock() {
                     Ok(mut board) => board.record(GiftEventView {
                         seq: event.seq,
                         timestamp_ms: event.timestamp_ms,
@@ -396,11 +396,37 @@ impl AppState {
                         is_final: gift.is_final,
                         group_id: gift.group_id.clone(),
                     }),
-                    Err(_) => crate::feed::Settlement::NONE,
+                    Err(_) => crate::feed::RecordOutcome::default(),
                 };
                 self.publish_gift_board(gift.is_final);
 
-                let (units, diamonds) = (settlement.units, settlement.diamonds);
+                let (units, diamonds) = (outcome.current.units, outcome.current.diamonds);
+
+                // Rachas que este mismo regalo ha dejado atras (el usuario empezo
+                // otra): se persisten aqui, con la misma orden que usa el cierre
+                // de sesion. Contarlas solo en memoria dejaba el total de la
+                // sesion en disco por debajo del que ve el streamer.
+                if !outcome.abandoned.is_empty() {
+                    if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
+                        for racha in &outcome.abandoned {
+                            tracing::debug!(
+                                grupo = %racha.group_id,
+                                unidades = racha.units,
+                                diamantes = racha.diamonds,
+                                "racha abandonada liquidada al empezar otra"
+                            );
+                            self.persist(
+                                WriteJob::GiftSettlement {
+                                    stream_id: stream_id.clone(),
+                                    group_id: racha.group_id.clone(),
+                                    units: racha.units,
+                                    diamonds: racha.diamonds,
+                                },
+                                true,
+                            );
+                        }
+                    }
+                }
                 if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
                     // Los regalos mueven dinero y rankings: nunca se descartan.
                     self.persist(
@@ -502,10 +528,25 @@ impl AppState {
             // (ver el contrato en `core/event.rs`).
             EventKind::MemberJoined { .. } => {}
 
-            // El aviso de borrado lo consume la interfaz, que quita la linea del
-            // chat por su `source_id`; `comments` guarda el texto original y
-            // nadie ha pedido todavia un borrado en la base.
-            EventKind::ChatMessageDeleted { .. } => {}
+            // Un borrado deja **tombstone** en la base (no se pierde el texto ni
+            // el rastro, solo se marca cuando dejo de estar visible) ademas de
+            // que la interfaz lo tache en pantalla. La marca no es critica: si
+            // se pierde, el historico conserva el mensaje, que es el estado
+            // anterior y no rompe nada.
+            EventKind::ChatMessageDeleted {
+                target_source_id,
+            } => {
+                if let Some(stream_id) = self.stream_id.read().ok().and_then(|g| g.clone()) {
+                    self.persist(
+                        WriteJob::ChatDeleted {
+                            stream_id,
+                            source_id: target_source_id.clone(),
+                            deleted_at: event.timestamp_ms,
+                        },
+                        false,
+                    );
+                }
+            }
 
             EventKind::StreamWaiting { handle, detail } => {
                 self.push_feed(FeedItem::info(

@@ -1090,3 +1090,129 @@ fn las_rachas_abiertas_se_liquidan_al_cerrar_la_sesion() {
     drop(base);
     db.finalizar();
 }
+
+/// Una racha abandonada a mitad de sesion tiene que llegar a la base.
+///
+/// `GiftBoard` la contabiliza cuando el mismo usuario empieza otra racha, pero
+/// hasta ahora ese numero se quedaba **solo en memoria**: el total que veia el
+/// streamer y el de `streams` divergian (el mismo tipo de fallo que D14). Ahora
+/// la liquidacion se devuelve y se persiste con la orden del cierre de sesion.
+#[test]
+fn la_racha_abandonada_llega_a_la_base_al_empezar_otra() {
+    let db = DbTemp::nueva("flujo-abandonada");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
+    let carlos = usuario("1", "Carlos");
+
+    estado.on_event(&conectar(1));
+    // Racha g1: no cierra nunca.
+    estado.on_event(&Event::new(
+        2,
+        SALA.to_string(),
+        Some("gift-2".to_string()),
+        EventKind::GiftReceived {
+            user: carlos.clone(),
+            gift: regalo("5655", "Rose", 1, 1, true, false, "g-1"),
+        },
+    ));
+    // Y el mismo usuario empieza otra (g2) que si cierra.
+    estado.on_event(&Event::new(
+        3,
+        SALA.to_string(),
+        Some("gift-3".to_string()),
+        EventKind::GiftReceived {
+            user: carlos.clone(),
+            gift: regalo("5655", "Rose", 1, 1, true, true, "g-2"),
+        },
+    ));
+
+    // Lo que ve la interfaz.
+    let snapshot = estado.snapshot();
+    assert_eq!(
+        snapshot.total_diamonds, 2,
+        "1 de la racha abandonada + 1 de la que cierra"
+    );
+
+    estado.shutdown();
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.query_i64("SELECT diamond_total FROM streams", 0)
+            .expect("leyendo los diamantes"),
+        Some(2),
+        "y lo persistido tiene que decir lo mismo que la memoria"
+    );
+    assert_eq!(
+        base.query_i64("SELECT gift_count FROM streams", 0)
+            .expect("leyendo las unidades"),
+        Some(2)
+    );
+    assert_eq!(
+        base.query_i64(
+            "SELECT COUNT(*) FROM gift_events WHERE group_id = 'g-1' AND is_final = 1",
+            0
+        )
+        .expect("leyendo el cierre de la abandonada"),
+        Some(1),
+        "la racha abandonada queda cerrada en el historico"
+    );
+    assert_eq!(
+        base.count("gift_events").expect("contando regalos"),
+        2,
+        "sin filas de ajuste: se marcan las filas reales"
+    );
+
+    drop(base);
+    db.finalizar();
+}
+
+/// Un comentario borrado en TikTok deja **tombstone** en la base.
+///
+/// No se borra la fila: se marca cuando dejo de estar visible, para no perder ni
+/// el texto ni el rastro (docs/plan-review.md). El evento se llama
+/// `target_source_id` para no chocar con el `source_id` del sobre al serializar
+/// el enum aplanado.
+#[test]
+fn el_borrado_de_un_comentario_deja_tombstone_en_la_base() {
+    let db = DbTemp::nueva("flujo-borrado");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base temporal");
+    let carlos = usuario("1", "Carlos");
+
+    estado.on_event(&conectar(1));
+    estado.on_event(&Event::new(
+        2,
+        SALA.to_string(),
+        Some("m1".to_string()),
+        EventKind::ChatMessage {
+            user: carlos.clone(),
+            content: "se va a borrar".into(),
+            emote_count: 0,
+        },
+    ));
+    estado.on_event(&Event::new(
+        3,
+        SALA.to_string(),
+        None,
+        EventKind::ChatMessageDeleted {
+            target_source_id: "m1".into(),
+        },
+    ));
+
+    estado.shutdown();
+    let base = Database::open(&db.path()).expect("la base temporal deberia reabrirse");
+    assert_eq!(
+        base.count("comments").expect("contando comentarios"),
+        1,
+        "el texto se conserva: el borrado es una marca, no un DELETE"
+    );
+    assert_eq!(
+        base.query_i64(
+            "SELECT COUNT(*) FROM comments WHERE source_id = 'm1' AND deleted_at IS NOT NULL",
+            0
+        )
+        .expect("leyendo la marca"),
+        Some(1),
+        "y queda marcado cuando se borro"
+    );
+
+    drop(base);
+    db.finalizar();
+}

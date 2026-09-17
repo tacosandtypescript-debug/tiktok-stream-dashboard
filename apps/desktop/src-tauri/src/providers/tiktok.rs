@@ -654,11 +654,12 @@ pub(crate) fn translate_message(method: &str, payload: &[u8], sink: &mut EventSi
                         // mismo aviso puede borrar varios mensajes, y repetir el
                         // id del aviso haria que el bus descartase los
                         // siguientes como duplicados. El mensaje borrado viaja
-                        // en el cuerpo del evento.
+                        // en `target_source_id`, que se llama asi para no chocar
+                        // con el `source_id` del sobre al serializar aplanado.
                         sink.push(
                             None,
                             EventKind::ChatMessageDeleted {
-                                source_id: msg_id.to_string(),
+                                target_source_id: msg_id.to_string(),
                             },
                         );
                     }
@@ -1516,7 +1517,9 @@ mod tests {
         let borrados: Vec<&str> = eventos
             .iter()
             .filter_map(|(_, kind)| match kind {
-                EventKind::ChatMessageDeleted { source_id } => Some(source_id.as_str()),
+                EventKind::ChatMessageDeleted { target_source_id } => {
+                    Some(target_source_id.as_str())
+                }
                 _ => None,
             })
             .collect();

@@ -230,6 +230,21 @@ impl Settlement {
     };
 }
 
+/// Lo que hay que contabilizar despues de registrar un evento de regalo.
+///
+/// Son **dos cosas distintas** y por eso no se devuelve un solo numero:
+///   * `current`: lo que aporta el evento recien llegado (cero mientras su racha
+///     sigue abierta). Va en su propia fila de `gift_events`.
+///   * `abandoned`: rachas anteriores que se liquidan en esta misma llamada
+///     porque el mismo usuario ha empezado otra. Tienen su propio `group_id`, y
+///     sin devolverlas se quedaban contadas en memoria pero **sin persistir**:
+///     el total de la interfaz y el de `streams` divergian.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordOutcome {
+    pub current: Settlement,
+    pub abandoned: Vec<StreakSettlement>,
+}
+
 /// Racha abierta que se liquida al cerrar la sesion.
 ///
 /// Lleva lo imprescindible para persistirla: `group_id` identifica las filas de
@@ -282,7 +297,7 @@ impl GiftBoard {
     /// racha es la **suma de sus incrementos**, no el valor del ultimo evento:
     /// `repeat_count` es un incremento por mensaje. Contar solo el ultimo
     /// infravaloraba los diamantes a la mitad en una racha de dos rosas.
-    pub fn record(&mut self, view: GiftEventView) -> Settlement {
+    pub fn record(&mut self, view: GiftEventView) -> RecordOutcome {
         if self.recent.len() >= GIFT_CAPACITY {
             self.recent.pop_front();
         }
@@ -305,15 +320,26 @@ impl GiftBoard {
                 units,
                 diamonds,
             });
-            return Settlement { units, diamonds };
+            return RecordOutcome {
+                current: Settlement { units, diamonds },
+                abandoned: Vec::new(),
+            };
         }
 
         // Si este usuario ha empezado otra racha, la anterior se quedo sin
         // cierre: se liquida lo que llevaba en lugar de perderlo (35 de 176
-        // rachas del historico no reciben `repeat_end`).
+        // rachas del historico no reciben `repeat_end`). Se devuelve para que el
+        // llamante la persista: contarla solo en memoria dejaba el total de la
+        // sesion por debajo del que ve el streamer.
+        let mut abandoned = Vec::new();
         if let Some(previo) = self.open_by_user.get(&user_id).cloned() {
             if previo != group_id {
                 if let Some(pendiente) = self.open.remove(&previo) {
+                    abandoned.push(StreakSettlement {
+                        group_id: previo,
+                        units: pendiente.units,
+                        diamonds: pendiente.diamonds,
+                    });
                     self.settle(pendiente);
                 }
             }
@@ -334,11 +360,14 @@ impl GiftBoard {
         self.open_by_user.insert(user_id.clone(), group_id.clone());
 
         if !commits {
-            return Settlement::NONE;
+            return RecordOutcome {
+                current: Settlement::NONE,
+                abandoned,
+            };
         }
 
         self.open_by_user.remove(&user_id);
-        match self.open.remove(&group_id) {
+        let current = match self.open.remove(&group_id) {
             Some(pendiente) => {
                 let liquidado = Settlement {
                     units: pendiente.units,
@@ -348,7 +377,8 @@ impl GiftBoard {
                 liquidado
             }
             None => Settlement::NONE,
-        }
+        };
+        RecordOutcome { current, abandoned }
     }
 
     /// Liquida **todas** las rachas abiertas y devuelve lo que ha contabilizado.
@@ -529,13 +559,19 @@ mod tests {
         // Una racha de 3 rosas: tres eventos de **un** incremento cada uno (es
         // lo que llega de verdad: misma racha, `repeat_count = 1` en todos) y
         // solo el ultimo cierra. La aportacion son 3 rosas.
-        assert_eq!(board.record(gift(1, "1", "Carlos", 1, 1, false)), Settlement::NONE);
-        assert_eq!(board.record(gift(2, "1", "Carlos", 1, 1, false)), Settlement::NONE);
+        assert_eq!(
+            board.record(gift(1, "1", "Carlos", 1, 1, false)).current,
+            Settlement::NONE
+        );
+        assert_eq!(
+            board.record(gift(2, "1", "Carlos", 1, 1, false)).current,
+            Settlement::NONE
+        );
         assert_eq!(board.total_diamonds(), 0, "mientras la racha sigue abierta no cuenta");
         assert_eq!(board.open_streaks(), 1);
 
         assert_eq!(
-            board.record(gift(3, "1", "Carlos", 1, 1, true)),
+            board.record(gift(3, "1", "Carlos", 1, 1, true)).current,
             Settlement { units: 3, diamonds: 3 }
         );
         assert_eq!(board.total_diamonds(), 3, "3 rosas de 1 diamante");
@@ -560,7 +596,11 @@ mod tests {
         board.record(gift(1, "1", "Carlos", 1, 1, false));
         let liquidado = board.record(gift(2, "1", "Carlos", 1, 1, true));
 
-        assert_eq!(liquidado, Settlement { units: 2, diamonds: 2 }, "dos rosas, no una");
+        assert_eq!(
+            liquidado.current,
+            Settlement { units: 2, diamonds: 2 },
+            "dos rosas, no una"
+        );
         assert_eq!(board.total_diamonds(), 2);
         assert_eq!(board.total_gifts(), 2);
     }
@@ -571,13 +611,14 @@ mod tests {
     fn un_incremento_mayor_que_uno_cuenta_entero() {
         let mut board = GiftBoard::new(10);
         let liquidado = board.record(gift(1, "1", "Carlos", 1, 5, true));
-        assert_eq!(liquidado, Settlement { units: 5, diamonds: 5 });
+        assert_eq!(liquidado.current, Settlement { units: 5, diamonds: 5 });
         assert_eq!(board.total_diamonds(), 5);
     }
 
     /// 35 de 176 rachas del historico no reciben nunca `repeat_end`. Antes esas
     /// aportaciones se perdian enteras; ahora se liquidan cuando el mismo
-    /// usuario empieza otra racha.
+    /// usuario empieza otra racha, **y se devuelven** para poder persistirlas:
+    /// contarlas solo en memoria dejaba el total de la sesion en disco corto.
     #[test]
     fn una_racha_sin_cierre_se_liquida_al_empezar_otra() {
         let mut board = GiftBoard::new(10);
@@ -586,8 +627,21 @@ mod tests {
         let mut segunda = gift(2, "1", "Carlos", 1, 1, false);
         segunda.group_id = "g2".into();
 
-        assert_eq!(board.record(primera), Settlement::NONE);
-        assert_eq!(board.record(segunda), Settlement::NONE);
+        assert_eq!(board.record(primera).current, Settlement::NONE);
+        let al_empezar_otra = board.record(segunda);
+
+        // La racha abandonada se devuelve con **su** grupo, que es lo que hace
+        // falta para persistirla en la fila correcta.
+        assert_eq!(
+            al_empezar_otra.abandoned,
+            vec![StreakSettlement {
+                group_id: "g1".into(),
+                units: 1,
+                diamonds: 1,
+            }],
+            "la liquidacion de la racha abandonada tiene que salir hacia la base"
+        );
+        assert_eq!(al_empezar_otra.current, Settlement::NONE);
 
         // Al abrir la segunda, la primera (que nunca cerro) se contabiliza.
         assert_eq!(board.total_gifts(), 1, "la racha abandonada no se pierde");
@@ -596,7 +650,12 @@ mod tests {
         // Y cerrar la segunda liquida solo lo suyo.
         let mut cierre = gift(3, "1", "Carlos", 1, 1, true);
         cierre.group_id = "g2".into();
-        assert_eq!(board.record(cierre), Settlement { units: 2, diamonds: 2 });
+        let cierre = board.record(cierre);
+        assert_eq!(cierre.current, Settlement { units: 2, diamonds: 2 });
+        assert!(
+            cierre.abandoned.is_empty(),
+            "cerrar la racha vigente no abandona ninguna"
+        );
         assert_eq!(board.total_diamonds(), 3, "1 de la abandonada + 2 de esta");
         assert_eq!(board.open_streaks(), 0);
     }

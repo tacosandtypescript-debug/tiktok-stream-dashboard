@@ -83,9 +83,9 @@ fn todos_los_eventos_llevan_el_tipo_plano_y_sus_campos() {
         (
             "chat.message.deleted",
             EventKind::ChatMessageDeleted {
-                source_id: "m1".into(),
+                target_source_id: "m1".into(),
             },
-            vec![("source_id", "string")],
+            vec![("target_source_id", "string")],
         ),
         (
             "member.joined",

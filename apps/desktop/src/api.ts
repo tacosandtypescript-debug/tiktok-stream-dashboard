@@ -45,13 +45,14 @@ export type DashEvent =
   /**
    * Un comentario borrado en TikTok.
    *
-   * `source_id` es el `msg_id` del mensaje borrado, el mismo que viaja en la
-   * envoltura de su `chat.message` (y que la interfaz guarda en `ChatEntry`).
-   * Ojo: la envoltura del evento **tambien** tiene un `source_id` y el enum va
-   * aplanado (`#[serde(flatten)]`), asi que la clave se escribe dos veces; el
-   * campo del payload se serializa despues y es el que gana.
+   * `target_source_id` es el `msg_id` del mensaje borrado, el mismo que viaja en
+   * la envoltura de su `chat.message` (y que la interfaz guarda en `ChatEntry`).
+   * Se llama asi y **no** `source_id` porque la envoltura del evento ya tiene su
+   * propio `source_id` y el enum va aplanado (`#[serde(flatten)]`): con el mismo
+   * nombre, el JSON saldria con la clave duplicada y el valor dependeria del
+   * orden.
    */
-  | { type: "chat.message.deleted"; source_id: string }
+  | { type: "chat.message.deleted"; target_source_id: string }
   /** Alguien ha entrado en la sala. El evento mas frecuente de TikTok. */
   | { type: "member.joined"; user: UserRef }
   | { type: "gift.received"; user: UserRef; gift: GiftInfo }

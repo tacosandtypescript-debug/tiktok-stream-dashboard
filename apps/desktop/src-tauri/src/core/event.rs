@@ -154,8 +154,19 @@ pub enum EventKind {
         emote_count: u32,
     },
 
+    /// Un comentario ha sido borrado en TikTok.
+    ///
+    /// El campo se llama `target_source_id` y **no** `source_id` a proposito: el
+    /// sobre del evento ya lleva su propio `source_id` (`core/event.rs`) y el
+    /// enum se serializa con `#[serde(flatten)]`, asi que dos campos con el
+    /// mismo nombre producen una **clave duplicada** en el JSON. `JSON.parse` se
+    /// queda con la ultima y el resultado depende del orden, que es justo el
+    /// tipo de ambiguedad que rompe un contrato en silencio.
     #[serde(rename = "chat.message.deleted")]
-    ChatMessageDeleted { source_id: String },
+    ChatMessageDeleted {
+        /// `msg_id` de TikTok del mensaje borrado.
+        target_source_id: String,
+    },
 
     /// Alguien ha entrado en la sala.
     ///

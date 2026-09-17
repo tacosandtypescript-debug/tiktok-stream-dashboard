@@ -281,10 +281,11 @@ export function App() {
           void api.uiChat({ received_seq: event.seq }).catch(() => undefined);
           break;
         case "chat.message.deleted": {
-          // Se marca, no se quita: ver `DELETED_WINDOW` y `chatText`. Si el
-          // evento no trae `source_id` (mensajes viejos sin `msg_id`) no hay
-          // forma de saber que linea es: no se inventa nada y no se toca el chat.
-          const id = event.source_id;
+          // Se marca, no se quita: ver `DELETED_WINDOW` y `chatText`. El campo
+          // se llama `target_source_id` (no `source_id`) porque el sobre del
+          // evento ya trae el suyo y aplanado daria clave duplicada en el JSON.
+          // Si no viene, no hay forma de saber que linea es: no se inventa nada.
+          const id = event.target_source_id;
           if (id !== undefined && id.length > 0) {
             setDeleted((previous) => {
               if (previous.has(id)) return previous;
