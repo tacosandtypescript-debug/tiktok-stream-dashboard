@@ -1,0 +1,31 @@
+[package]
+name = "tiktok-rust-provider-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Spike desechable: valida si un provider TikTok nativo en Rust es viable.
+# Decisiones:
+#  - rustls en TODO (no native-tls/schannel). Ver docs/decisions.md D6.
+#  - Sin API key de Euler Stream (limites comunitarios gratuitos). Ver D2.
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
+prost = "0.13"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+base64 = "0.22"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sin fondo · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Sin fondo: el diseno va flotando sobre el video, sin tarjeta y sin caja.
+         Cada fila se sostiene con un degradado lateral que se desvanece hacia la
+         derecha —no hay borde que tape el video— y con una sombra de texto, que es
+         lo unico que garantiza que el nombre se lea sobre un fondo claro. Ese
+         recurso es la razon de ser del diseno: quitarlo lo convertiria en otra
+         tarjeta. -->
+    <style>
+      /* La cabecera no tiene tarjeta detras, asi que lleva la misma sombra que las
+         cifras: sin ella desaparece en cuanto el video pasa por blanco. */
+      .cabecera {
+        align-items: baseline;
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        padding: 0 10px;
+      }
+
+      .cabecera h1 {
+        color: var(--texto);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        margin: 0;
+        text-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.95),
+          0 0 2px rgba(0, 0, 0, 0.9);
+        text-transform: uppercase;
+      }
+
+      .cabecera .total {
+        color: var(--acento);
+        font-size: 16px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        text-shadow:
+          0 1px 4px rgba(0, 0, 0, 0.95),
+          0 0 3px rgba(0, 0, 0, 0.9);
+      }
+
+      .lista {
+        display: grid;
+        gap: 4px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      /* El degradado llega casi opaco hasta el 92% y muere en el 100%: asi el
+         nombre y la cifra —que van a la izquierda— tienen fondo suficiente, y a la
+         derecha no queda un canto recto. */
+      .fila {
+        align-items: center;
+        background: linear-gradient(
+          90deg,
+          rgba(8, 10, 14, 0.9) 0%,
+          rgba(8, 10, 14, 0.82) 92%,
+          rgba(8, 10, 14, 0) 100%
+        );
+        border-radius: 999px 6px 6px 999px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 22px 34px minmax(0, 1fr) max-content;
+        padding: 4px 10px 4px 4px;
+      }
+
+      .fila .pos {
+        color: var(--apagado);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        text-align: center;
+      }
+
+      /* Solo el retrato lleva aro, no su caja: la caja es la referencia sobre la
+         que se apoya la corona del nº1. */
+      .fila .retrato {
+        border: 2px solid rgba(255, 255, 255, 0.18);
+      }
+
+      .fila .nombre {
+        color: #ffffff;
+        overflow: hidden;
+        font-size: 14px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        text-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.95),
+          0 0 2px rgba(0, 0, 0, 0.9);
+        white-space: nowrap;
+      }
+
+      .fila .cifra {
+        color: var(--acento);
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        text-shadow:
+          0 1px 4px rgba(0, 0, 0, 0.95),
+          0 0 3px rgba(0, 0, 0, 0.9);
+      }
+
+      /* --- La fila del nº1 -------------------------------------------------- */
+
+      .fila.uno {
+        grid-template-columns: 22px 46px minmax(0, 1fr) max-content;
+        padding: 7px 12px 7px 4px;
+      }
+
+      .fila.uno .retrato {
+        border-color: var(--lider);
+      }
+
+      .fila.uno .pos {
+        color: var(--lider);
+        font-size: 15px;
+      }
+
+      .fila.uno .nombre {
+        font-size: 17px;
+        font-weight: 800;
+      }
+
+      .fila.uno .cifra {
+        color: var(--lider);
+        font-size: 26px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <div class="cabecera">
+        <h1 id="titulo"></h1>
+        <span class="total" id="total">0</span>
+      </div>
+      <ol class="lista" id="filas"></ol>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /**
+         * Retrato con su inicial de reserva cuando TikTok no manda foto.
+         *
+         * La caja `.retrato-caja` no es decorativa: es donde `anim.colocarCorona`
+         * busca el sitio para la corona. Sin ella el nº1 se quedaria sin corona
+         * sin que fallara nada, que es justo el tipo de averia que no se ve en
+         * consola.
+         */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * fila: la misma clave sigue siendo el mismo `<li>`, que es lo que permite
+         * que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const nuevoLider = entradas[0] ? String(entradas[0].user?.id) : null;
+
+            reordenar(
+              entradas,
+              (entrada, indice) => {
+                const li = document.createElement("li");
+                li.className = indice === 0 ? "fila uno" : "fila";
+                li.dataset.clave = String(entrada.user?.id);
+
+                const pos = document.createElement("span");
+                pos.className = "pos";
+                pos.textContent = String(indice + 1);
+
+                const nombre = document.createElement("span");
+                nombre.className = "nombre";
+                const completo = ctx.nombre(entrada);
+                nombre.textContent = completo;
+                nombre.title = completo;
+
+                const cifra = document.createElement("span");
+                cifra.className = "cifra";
+                cifra.textContent = ctx.numero(entrada.value);
+
+                li.append(pos, retrato(entrada, indice === 0 ? 46 : 34), nombre, cifra);
+                return li;
+              },
+              () => {
+                // La corona se coloca despues de reordenar, sobre el DOM final: si
+                // se hiciera antes, la fila del nº1 seria otra.
+                const filaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, filaUno);
+                if (filaUno) anim.colocarCorona(filaUno, { esNueva: nuevoLider !== liderPrevio });
+                liderPrevio = nuevoLider;
+              },
+            );
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

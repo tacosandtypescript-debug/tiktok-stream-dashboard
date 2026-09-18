@@ -1,0 +1,2687 @@
+{
+  "ProtoMessageFetchResult": {
+    "module": "TikTokLiveProto.v3.webcast.shared.message",
+    "fields": {
+      "messages": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "BaseProtoMessage"
+      },
+      "cursor": {
+        "number": 2,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "fetch_interval": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "now": {
+        "number": 4,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "internal_ext": {
+        "number": 5,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "fetch_type": {
+        "number": 6,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "route_params": {
+        "number": 7,
+        "proto_type": "map",
+        "repeated": false,
+        "optional": false,
+        "cls": "Entry"
+      },
+      "heartbeat_duration": {
+        "number": 8,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "need_ack": {
+        "number": 9,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_server": {
+        "number": 10,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "is_first": {
+        "number": 11,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "history_comment_cursor": {
+        "number": 12,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "history_no_more": {
+        "number": 13,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      }
+    }
+  },
+  "CommonMessageData": {
+    "module": "TikTokLiveProto.v3.webcast.shared.message",
+    "fields": {
+      "method": {
+        "number": 1,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "msg_id": {
+        "number": 2,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "room_id": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "create_time": {
+        "number": 4,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "monitor": {
+        "number": 5,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "is_show_msg": {
+        "number": 6,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "describe": {
+        "number": 7,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "display_text": {
+        "number": 8,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "fold_type": {
+        "number": 9,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "anchor_fold_type": {
+        "number": 10,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "priority_score": {
+        "number": 11,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "log_id": {
+        "number": 12,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "msg_process_filter_k": {
+        "number": 13,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "msg_process_filter_v": {
+        "number": 14,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "from_idc": {
+        "number": 15,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "to_idc": {
+        "number": 16,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "filter_msg_tags": {
+        "number": 17,
+        "proto_type": "string",
+        "repeated": true,
+        "optional": false,
+        "cls": "str"
+      },
+      "sei": {
+        "number": 18,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "LiveMessageSei"
+      },
+      "depend_root_id": {
+        "number": 19,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "LiveMessageId"
+      },
+      "depend_id": {
+        "number": 20,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "LiveMessageId"
+      },
+      "anchor_priority_score": {
+        "number": 21,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "room_message_heat_level": {
+        "number": 22,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "fold_type_for_web": {
+        "number": 23,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "anchor_fold_type_for_web": {
+        "number": 24,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "client_send_time": {
+        "number": 25,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "dispatch_strategy": {
+        "number": 26,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      }
+    }
+  },
+  "WebcastPushFrame": {
+    "module": "TikTokLiveProto.v3.webcast.im",
+    "fields": {
+      "seq_id": {
+        "number": 1,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "log_id": {
+        "number": 2,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "service": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "method": {
+        "number": 4,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "headers": {
+        "number": 5,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "PushHeader"
+      },
+      "payload_encoding": {
+        "number": 6,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "payload_type": {
+        "number": 7,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "payload": {
+        "number": 8,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      }
+    }
+  },
+  "PushHeader": {
+    "module": "TikTokLiveProto.v3.webcast.im",
+    "fields": {
+      "key": {
+        "number": 1,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "value": {
+        "number": 2,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      }
+    }
+  },
+  "User": {
+    "module": "TikTokLiveProto.v3.webcast.model.base.user",
+    "fields": {
+      "id": {
+        "number": 1,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated1": {
+        "number": 2,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "nickname": {
+        "number": 3,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "deprecated2": {
+        "number": 4,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "bio_description": {
+        "number": 5,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "deprecated3": {
+        "number": 6,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated4": {
+        "number": 7,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated5": {
+        "number": 8,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "avatar_thumb": {
+        "number": 9,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "avatar_medium": {
+        "number": 10,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "avatar_large": {
+        "number": 11,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "verified": {
+        "number": 12,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "deprecated6": {
+        "number": 13,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated7": {
+        "number": 14,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "status": {
+        "number": 15,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "create_time": {
+        "number": 16,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "modify_time": {
+        "number": 17,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "secret": {
+        "number": 18,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "share_qrcode_uri": {
+        "number": 19,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "deprecated8": {
+        "number": 20,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "badge_image_list": {
+        "number": 21,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "ImageModel"
+      },
+      "follow_info": {
+        "number": 22,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "FollowInfo"
+      },
+      "pay_grade": {
+        "number": 23,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "UserHonor"
+      },
+      "fans_club": {
+        "number": 24,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "FansClubMember"
+      },
+      "border": {
+        "number": 25,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "BorderInfo"
+      },
+      "special_id": {
+        "number": 26,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "avatar_border": {
+        "number": 27,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "medal": {
+        "number": 28,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "real_time_icons": {
+        "number": 29,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "ImageModel"
+      },
+      "new_real_time_icons": {
+        "number": 30,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "ImageModel"
+      },
+      "top_vip_no": {
+        "number": 31,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user_attr": {
+        "number": 32,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "UserAttr"
+      },
+      "own_room": {
+        "number": 33,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "OwnRoom"
+      },
+      "pay_score": {
+        "number": 34,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "ticket_count": {
+        "number": 35,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "anchor_info": {
+        "number": 36,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AnchorInfo"
+      },
+      "link_mic_stats": {
+        "number": 37,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "LinkmicStatus"
+      },
+      "display_id": {
+        "number": 38,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "with_commerce_permission": {
+        "number": 39,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "with_fusion_shop_entry": {
+        "number": 40,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "deprecated21": {
+        "number": 41,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "webcast_anchor_level": {
+        "number": 42,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AnchorLevel"
+      },
+      "verified_content": {
+        "number": 43,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "author_stats": {
+        "number": 44,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Author"
+      },
+      "top_fans": {
+        "number": 45,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "User"
+      },
+      "sec_uid": {
+        "number": 46,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "user_role": {
+        "number": 47,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated9": {
+        "number": 48,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "activity_reward": {
+        "number": 49,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ActivityRewardInfo"
+      },
+      "deprecated10": {
+        "number": 50,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "deprecated11": {
+        "number": 51,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "personal_card": {
+        "number": 52,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "authentication_info": {
+        "number": 53,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AuthenticationInfo"
+      },
+      "deprecated12": {
+        "number": 54,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated13": {
+        "number": 55,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated14": {
+        "number": 56,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "media_badge_image_list": {
+        "number": 57,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "ImageModel"
+      },
+      "deprecated15": {
+        "number": 58,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user_vip_info": {
+        "number": 59,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "commerce_webcast_config_ids": {
+        "number": 60,
+        "proto_type": "int64",
+        "repeated": true,
+        "optional": false,
+        "cls": "int"
+      },
+      "border_list": {
+        "number": 61,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "BorderInfo"
+      },
+      "combo_badge_info": {
+        "number": 62,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ComboBadgeInfo"
+      },
+      "subscribe_info": {
+        "number": 63,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "SubscribeInfo"
+      },
+      "badge_list": {
+        "number": 64,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "BadgeStruct"
+      },
+      "mint_type_label": {
+        "number": 65,
+        "proto_type": "int64",
+        "repeated": true,
+        "optional": false,
+        "cls": "int"
+      },
+      "fans_club_info": {
+        "number": 66,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "FansClubInfo"
+      },
+      "deprecated19": {
+        "number": 1001,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_find_by_contacts": {
+        "number": 1002,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_others_download_video": {
+        "number": 1003,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_others_download_when_sharing_video": {
+        "number": 1004,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_share_show_profile": {
+        "number": 1005,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_show_in_gossip": {
+        "number": 1006,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_show_my_action": {
+        "number": 1007,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_strange_comment": {
+        "number": 1008,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_unfollower_comment": {
+        "number": 1009,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "allow_use_linkmic": {
+        "number": 1010,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "anchor_level": {
+        "number": 1011,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AnchorLevel"
+      },
+      "avatar_jpg": {
+        "number": 1012,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "bg_img_url": {
+        "number": 1013,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "deprecated18": {
+        "number": 1014,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "deprecated16": {
+        "number": 1015,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "block_status": {
+        "number": 1016,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "comment_restrict": {
+        "number": 1017,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "constellation": {
+        "number": 1018,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "disable_ichat": {
+        "number": 1019,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "enable_ichat_img": {
+        "number": 1020,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "exp": {
+        "number": 1021,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "fan_ticket_count": {
+        "number": 1022,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "fold_stranger_chat": {
+        "number": 1023,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "follow_status": {
+        "number": 1024,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "deprecated28": {
+        "number": 1025,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "deprecated29": {
+        "number": 1026,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "ichat_restrict_type": {
+        "number": 1027,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "id_str": {
+        "number": 1028,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "is_follower": {
+        "number": 1029,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_following": {
+        "number": 1030,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "need_profile_guide": {
+        "number": 1031,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "pay_scores": {
+        "number": 1032,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "push_comment_status": {
+        "number": 1033,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_digg": {
+        "number": 1034,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_follow": {
+        "number": 1035,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_friend_action": {
+        "number": 1036,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_ichat": {
+        "number": 1037,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_status": {
+        "number": 1038,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_video_post": {
+        "number": 1039,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "push_video_recommend": {
+        "number": 1040,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "stats": {
+        "number": 1041,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "deprecated17": {
+        "number": 1042,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "verified_reason": {
+        "number": 1043,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "with_car_management_permission": {
+        "number": 1044,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "upcoming_event_list": {
+        "number": 1045,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "LiveEventInfo"
+      },
+      "scm_label": {
+        "number": 1046,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "ecommerce_entrance": {
+        "number": 1047,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "EcommerceEntrance"
+      },
+      "is_block": {
+        "number": 1048,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_subscribe": {
+        "number": 1090,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_anchor_marked": {
+        "number": 1091,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "enigma_info": {
+        "number": 1092,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "EnigmaInfo"
+      }
+    }
+  },
+  "Gift": {
+    "module": "TikTokLiveProto.v3.webcast.model",
+    "fields": {
+      "image": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "describe": {
+        "number": 2,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "duration": {
+        "number": 4,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "id": {
+        "number": 5,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "for_linkmic": {
+        "number": 7,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "combo": {
+        "number": 10,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "type": {
+        "number": 11,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "diamond_count": {
+        "number": 12,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "is_displayed_on_panel": {
+        "number": 13,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "primary_effect_id": {
+        "number": 14,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "gift_label_icon": {
+        "number": 15,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "name": {
+        "number": 16,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "icon": {
+        "number": 21,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "gold_effect": {
+        "number": 24,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "preview_image": {
+        "number": 47,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "gift_panel_banner": {
+        "number": 48,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftPanelBanner"
+      },
+      "is_broadcast_gift": {
+        "number": 49,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_effect_befview": {
+        "number": 50,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_random_gift": {
+        "number": 51,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_box_gift": {
+        "number": 52,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "can_put_in_gift_box": {
+        "number": 53,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "gift_box_info": {
+        "number": 54,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftBoxInfo"
+      },
+      "tracker_params": {
+        "number": 100,
+        "proto_type": "map",
+        "repeated": false,
+        "optional": false,
+        "cls": "Entry"
+      },
+      "lock_info": {
+        "number": 101,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftLockInfo"
+      },
+      "color_infos": {
+        "number": 102,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "GiftColorInfo"
+      },
+      "gift_rank_recommend_info": {
+        "number": 103,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "random_effect_info": {
+        "number": 104,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftRandomEffectInfo"
+      },
+      "gift_sub_type": {
+        "number": 105,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "gift_vertical_scenarios": {
+        "number": 106,
+        "proto_type": "int32",
+        "repeated": true,
+        "optional": false,
+        "cls": "int"
+      },
+      "group_in_tab": {
+        "number": 107,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "is_gallery_gift": {
+        "number": 108,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "gift_sponsor_info": {
+        "number": 109,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftSponsorInfo"
+      },
+      "gift_skins": {
+        "number": 110,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "GiftSkin"
+      },
+      "gift_label_type": {
+        "number": 111,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "gift_texts": {
+        "number": 112,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "GiftText"
+      },
+      "gift_skin_to_gift_texts_infos": {
+        "number": 113,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "GiftSkinToGiftTextsInfo"
+      },
+      "expiration_timestamp": {
+        "number": 114,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "batch_gift_info": {
+        "number": 115,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "BatchGiftInfo"
+      },
+      "is_global_gift": {
+        "number": 116,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "disable_gallery_banner": {
+        "number": 117,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "ug_gift_info": {
+        "number": 118,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "UgGiftStructInfo"
+      },
+      "cross_screen_effect_info": {
+        "number": 119,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CrossScreenEffectInfo"
+      },
+      "beacon_bubble": {
+        "number": 120,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftPanelBeaconBubble"
+      },
+      "gift_resources": {
+        "number": 121,
+        "proto_type": "map",
+        "repeated": false,
+        "optional": false,
+        "cls": "Entry"
+      },
+      "resource_id": {
+        "number": 122,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "biz_extra": {
+        "number": 123,
+        "proto_type": "map",
+        "repeated": false,
+        "optional": false,
+        "cls": "Entry"
+      },
+      "lynx_cross_screen_effect_info": {
+        "number": 124,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "LynxCrossScreenEffectInfo"
+      },
+      "gift_struct_hash": {
+        "number": 125,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "scheme_info": {
+        "number": 126,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "SchemeInfo"
+      },
+      "series_info": {
+        "number": 127,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftSeriesInfo"
+      },
+      "color_picker_info": {
+        "number": 128,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ColorPickerInfo"
+      },
+      "music_info": {
+        "number": 140,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "MusicGiftInfo"
+      },
+      "gift_bottom_right_label_icon": {
+        "number": 141,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "strategy_event": {
+        "number": 201,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      }
+    }
+  },
+  "WebcastChatMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "user": {
+        "number": 2,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "content": {
+        "number": 3,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "visible_to_sender": {
+        "number": 4,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "background_image": {
+        "number": 5,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "full_screen_text_color": {
+        "number": 6,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "background_image_v2": {
+        "number": 7,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "public_area_common": {
+        "number": 9,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaCommon"
+      },
+      "gift_image": {
+        "number": 10,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "input_type": {
+        "number": 11,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "at_user": {
+        "number": 12,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "emotes": {
+        "number": 13,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "EmoteWithIndex"
+      },
+      "content_language": {
+        "number": 14,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "msg_filter": {
+        "number": 15,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "MsgFilter"
+      },
+      "quick_chat_scene": {
+        "number": 16,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "community_flagged_status": {
+        "number": 17,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user_identity": {
+        "number": 18,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "UserIdentity"
+      },
+      "comment_quality_scores": {
+        "number": 19,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "CommentQualityScore"
+      },
+      "comment_tag": {
+        "number": 20,
+        "proto_type": "enum",
+        "repeated": true,
+        "optional": false,
+        "cls": "CommentTag"
+      },
+      "public_area_message_common": {
+        "number": 21,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaMessageCommon"
+      },
+      "screen_time": {
+        "number": 22,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "signature": {
+        "number": 23,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "signature_version": {
+        "number": 24,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "ec_streamer_key": {
+        "number": 25,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "comment_label_scores": {
+        "number": 26,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "CommentLabelScore"
+      },
+      "mention_user_list": {
+        "number": 27,
+        "proto_type": "int64",
+        "repeated": true,
+        "optional": false,
+        "cls": "int"
+      },
+      "mention_users": {
+        "number": 28,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "User"
+      },
+      "is_on_comment_tray": {
+        "number": 29,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      }
+    }
+  },
+  "WebcastGiftMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "gift_id": {
+        "number": 2,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "fan_ticket_count": {
+        "number": 3,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "group_count": {
+        "number": 4,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "repeat_count": {
+        "number": 5,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "combo_count": {
+        "number": 6,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user": {
+        "number": 7,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "to_user": {
+        "number": 8,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "repeat_end": {
+        "number": 9,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "text_effect": {
+        "number": 10,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "TextEffect"
+      },
+      "group_id": {
+        "number": 11,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "income_taskgifts": {
+        "number": 12,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "room_fan_ticket_count": {
+        "number": 13,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "priority": {
+        "number": 14,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftImPriority"
+      },
+      "gift": {
+        "number": 15,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Gift"
+      },
+      "log_id": {
+        "number": 16,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "send_type": {
+        "number": 17,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "public_area_common": {
+        "number": 18,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaCommon"
+      },
+      "tray_display_text": {
+        "number": 19,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "banned_display_effects": {
+        "number": 20,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "tray_info": {
+        "number": 21,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftTrayInfo"
+      },
+      "monitor_extra": {
+        "number": 22,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "monitor_info": {
+        "number": 23,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftMonitorInfo"
+      },
+      "color_id": {
+        "number": 24,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "is_first_sent": {
+        "number": 25,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "display_text_for_anchor": {
+        "number": 26,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "display_text_for_audience": {
+        "number": 27,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "order_id": {
+        "number": 28,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "gifts_in_box": {
+        "number": 29,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftsBoxInfo"
+      },
+      "msg_filter": {
+        "number": 30,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "MsgFilter"
+      },
+      "lynx_extra": {
+        "number": 31,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "LynxGiftExtra"
+      },
+      "user_identity": {
+        "number": 32,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "UserIdentity"
+      },
+      "match_info": {
+        "number": 33,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "MatchInfo"
+      },
+      "linkmic_gift_expression_strategy": {
+        "number": 34,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "LinkmicGiftExpressionStrategy"
+      },
+      "flying_mic_resources": {
+        "number": 35,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "FlyingMicResources"
+      },
+      "disable_gift_tracking": {
+        "number": 36,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "asset": {
+        "number": 37,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AssetsModel"
+      },
+      "version": {
+        "number": 38,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "GiftMessageVersion"
+      },
+      "sponsorship_info": {
+        "number": 39,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "SponsorshipInfo"
+      },
+      "flying_mic_resources_v2": {
+        "number": 40,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "FlyingMicResources"
+      },
+      "public_area_message_common": {
+        "number": 41,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaMessageCommon"
+      },
+      "signature": {
+        "number": 42,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "signature_version": {
+        "number": 43,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "multi_generate_message": {
+        "number": 44,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "to_member_id": {
+        "number": 45,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "to_member_id_int": {
+        "number": 46,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "to_member_nickname": {
+        "number": 47,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "interactive_gift_info": {
+        "number": 48,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "InteractiveGiftInfo"
+      },
+      "display_duration_ms": {
+        "number": 49,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "display_text_for_sender": {
+        "number": 50,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "is_asset_bundle_gift": {
+        "number": 51,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "asset_bundle": {
+        "number": 52,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "AssetBundle"
+      },
+      "effect_extra": {
+        "number": 53,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "secondary_effect_info": {
+        "number": 54,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "SecondaryEffectInfo"
+      },
+      "gift_variant_id": {
+        "number": 55,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "shiny_card_unlock_token": {
+        "number": 56,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "gift_effect": {
+        "number": 100,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "GiftEffect"
+      }
+    }
+  },
+  "WebcastLikeMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "count": {
+        "number": 2,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "total": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "color": {
+        "number": 4,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user": {
+        "number": 5,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "icon": {
+        "number": 6,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "icons": {
+        "number": 7,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "ImageModel"
+      },
+      "specified_display_text": {
+        "number": 8,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "SpecifiedDisplayText"
+      },
+      "effect_cnt": {
+        "number": 9,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "like_effect": {
+        "number": 10,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "LikeEffect"
+      },
+      "public_area_message_common": {
+        "number": 11,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaMessageCommon"
+      },
+      "room_message_heat_level": {
+        "number": 12,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      }
+    }
+  },
+  "WebcastMemberMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "user": {
+        "number": 2,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "member_count": {
+        "number": 3,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "operator": {
+        "number": 4,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "is_set_to_admin": {
+        "number": 5,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "is_top_user": {
+        "number": 6,
+        "proto_type": "bool",
+        "repeated": false,
+        "optional": false,
+        "cls": "bool"
+      },
+      "rank_score": {
+        "number": 7,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "top_user_no": {
+        "number": 8,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "enter_type": {
+        "number": 9,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "action": {
+        "number": 10,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "MemberMessageAction"
+      },
+      "action_description": {
+        "number": 11,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "user_id": {
+        "number": 12,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "effect_config": {
+        "number": 13,
+        "proto_type": "bytes",
+        "repeated": false,
+        "optional": false,
+        "cls": "bytes"
+      },
+      "pop_str": {
+        "number": 14,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "enter_effect_config": {
+        "number": 15,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "EffectConfigBean"
+      },
+      "background_image": {
+        "number": 16,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "background_image_v2": {
+        "number": 17,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "ImageModel"
+      },
+      "anchor_display_text": {
+        "number": 18,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "Text"
+      },
+      "client_enter_source": {
+        "number": 19,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "client_enter_type": {
+        "number": 20,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "client_live_reason": {
+        "number": 21,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "action_duration": {
+        "number": 22,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "user_share_type": {
+        "number": 23,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "display_style": {
+        "number": 24,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "DisplayStyle"
+      },
+      "admin_permissions": {
+        "number": 25,
+        "proto_type": "map",
+        "repeated": false,
+        "optional": false,
+        "cls": "Entry"
+      },
+      "kick_source": {
+        "number": 26,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "allow_preview_time": {
+        "number": 27,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "last_subscription_action": {
+        "number": 28,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "public_area_message_common": {
+        "number": 29,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaMessageCommon"
+      },
+      "live_sub_only_tier": {
+        "number": 30,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "live_sub_only_month": {
+        "number": 31,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "ec_streamer_key": {
+        "number": 32,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "show_wave": {
+        "number": 33,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "wave_algorithm_data": {
+        "number": 34,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "WaveAlgorithmData"
+      },
+      "hit_ab_status": {
+        "number": 35,
+        "proto_type": "enum",
+        "repeated": false,
+        "optional": false,
+        "cls": "HitAbStatus"
+      }
+    }
+  },
+  "WebcastRoomUserSeqMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "ranks": {
+        "number": 2,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "Contributor"
+      },
+      "total": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "pop_str": {
+        "number": 4,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "seats": {
+        "number": 5,
+        "proto_type": "message",
+        "repeated": true,
+        "optional": false,
+        "cls": "Contributor"
+      },
+      "popularity": {
+        "number": 6,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "total_user": {
+        "number": 7,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "anonymous": {
+        "number": 8,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      }
+    }
+  },
+  "WebcastSocialMessage": {
+    "module": "TikTokLiveProto.v3.webcast.model.message",
+    "fields": {
+      "common": {
+        "number": 1,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "CommonMessageData"
+      },
+      "user": {
+        "number": 2,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "User"
+      },
+      "share_type": {
+        "number": 3,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "action": {
+        "number": 4,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "share_target": {
+        "number": 5,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "follow_count": {
+        "number": 6,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "share_display_style": {
+        "number": 7,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "share_count": {
+        "number": 8,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "public_area_message_common": {
+        "number": 9,
+        "proto_type": "message",
+        "repeated": false,
+        "optional": true,
+        "cls": "PublicAreaMessageCommon"
+      },
+      "signature": {
+        "number": 10,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "signature_version": {
+        "number": 11,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      },
+      "show_duration_ms": {
+        "number": 12,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "follow_type": {
+        "number": 13,
+        "proto_type": "int32",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "target_user_id": {
+        "number": 14,
+        "proto_type": "int64",
+        "repeated": false,
+        "optional": false,
+        "cls": "int"
+      },
+      "scene": {
+        "number": 15,
+        "proto_type": "string",
+        "repeated": false,
+        "optional": false,
+        "cls": "str"
+      }
+    }
+  }
+}

@@ -1,0 +1,1571 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Esgrima · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Esgrima: el nº1 defiende la corona contra el siguiente de la tabla, con
+         personajes de cuerpo entero dibujados en un lienzo. Un cruce lo gana
+         quien tenga mas RITMO de taps en ese momento, no quien lleve mas
+         acumulado; por eso el que va primero pero esta parado pierde contra el
+         que acaba de empezar a tocar. El que gana se queda y el que pierde sale,
+         asi que el nº1 tiene que defender su sitio cada vuelta.
+
+         Este diseno NO sirve para regalos ni seguidores: se mueve con los taps
+         por segundo, que es lo unico que llega en `tasas`. -->
+    <style>
+      /* El ancho de `.vista` en comun.css es el de un diseno de tabla (420 px), y
+         trae 12 px de relleno. Aqui el lienzo manda y ocupa el ancho entero, asi
+         que el relleno se quita: con el, la caja medía 1104 px y la arena se
+         recortaba 24 px por la derecha (el overlay no se desplaza, se recorta). */
+      .vista {
+        padding: 0;
+        width: 1080px;
+      }
+
+      /* La caja entera se recorta: el banner de victoria entra y sale con una
+         animacion que lo hace crecer, y sin esto abombaria el panel cada vez. */
+      .panel {
+        background: var(--velo);
+        border: 1px solid var(--borde);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .cab {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 12px 8px;
+      }
+
+      .cab .titulo {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+      }
+
+      /* El punto de directo: dice que esto esta pasando ahora, no que sea un
+         resumen. Va en el color del nº1 porque es el que pelea. */
+      .cab .punto {
+        background: var(--lider);
+        border-radius: 50%;
+        display: block;
+        flex: 0 0 auto;
+        height: 8px;
+        width: 8px;
+      }
+
+      .cab h1 {
+        color: var(--texto);
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        margin: 0;
+        text-transform: uppercase;
+      }
+
+      /* La nota se lleva el espacio libre y el total queda anclado a la derecha:
+         con `space-between` a secas, el total se iba al centro en cuanto la nota
+         se vaciaba (vistas de regalos y seguidores) y la cabecera bailaba. */
+      .cab .nota {
+        color: var(--apagado);
+        flex: 1 1 auto;
+        font-size: 11px;
+        min-width: 0;
+        text-align: right;
+      }
+
+      .cab .total {
+        color: var(--acento);
+        flex: 0 0 auto;
+        font-size: 15px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+      }
+
+      canvas {
+        display: block;
+      }
+
+      /* El banner reserva su sitio siempre (opacidad 0, no `display: none`):
+         si apareciera de la nada, empujaria la arena justo en el momento del ko. */
+      .banner {
+        color: var(--vuelta);
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        margin: 0;
+        opacity: 0;
+        padding: 0 12px 10px;
+        text-align: center;
+        text-shadow: 0 4px 16px rgba(0, 0, 0, 0.95);
+      }
+
+      .banner.ver {
+        animation: golpe 2400ms ease-out;
+      }
+
+      @keyframes golpe {
+        0% {
+          opacity: 0;
+          transform: scale(0.85);
+        }
+        10% {
+          opacity: 1;
+          transform: scale(1.08);
+        }
+        22% {
+          transform: scale(1);
+        }
+        78% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+
+      /* A 11 px y sin tarjeta detras, el aviso de conexion se pierde sobre un
+         video claro: se le da el mismo respaldo que a lo que va en el lienzo. */
+      .aviso {
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <div class="panel">
+        <div class="cab">
+          <span class="titulo">
+            <span class="punto"></span>
+            <h1 id="titulo"></h1>
+          </span>
+          <span class="nota" id="nota">el nº1 defiende · gana quien tenga más ritmo de taps</span>
+          <span class="total" id="total">0</span>
+        </div>
+        <!-- 1080x520: el tamano del lienzo de la maqueta, sin escalar, para que
+             las figuras y los textos salgan al pixel que se probo. -->
+        <canvas id="arena" height="520" width="1080"></canvas>
+        <p class="banner" id="banner"></p>
+      </div>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script>
+      /* ---------------------------------------------------------------------
+         Personajes de los minijuegos: un guerrero pequeno, dibujado por codigo.
+
+         Va inline a proposito: un diseno es **un fichero**. Solo lo usa este
+         diseno —los demas no dibujan personajes—, asi que dejarlo como asset
+         aparte seria un fichero mas que servir y que se puede desincronizar sin
+         que nada avise. Se copia tal cual de `maquetas-vivo/personaje.js`.
+
+         Por que dibujado y no sprites: el proyecto funciona **offline** y sin
+         assets, y aqui cada personaje tiene que cambiar de postura (andar,
+         correr, atacar, bloquear, celebrar) segun lo que haga el chat. Con
+         formas y matematica se anima lo que haga falta sin depender de ninguna
+         imagen.
+
+         La **cabeza lleva la foto** de la persona: es lo que hace que se
+         entienda quien pelea. El cuerpo es generico y del color de su puesto.
+
+         DOS REGLAS QUE COSTARON UN FALLO CADA UNA:
+
+          1. **Todo lleva contorno oscuro.** El overlay va sobre video de
+             cualquier color: un personaje solo relleno desaparece sobre un fondo
+             claro. La primera version pinto las piernas en casi negro y sobre
+             fondo oscuro se veian como una vara suelta.
+          2. **Las piernas van del color del cuerpo, no negras.** Asi se leen
+             como piernas; el contorno ya les da el borde.
+
+         Proporciones (pies en y=0, altura total `A`):
+
+                cabeza   centro -0.88A, radio 0.12A     <- la foto va aqui
+                cuello   -0.78A
+                hombros  -0.72A
+                cintura  -0.50A
+                cadera   -0.44A
+                rodilla  -0.22A
+                tobillo  -0.04A
+
+         Uso:
+           const p = personaje.crear({ foto, color, altura: 120 });
+           personaje.andar(p, 1);            // 1 = derecha, -1 = izquierda
+           personaje.atacar(p, ahora);
+           personaje.actualizar(p, dt, ahora);
+           ctx.save(); ctx.translate(x, suelo); personaje.dibujar(ctx, p, ahora); ctx.restore();
+
+         No se cuelga de `window`: nadie mas lo usa y en la pagina del overlay
+         conviven todos los runtime compartidos. `const personaje` en el ambito
+         del script basta.
+         --------------------------------------------------------------------- */
+      const personaje = (() => {
+        const fotos = new Map();
+
+        // Contorno comun: un trazo oscuro por debajo de cada forma.
+        const CONTORNO = "rgba(6, 8, 12, 0.92)";
+
+        function cargarFoto(url) {
+          if (!url) return null;
+          if (fotos.has(url)) return fotos.get(url);
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.referrerPolicy = "no-referrer";
+          img.src = url;
+          fotos.set(url, img);
+          return img;
+        }
+
+        function crear({ foto, color, altura = 120, nombre = "" }) {
+          return {
+            foto: cargarFoto(foto),
+            color: color || "#25F4EE",
+            altura,
+            nombre,
+            hacia: 1,
+            fase: Math.random() * 6.28,
+            velocidadPaso: 0,
+            estado: "quieto",
+            hasta: 0,
+            golpe: 0,
+            sacudida: 0,
+            turbo: 0,
+            salto: 0,
+            corona: false,
+            // --- La pose ---
+            //
+            // Cada movimiento mueve el **cuerpo entero**, no solo el brazo de la
+            // espada. Estos seis numeros, de 0 a 1 (y `inclina` en radianes), son la
+            // diferencia entre "el brazo gira" y "se echa encima": antes solo habia
+            // `golpe`, y por eso una estocada se veia como una espada que se mueve
+            // sola mientras el muñeco sigue plantado.
+            avance: 0, // estocada: se echa hacia el rival
+            retroceso: 0, // se echa atras, al esquivar o al recibir
+            inclina: 0, // el tronco se tumba (desde los pies)
+            patada: 0, // la pierna de delante se levanta y se estira
+            mano: 0, // el brazo libre pega
+            // --- Mas articulaciones ---
+            //
+            // `inclina` tumba el cuerpo entero desde los pies, que es como se cae uno.
+            // `tuerce` dobla **por la cintura**: el pecho gira sobre la cadera y las
+            // piernas se quedan donde estaban. Sin esa articulacion, un golpe es un
+            // bloque rigido que se ladea entero.
+            tuerce: 0,
+            /// Paso adelante (+) o atras (-). Es un impulso que se apaga solo.
+            paso: 0,
+            /// A que distancia esta el rival, en unidades del personaje. Es lo que
+            /// permite apuntarle con la espada en vez de sujetarla en un angulo fijo.
+            rivalX: 240,
+            /// Los ultimos fotogramas de la pose, para que cada parte los lea con su
+            /// propio retardo. Es lo que hace que la espada vaya detras del brazo.
+            historial: [],
+          };
+        }
+
+        /**
+         * Cuanto se retrasa cada parte, en milisegundos.
+         *
+         * La cadera manda y lo demas va detras. Es el principio de **accion
+         * retardada**: en la realidad nada llega a la vez, y moverlo todo con el mismo
+         * numero es justo lo que hace que un muñeco parezca rigido aunque se mueva
+         * mucho. La punta de la espada es lo que mas tarda, y por eso una espada
+         * parece pesar.
+         */
+        const RETARDO = { pecho: 70, brazo: 120, cabeza: 160 };
+
+        const DURACION = {
+          andar: 0.45,
+          correr: 0.55,
+          atacar: 0.4,
+          bloquear: 0.5,
+          // El tambaleo dura mas que un golpe: entra rapido y se recupera despacio.
+          herido: 0.75,
+          celebrar: 1.6,
+          patada: 0.42,
+          punetazo: 0.32,
+          esquivar: 0.36,
+        };
+
+        function poner(p, estado, ahora) {
+          p.estado = estado;
+          p.hasta = ahora + (DURACION[estado] ?? 0.4) * 1000;
+        }
+
+        /** Un valor que va hacia su objetivo sin pasarse. */
+        const acercar = (valor, objetivo, paso) =>
+          valor + (objetivo - valor) * Math.min(1, paso);
+
+        /**
+         * El compas de un movimiento: sube rapido hasta el primer tercio y vuelve.
+         *
+         * Es la forma de un golpe —entra, pega y se recoge—, y por eso la comparten
+         * todos los movimientos en vez de llevar cada uno su temporizador. Medido en
+         * el estado: el pico cae al 35% de la duracion, que es cuando el golpe
+         * "llega".
+         */
+        /**
+         * El compas de un movimiento: **prepara, pega y vuelve**.
+         *
+         * Antes subia y bajaba sin mas, y un golpe que empieza yendo hacia delante se
+         * ve rapido pero no se ve fuerte. La preparacion —un gesto corto al reves— es
+         * lo que hace que el ojo lea "va a pegar" y despues "pego". Devuelve negativo
+         * durante esa preparacion, asi que quien lo use tiene que admitir negativos.
+         *
+         *   0,00 - 0,18  preparacion, al reves
+         *   0,18 - 0,42  el golpe, de golpe
+         *   0,42 - 1,00  la vuelta, despacio
+         */
+        function compas(p, ahora, duracion) {
+          const t = 1 - Math.max(0, (p.hasta - ahora) / (duracion * 1000));
+          if (t < 0.18) return -(t / 0.18) * 0.28;
+          if (t < 0.42) return -0.28 + ((t - 0.18) / 0.24) * 1.28;
+          return Math.max(0, 1 - (t - 0.42) / 0.58);
+        }
+
+        /**
+         * La pose de hace `retardo` milisegundos.
+         *
+         * Cada parte del cuerpo llama a esto con su propio retardo, y asi el pecho va
+         * detras de la cadera, el brazo detras del pecho y la cabeza detras de todos.
+         * Sin esto, todas las partes llegan y se van en el mismo fotograma.
+         */
+        function versionEn(p, retardo, ahora) {
+          const cuando = ahora - retardo;
+          const h = p.historial;
+          for (let i = h.length - 1; i >= 0; i--) {
+            if (h[i].t <= cuando) return h[i];
+          }
+          return h[0] ?? p;
+        }
+
+        /**
+         * El compas de un golpe **recibido**: entra de golpe y vuelve despacio.
+         *
+         * Un tambaleo no es simetrico. El golpe llega en un suspiro y la recuperacion
+         * tarda; con el compas normal —subida y bajada iguales— el muñeco se sacude y
+         * se recoloca tan rapido que no se lee como un golpe, se lee como un tic.
+         */
+        function compasGolpe(p, ahora, duracion) {
+          const t = 1 - Math.max(0, (p.hasta - ahora) / (duracion * 1000));
+          return t < 0.15 ? t / 0.15 : Math.max(0, 1 - (t - 0.15) / 0.85);
+        }
+
+        /** Traza una polilinea con contorno: primero el borde, luego el relleno. */
+        function miembro(ctx, puntos, color, grosor) {
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(puntos[0][0], puntos[0][1]);
+          for (let i = 1; i < puntos.length; i++) ctx.lineTo(puntos[i][0], puntos[i][1]);
+          ctx.strokeStyle = CONTORNO;
+          ctx.lineWidth = grosor + 4;
+          ctx.stroke();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = grosor;
+          ctx.stroke();
+        }
+
+        /** Rellena un camino con contorno. */
+        function cuerpo(ctx, trazar, color, grosor = 3) {
+          ctx.beginPath();
+          trazar(ctx);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.strokeStyle = CONTORNO;
+          ctx.lineWidth = grosor;
+          ctx.stroke();
+        }
+
+        const api = {
+          crear,
+          poner,
+          quieto: (p) => poner(p, "quieto", performance.now()),
+
+          andar: (p, hacia) => {
+            p.hacia = hacia >= 0 ? 1 : -1;
+            if (p.estado !== "andar") poner(p, "andar", performance.now());
+          },
+
+          correr: (p, intensidad = 1) => {
+            p.velocidadPaso = intensidad;
+            if (p.estado !== "correr") poner(p, "correr", performance.now());
+            p.turbo = Math.min(1, p.turbo + 0.3 * intensidad);
+          },
+
+          atacar: (p, ahora) => {
+            poner(p, "atacar", ahora);
+            p.golpe = 0;
+            p.paso = Math.min(1, p.paso + 0.75);
+          },
+          bloquear: (p, ahora) => {
+            poner(p, "bloquear", ahora);
+            p.paso = Math.max(-1, p.paso - 0.35);
+          },
+          herido: (p, ahora) => {
+            poner(p, "herido", ahora);
+            p.sacudida = 1;
+            // El golpe empuja hacia atras: es el unico movimiento que de verdad separa
+            // a los dos, y sin el se quedan clavados a la misma distancia toda la pelea.
+            p.paso = Math.max(-1, p.paso - 1);
+          },
+          celebrar: (p, ahora) => {
+            poner(p, "celebrar", ahora);
+            p.salto = 0;
+          },
+          /** Patada: la pierna de delante se levanta y se estira hacia el rival. */
+          patada: (p, ahora) => {
+            poner(p, "patada", ahora);
+            p.paso = Math.min(1, p.paso + 0.7);
+          },
+          /** Punetazo: pega el brazo libre, el que no lleva la espada. */
+          punetazo: (p, ahora) => {
+            poner(p, "punetazo", ahora);
+            p.paso = Math.min(1, p.paso + 0.8);
+          },
+          /** Esquivar: se echa atras sin llegar a que le toquen. */
+          esquivar: (p, ahora) => {
+            poner(p, "esquivar", ahora);
+            p.paso = Math.max(-1, p.paso - 0.6);
+          },
+          /** Cuanto tiene al rival delante. Se lo dice la arena, que es quien lo sabe. */
+          rival: (p, distancia) => {
+            p.rivalX = distancia;
+          },
+
+          actualizar(p, dt, ahora) {
+            const ritmo = p.estado === "correr" ? 15 : p.estado === "andar" ? 8 : 2;
+            p.fase += dt * ritmo * (p.estado === "correr" ? 0.6 + p.velocidadPaso : 1);
+
+            if (p.estado === "atacar") {
+              // El golpe de la espada usa el mismo compas que el cuerpo: asi la hoja
+              // tambien prepara el golpe hacia atras antes de barrer, en vez de salir
+              // disparada desde la guardia.
+              p.golpe = compas(p, ahora, DURACION.atacar);
+            } else {
+              p.golpe += (0 - p.golpe) * Math.min(1, dt * 8);
+            }
+
+            p.sacudida = Math.max(0, p.sacudida - dt * 4);
+            if (p.estado !== "correr") p.turbo = Math.max(0, p.turbo - dt * 1.8);
+            if (p.estado === "celebrar") p.salto = Math.abs(Math.sin(ahora / 150));
+
+            // --- La pose del momento ---
+            //
+            // Cada movimiento es un compas que sube y vuelve, y los valores se
+            // **acercan** a el en vez de saltar: encadenar dos golpes seguidos no
+            // puede dar un tiron de una postura a otra.
+            const objetivo = {
+              avance: p.estado === "atacar" ? compas(p, ahora, DURACION.atacar) : 0,
+              patada: p.estado === "patada" ? compas(p, ahora, DURACION.patada) : 0,
+              mano: p.estado === "punetazo" ? compas(p, ahora, DURACION.punetazo) : 0,
+              retroceso:
+                p.estado === "esquivar"
+                  ? compas(p, ahora, DURACION.esquivar)
+                  : p.estado === "herido"
+                    ? compasGolpe(p, ahora, DURACION.herido) * 0.8
+                    : p.estado === "bloquear"
+                      ? 0.3
+                      : 0,
+              inclina:
+                p.estado === "atacar"
+                  ? 0.1
+                  : p.estado === "patada"
+                    ? -0.16
+                    : p.estado === "punetazo"
+                      ? 0.07
+                      : p.estado === "esquivar"
+                        ? -0.2
+                        : p.estado === "herido"
+                          ? -0.14
+                          : p.estado === "correr"
+                            ? 0.12 * Math.min(1, p.velocidadPaso)
+                            : 0,
+              // La cintura hace el resto del trabajo: es lo que dobla al muñeco por la
+              // mitad en vez de ladearlo entero como un bloque.
+              tuerce:
+                p.estado === "atacar"
+                  ? 0.2
+                  : p.estado === "patada"
+                    ? -0.2
+                    : p.estado === "punetazo"
+                      ? 0.24
+                      : p.estado === "esquivar"
+                        ? -0.22
+                        : p.estado === "herido"
+                          ? -0.26
+                          : p.estado === "bloquear"
+                            ? 0.12
+                            : 0,
+            };
+            const paso = Math.min(1, dt * 14);
+            for (const clave of ["avance", "patada", "mano", "retroceso", "inclina", "tuerce"]) {
+              p[clave] = acercar(p[clave], objetivo[clave], paso);
+            }
+            // El paso se apaga solo: es un impulso, no un estado. Con esto se acercan al
+            // atacar y se separan al recibir, y vuelven solos a su sitio.
+            p.paso = acercar(p.paso, 0, dt * 1.4);
+
+            // Se guarda la pose de este fotograma para que las partes puedan leerla con
+            // retardo. Se tira lo que ya no hace falta: el retardo mas largo son 160 ms y
+            // guardando 600 sobra, incluso si un fotograma se atasca.
+            p.historial.push({
+              t: ahora,
+              tuerce: p.tuerce,
+              inclina: p.inclina,
+              avance: p.avance,
+              golpe: p.golpe,
+            });
+            while (p.historial.length > 2 && ahora - p.historial[0].t > 600) {
+              p.historial.shift();
+            }
+
+            if (p.estado !== "quieto" && ahora > p.hasta) p.estado = "quieto";
+          },
+
+          /**
+           * Dibuja el personaje con los pies en (0,0).
+           *
+           * `giro` permite inclinar el cuerpo (el sprint se inclina hacia delante).
+           */
+          dibujar(ctx, p, ahora) {
+            const A = p.altura;
+            const cabezaY = -0.88 * A;
+            const cabezaR = 0.12 * A;
+            const cuelloY = -0.78 * A;
+            const hombroY = -0.72 * A;
+            const cinturaY = -0.5 * A;
+            const caderaY = -0.44 * A;
+            const rodillaY = -0.22 * A;
+            const tobilloY = -0.04 * A;
+
+            const color = p.color;
+            const grosor = Math.max(4, A * 0.062);
+
+            ctx.save();
+            // Sacudida al recibir un golpe, y salto al celebrar.
+            ctx.translate(p.sacudida * (Math.random() - 0.5) * 6, -p.salto * A * 0.08);
+            ctx.scale(p.hacia, 1);
+
+            // La pose: el cuerpo entero se echa encima o atras. La **cadera manda**, asi
+            // que esta parte va sin retardo: es la que tira del resto.
+            const empuje = p.avance * A * 0.3 - p.retroceso * A * 0.26;
+            ctx.translate(empuje + p.paso * A * 0.2, 0);
+            ctx.rotate(p.inclina);
+
+            // ── Vida ──────────────────────────────────────────────────────────
+            //
+            // Un muñeco quieto esta muerto. Entre golpe y golpe lo unico que se movia
+            // era el brazo de la espada, y poco (±0.07 rad): la pelea eran dos
+            // estatuas mirandose. Estas tres capas —respirar, cambiarse el peso de pie
+            // y menear la cabeza— no cuestan nada, son senos, y son la diferencia
+            // entre "parado" y "esperando".
+            const seg = ahora / 1000;
+            const respira = Math.sin(seg * 1.9); // unas veinte respiraciones por minuto
+            const peso = Math.sin(seg * 0.85); // el cambio de peso es mas lento
+            const mira = Math.sin(seg * 1.25 + p.fase * 0.3);
+            // Se va de un pie a otro, el pecho sube al respirar y el tronco se balancea.
+            // Los numeros estan subidos a proposito: con la mitad no se veian, y un
+            // movimiento que no se ve no es vida, es ruido.
+            ctx.translate(peso * A * 0.03, -Math.abs(respira) * A * 0.014);
+            ctx.rotate(peso * 0.03);
+
+            // ── Piernas ──────────────────────────────────────────────────────
+            // Dos segmentos por pierna, del color del cuerpo, con pie. La de indice 0
+            // es la de delante: la que se abre en la estocada y la que se levanta en la
+            // patada.
+            const amplitud =
+              p.estado === "correr" ? A * 0.16 : p.estado === "andar" ? A * 0.1 : A * 0.02;
+            const levantar = p.estado === "correr" ? A * 0.06 : A * 0.02;
+            [0, Math.PI].forEach((desfase, indice) => {
+              let pieX;
+              let pieY;
+              if (indice === 0 && Math.abs(p.patada) > 0.02) {
+                // La patada: la pierna se retrasa primero —la preparacion— y luego sube
+                // y sale hacia el rival. Sin levantar el pie, una "patada" es una pierna
+                // estirada a ras de suelo y no se lee.
+                pieX = A * 0.36 * p.patada;
+                pieY = -A * 0.34 * Math.max(0, p.patada);
+              } else {
+                const s = Math.sin(p.fase + desfase);
+                pieX = s * amplitud;
+                // El pie se levanta en la mitad del paso en que va hacia delante.
+                pieY = -Math.max(0, Math.cos(p.fase + desfase)) * levantar;
+                // La estocada abre la pierna de delante y estira la de atras: es lo que
+                // da la sensacion de haberse echado encima de verdad.
+                pieX += indice === 0 ? p.avance * A * 0.28 : -p.avance * A * 0.2;
+              }
+              // El pie de atras se **queda quieto** mientras el cuerpo se echa encima: se
+              // le resta el desplazamiento del cuerpo, asi que en el mundo no se mueve.
+              // Sin esto el muñeco patina hacia delante con los pies arrastrando, que era
+              // lo mas falso que quedaba.
+              if (indice === 1) pieX -= empuje;
+              // La rodilla se va hacia delante. Sin doblarla, la pierna es un palo
+              // recto del hip al pie y el muñeco se ve tieso aunque mueva los pies:
+              // era la mitad de la tiesura.
+              const rodillaX = pieX * 0.45 + A * 0.055;
+              miembro(
+                ctx,
+                [[0, caderaY], [rodillaX, rodillaY + pieY * 0.4], [pieX, tobilloY + pieY]],
+                color,
+                grosor,
+              );
+              // El pie tiene **tobillo**: talon, empeine y punta, y la punta flexiona
+              // con el paso. Un pie que no flexiona deja la pierna en un palo con una
+              // raya al final.
+              const flex = Math.sin(p.fase + desfase);
+              miembro(
+                ctx,
+                [
+                  [pieX - A * 0.035, tobilloY + pieY - Math.max(0, -flex) * A * 0.012],
+                  [pieX, tobilloY + pieY],
+                  [pieX + A * 0.08, tobilloY + pieY + Math.max(0, flex) * A * 0.022],
+                ],
+                color,
+                grosor * 0.8,
+              );
+            });
+
+            // ── Cadera ────────────────────────────────────────────────────────
+            //
+            // La pelvis y el bajo vientre. Antes el tronco terminaba en la cintura y las
+            // piernas salian de la nada: quedaba un hueco entre la una y las otras.
+            const anchoHombro = A * 0.155;
+            const anchoCintura = A * 0.115;
+            const anchoCadera = A * 0.13;
+            cuerpo(
+              ctx,
+              (c) => {
+                c.moveTo(-anchoCadera, caderaY + A * 0.07);
+                c.lineTo(anchoCadera, caderaY + A * 0.07);
+                c.lineTo(anchoCintura, cinturaY + A * 0.015);
+                c.lineTo(-anchoCintura, cinturaY + A * 0.015);
+              },
+              color,
+            );
+
+            // ── A partir de aqui, el tronco gira ──────────────────────────────
+            //
+            // Esta es la articulacion que separa un muñeco articulado de un bloque: el
+            // pecho gira sobre la cintura y las piernas se quedan plantadas donde
+            // estaban. `inclina` tumba el cuerpo entero desde los pies —que es como se
+            // cae uno—, y `tuerce` dobla por la mitad, que es como se pega.
+            // El pecho va **detras** de la cadera: lee la pose de hace 70 ms. Es lo que
+            // convierte un bloque que gira en un tronco que sigue al que empuja.
+            const pecho = versionEn(p, RETARDO.pecho, ahora);
+            ctx.save();
+            ctx.translate(0, cinturaY);
+            ctx.rotate(pecho.tuerce);
+            ctx.translate(0, -cinturaY);
+
+            // ── Pecho ─────────────────────────────────────────────────────────
+            // Hombre: mas ancho de hombros que de cintura.
+            cuerpo(
+              ctx,
+              (c) => {
+                c.moveTo(-anchoHombro, hombroY);
+                c.quadraticCurveTo(-anchoHombro - A * 0.03, cinturaY - A * 0.06, -anchoCintura, cinturaY);
+                c.lineTo(anchoCintura, cinturaY);
+                c.quadraticCurveTo(anchoHombro + A * 0.03, cinturaY - A * 0.06, anchoHombro, hombroY);
+                c.quadraticCurveTo(0, hombroY - A * 0.05, -anchoHombro, hombroY);
+              },
+              color,
+            );
+
+            // Cinturon.
+            cuerpo(
+              ctx,
+              (c) => c.rect(-anchoCintura * 1.05, cinturaY - A * 0.02, anchoCintura * 2.1, A * 0.05),
+              "#F5C451",
+              2,
+            );
+
+            // ── Brazo libre ───────────────────────────────────────────────────
+            // Cuelga y contrapesa al correr... y pega cuando toca. El puñetazo sale
+            // del hombro, cruza el cuerpo y acaba delante: es el movimiento que el
+            // muñeco no tenia.
+            const hombroLX = -anchoHombro * 0.85;
+            const hombroLY = hombroY + A * 0.03;
+            if (Math.abs(p.mano) > 0.02) {
+              const codoFX = hombroLX + anchoHombro * 1.4 * p.mano;
+              const codoFY = hombroLY + A * 0.05 * (1 - p.mano);
+              const manoFX = hombroLX + anchoHombro * 3.4 * p.mano;
+              const manoFY = hombroLY - A * 0.01 * p.mano;
+              miembro(
+                ctx,
+                [[hombroLX, hombroLY], [codoFX, codoFY], [manoFX, manoFY]],
+                color,
+                grosor * 0.95,
+              );
+              // El puño, un disco: un tramo mas de linea no se lee como un puño.
+              ctx.beginPath();
+              ctx.arc(manoFX, manoFY, grosor * 0.66, 0, Math.PI * 2);
+              ctx.fillStyle = color;
+              ctx.fill();
+              ctx.strokeStyle = CONTORNO;
+              ctx.lineWidth = 3;
+              ctx.stroke();
+            } else {
+              const brazoLibre =
+                Math.sin(p.fase + Math.PI) * (p.estado === "correr" ? A * 0.1 : A * 0.06) +
+                Math.sin(seg * 1.1 + 1.3) * A * 0.025;
+              miembro(
+                ctx,
+                [
+                  [hombroLX, hombroLY],
+                  [-anchoHombro * 1.5, hombroY + A * 0.16 + brazoLibre * 0.6],
+                  [-anchoHombro * 1.5 + brazoLibre * 0.5, cinturaY - A * 0.04 + brazoLibre],
+                ],
+                color,
+                grosor * 0.9,
+              );
+            }
+
+            // ── Brazo de la espada ────────────────────────────────────────────
+            //
+            // El angulo decide la postura entera:
+            //   guardia   la espada arriba y atras, lista
+            //   atacar    barre en arco descendente (de arriba-atras a abajo-delante)
+            //   bloquear  vertical por delante, cubriendo el cuerpo
+            //   celebrar  en alto, levantada
+            const hombroX = anchoHombro * 0.8;
+            const hombroSY = hombroY + A * 0.03;
+
+            // El brazo de la espada es lo que mas se retrasa: lee el golpe de hace
+            // 120 ms. Es lo que hace que la hoja **siga** al cuerpo en vez de salir
+            // clavada con el, y por eso una espada parece pesar.
+            const arma = versionEn(p, RETARDO.brazo, ahora);
+
+            let angulo;
+            if (p.estado === "atacar") angulo = -2.3 + arma.golpe * 3.4;
+            else if (p.estado === "bloquear") angulo = -1.45;
+            else if (p.estado === "celebrar") angulo = -2.5;
+            else if (p.estado === "herido") angulo = 0.5;
+            else {
+              // En guardia la punta **apunta al rival**. Antes el angulo era fijo y las
+              // dos hojas se cruzaban de casualidad, cuando se cruzaban: el muñeco
+              // sujetaba la espada mirando a ninguna parte.
+              const alPecho = Math.atan2(-0.62 * A - hombroSY, Math.max(60, p.rivalX * 0.6) - hombroX);
+              angulo = alPecho + Math.sin(seg * 1.7) * 0.09 + Math.sin(seg * 0.7) * 0.05;
+            }
+
+            const codoAng = angulo - (0.55 - 0.45 * arma.golpe);
+            const codoX = hombroX + Math.cos(angulo) * A * 0.13;
+            const codoY = hombroSY + Math.sin(angulo) * A * 0.13;
+            const manoX = codoX + Math.cos(codoAng) * A * 0.145;
+            const manoY = codoY + Math.sin(codoAng) * A * 0.145;
+
+            miembro(ctx, [[hombroX, hombroSY], [codoX, codoY], [manoX, manoY]], color, grosor * 0.9);
+
+            // La mano: un puño cerrado en la empuñadura, para que la espada no salga de
+            // la nada.
+            ctx.beginPath();
+            ctx.arc(manoX, manoY, grosor * 0.5, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = CONTORNO;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // La espada: hoja clara con contorno, guarda dorada y puno. Al echarse
+            // encima, la hoja llega mas lejos: es la estocada, no un brazo mas largo.
+            const largo = A * (0.46 + 0.12 * p.avance);
+            const puntaX = manoX + Math.cos(codoAng) * largo;
+            const puntaY = manoY + Math.sin(codoAng) * largo;
+            miembro(ctx, [[manoX, manoY], [puntaX, puntaY]], "rgba(232,234,240,0.96)", Math.max(3, A * 0.032));
+
+            // Guarda perpendicular al filo.
+            const gx = Math.sin(codoAng) * A * 0.055;
+            const gy = -Math.cos(codoAng) * A * 0.055;
+            miembro(ctx, [[manoX - gx, manoY - gy], [manoX + gx, manoY + gy]], "#F5C451", Math.max(3, A * 0.03));
+
+            // ── Cabeza: la foto de la persona ─────────────────────────────────
+            //
+            // La cabeza sigue al rival con un vaiven lento. Sin esto los dos miran
+            // siempre de frente, y un muñeco que no mueve la cabeza parece un maniqui
+            // por mucho que le muevas los brazos.
+            // La cabeza es lo ultimo en llegar y lo ultimo en parar: lee la pose de hace
+            // 160 ms y ademas se le suma lo que el cuerpo **todavia no** ha hecho. Eso
+            // ultimo es el latigazo: cuando el tronco frena, la cabeza sigue un poco.
+            const cabezalenta = versionEn(p, RETARDO.cabeza, ahora);
+            const latigazo = (cabezalenta.inclina - p.inclina) * (-0.88 * A);
+            const cabezaX = mira * A * 0.022 + latigazo;
+            ctx.save();
+            ctx.translate(cabezaX, Math.sin(seg * 1.9) * A * 0.005);
+
+            // Cuello, para que la cabeza no parezca pegada al tronco. Va inclinado hacia
+            // donde mira la cabeza: si no, el cuello se despega de ella.
+            miembro(ctx, [[-cabezaX, hombroY + A * 0.01], [0, cuelloY]], color, grosor * 0.75);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(0, cabezaY, cabezaR, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.clip();
+            if (p.foto && p.foto.complete && p.foto.naturalWidth > 0) {
+              ctx.drawImage(p.foto, -cabezaR, cabezaY - cabezaR, cabezaR * 2, cabezaR * 2);
+            }
+            ctx.restore();
+
+            // El aro de la cabeza: casco, y separa la cara del fondo.
+            ctx.beginPath();
+            ctx.arc(0, cabezaY, cabezaR, 0, Math.PI * 2);
+            ctx.strokeStyle = CONTORNO;
+            ctx.lineWidth = Math.max(4, A * 0.028) + 3;
+            ctx.stroke();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(4, A * 0.028);
+            ctx.stroke();
+
+            // Penacho del que va ganando.
+            if (p.corona) {
+              ctx.font = `${Math.round(A * 0.24)}px "Segoe UI Emoji", serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "alphabetic";
+              ctx.fillText("👑", 0, cabezaY - cabezaR - A * 0.03);
+            }
+
+            ctx.restore();
+
+            // Se cierra la articulacion de la cintura: el pecho, los brazos y la cabeza
+            // giran con `tuerce`; las piernas y la pelvis se quedan donde estaban.
+            ctx.restore();
+
+            // ── Turbo: estelas de velocidad por detras ────────────────────────
+            if (p.turbo > 0.05) {
+              for (let i = 1; i <= 4; i++) {
+                const y = -A * (0.2 + i * 0.15);
+                const largoEstela = A * 0.5 * p.turbo * (1 - i / 6);
+                ctx.beginPath();
+                ctx.moveTo(-anchoHombro - A * 0.06, y);
+                ctx.lineTo(-anchoHombro - A * 0.06 - largoEstela, y);
+                ctx.strokeStyle = CONTORNO;
+                ctx.lineWidth = Math.max(3, A * 0.022) + 3;
+                ctx.stroke();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = Math.max(3, A * 0.022);
+                ctx.stroke();
+              }
+            }
+
+            ctx.restore();
+          },
+        };
+
+        return api;
+      })();
+    </script>
+
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        // ── Medidas y tiempos ────────────────────────────────────────────────
+        //
+        // Fijos, no por parametro de URL: la maqueta los leia de la query, pero
+        // el diseno se sirve por el servidor de overlays y alli no hay nadie
+        // escribiendo la direccion a mano. Se quedan con los valores con los que
+        // se probo la maqueta.
+        const ANCHO = 1080;
+        const ALTO = 520;
+        // El suelo donde apoyan los pies. Con la altura de personaje de abajo,
+        // deja sitio para las coronas y las estelas por encima de las cabezas.
+        const SUELO = ALTO - 90;
+        const ALTURA_PJ = 190;
+        /** Cada cuanto se cruzan. Con racha el campeon ataca mas rapido. */
+        const CRUCE_MS = 950;
+        const CRUCE_RACHA_MS = 620;
+        const HP_MAX = 100;
+        /** Diferencia de ritmo por debajo de la cual el golpe se bloquea. */
+        const UMBRAL_BLOQUEO = 0.28;
+
+        /**
+         * Lo que puede hacer el que ataca, repartido por el contador de cruces.
+         *
+         * La espada es la base —esto es una esgrima— y los otros entran de vez en
+         * cuando para que la pelea no sea siempre el mismo barrido.
+         */
+        const REPERTORIO = ["espada", "espada", "punetazo", "espada", "patada", "espada"];
+
+        const RACHA_ESPECIAL = 2;
+
+        /* Los mismos colores que los tokens de comun.css, en JavaScript: aqui no
+           existe `var()`.
+             --lider  #ff2e63   el nº1, que defiende
+             --acento #25f4ee   el retador y los golpes bloqueados
+             --vuelta #f5c451   la racha y las coronas
+             --apagado / --texto / --borde, para lo que va sobre el lienzo. */
+        const COLOR_DEFENSA = "#FF2E63";
+        const COLOR_ATAQUE = "#25F4EE";
+        const COLOR_RACHA = "#F5C451";
+        const COLOR_APAGADO = "#8C93A3";
+
+        /* El contexto del runtime, siempre por `window.overlay` y no por el
+           parametro de la funcion: hay tres sitios que pintan texto (el bucle, la
+           ficha y el que resuelve el combate) y solo dos de ellos reciben `ctx`.
+           `comun.js` deja `window.overlay` puesto antes de llamar a `montar`, asi
+           que usarlo como fuente unica evita que un sitio se quede sin los
+           formatos en espanol por no haber pasado el parametro. */
+        const rt = () => window.overlay;
+
+        /* Respaldo oscuro de los textos que van sobre el lienzo.
+           Es la leccion repetida del proyecto: sobre video claro un texto sin
+           respaldo desaparece, y ese mismo motivo es el que hace que cada figura
+           lleve contorno. Aqui no valen `text-shadow` ni tokens: es canvas. */
+        const RESPALDO = "rgba(8, 10, 14, 0.72)";
+
+        // La nota de la cabecera solo tiene sentido en la vista de taps: es lo
+        // unico que este diseno sabe leer.
+        const NOTA = "el nº1 defiende · gana quien tenga más ritmo de taps";
+
+        // ── El estado de la arena ────────────────────────────────────────────
+        //
+        // `cola` es el orden de aspirantes: el primero es el campeon. Los datos
+        // reales (foto, nombre, taps) se buscan por clave, asi que si alguien se
+        // cae de la tabla simplemente no se encuentra y el personaje se retira.
+        const arena = {
+          fase: "presentacion", // presentacion | combate | ko | hueco
+          cambio: 0,
+          cola: [], // [{ clave, racha }]
+          defensa: null,
+          ataque: null,
+          hpDefensa: HP_MAX,
+          hpAtaque: HP_MAX,
+          racha: 0,
+          ultimoCruce: 0,
+          luchando: false,
+          aviso: "",
+          avisoHasta: 0,
+          /// Cuantos cruces van: es lo que reparte los movimientos del repertorio.
+          cruce: 0,
+          /// Sacudida de pantalla, 0..1. La enciende un golpe fuerte y se apaga sola.
+          sacudida: 0,
+        };
+
+        // Los personajes se crean cuando se sabe quien pelea.
+        let pjA = null;
+        let pjB = null;
+
+        // ── Chispas del impacto ──────────────────────────────────────────────
+        //
+        // Saltan donde pega el golpe. Sin ellas el golpe se ve pero no se **siente**:
+        // es lo que separa un intercambio de dos muñecos que se rozan las espadas.
+        const TOPE_CHISPAS = 56;
+        let chispas = [];
+
+        function soltarChispas(x, y, cuantas, color) {
+          for (let i = 0; i < cuantas && chispas.length < TOPE_CHISPAS; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const vel = 80 + Math.random() * 240;
+            chispas.push({
+              x,
+              y,
+              vx: Math.cos(ang) * vel,
+              vy: Math.sin(ang) * vel - 70,
+              vida: 0.45 + Math.random() * 0.45,
+              color,
+              tam: 3 + Math.random() * 5,
+            });
+          }
+        }
+
+        function avanzarChispas(dt) {
+          if (chispas.length === 0) return;
+          chispas = chispas.filter((ch) => {
+            ch.vida -= dt * 1.5;
+            ch.x += ch.vx * dt;
+            ch.y += ch.vy * dt;
+            ch.vy += 440 * dt;
+            ch.vx *= 0.94;
+            return ch.vida > 0;
+          });
+        }
+
+        function pintarChispas(c) {
+          for (const ch of chispas) {
+            c.globalAlpha = Math.max(0, Math.min(1, ch.vida * 1.7));
+            c.beginPath();
+            c.arc(ch.x, ch.y, ch.tam * Math.max(0.3, ch.vida), 0, Math.PI * 2);
+            c.fillStyle = ch.color;
+            c.fill();
+          }
+          c.globalAlpha = 1;
+        }
+        let datosPorClave = new Map();
+        // El lienzo, el contexto de dibujo y los nodos del marcado: se resuelven
+        // en `montar`.
+        //
+        // OJO con los nombres: el contexto de dibujo va en `lienzoCtx` y NO en
+        // `ctx`, porque `ctx` es el objeto que trae el runtime (`ctx.nombre`,
+        // `ctx.numero`, `ctx.reducido`...). Llamar `ctx` al del canvas dejaria sin
+        // nombre ni formatos a las fichas y sin preferencia de movimiento al
+        // bucle, y el unico sintoma seria un texto mal puesto.
+        let lienzo = null;
+        let lienzoCtx = null;
+        let banner = null;
+        let total = null;
+        // Lo que no cambia dentro de un mismo combate no se recalcula en cada
+        // fotograma: aqui hay dos personajes articulados y el presupuesto de un
+        // renderer de OBS es corto.
+        let centroA = ANCHO / 2 - 90;
+        let centroB = ANCHO / 2 + 90;
+
+        /** Vuelve a montar el combate desde cero (al arrancar o al cambiar la tabla). */
+        function reiniciar(entradas) {
+          arena.cola = entradas.map((e, i) => ({ clave: window.ritmo.clave(e, i), racha: 0 }));
+          arena.racha = 0;
+          montarCombate();
+        }
+
+        function montarCombate() {
+          arena.defensa = arena.cola[0] ?? null;
+          arena.ataque = arena.cola[1] ?? null;
+          arena.hpDefensa = HP_MAX;
+          arena.hpAtaque = HP_MAX;
+          arena.fase = "presentacion";
+          arena.cambio = performance.now();
+          arena.luchando = Boolean(arena.defensa && arena.ataque);
+          pjA = null;
+          pjB = null;
+        }
+
+        function personajeDe(puesto, color, x) {
+          const datos = datosPorClave.get(puesto.clave);
+          if (!datos) return null;
+          const p = personaje.crear({
+            foto: datos.user?.avatar_url,
+            color,
+            altura: ALTURA_PJ,
+            nombre: datos.user?.nickname || "",
+          });
+          p.x = x;
+          p.corona = color === COLOR_DEFENSA;
+          return p;
+        }
+
+        function nombreDeClave(clave) {
+          const d = datosPorClave.get(clave);
+          return d ? rt().nombre(d) : "?";
+        }
+        function tapsDeClave(clave) {
+          const d = datosPorClave.get(clave);
+          return d ? Number(d.value) || 0 : 0;
+        }
+        function tasaDeClave(clave) {
+          return tasasActuales.get(clave) ?? 0;
+        }
+
+        let tasasActuales = new Map();
+
+        // ── El cruce ─────────────────────────────────────────────────────────
+        //
+        // Se decide quien ataca y si el golpe entra, comparando los RITMOS. Es el
+        // corazon del diseno: el acumulado no decide nada aqui.
+        function cruzar(ahora) {
+          if (!arena.defensa || !arena.ataque) return;
+
+          const ta = tasaDeClave(arena.defensa.clave);
+          const tb = tasaDeClave(arena.ataque.clave);
+          const suma = ta + tb;
+
+          // Si NADIE esta tocando, decide el ACUMULADO y el golpe es flojo.
+          //
+          // Es un respaldo necesario: sin el, un chat tranquilo dejaba la arena
+          // parada para siempre (medido: 16 s en fase "combate" sin un solo cruce).
+          // Ademas encaja con la logica del diseno: con el chat callado manda quien
+          // lleva mas taps, que es justo el que debe defender.
+          const porRitmo = suma >= 1;
+          const va = tapsDeClave(arena.defensa.clave);
+          const vb = tapsDeClave(arena.ataque.clave);
+          const arriba = porRitmo ? ta : va;
+          const abajo = porRitmo ? tb : vb;
+
+          if (!porRitmo && arriba + abajo <= 0) {
+            // Ni ritmo ni acumulado: de verdad no hay nada que decidir.
+            if (pjA) personaje.andar(pjA, 1);
+            if (pjB) personaje.andar(pjB, -1);
+            return;
+          }
+
+          // Al ir por acumulado, la pelea es mas lenta: no es lo mismo "ahora mismo"
+          // que "en toda la noche".
+          const ventaja = ((arriba - abajo) / Math.max(arriba, abajo)) * (porRitmo ? 1 : 0.55);
+          const atacaDefensa = ventaja >= 0;
+          const atacante = atacaDefensa ? pjA : pjB;
+          const defensor = atacaDefensa ? pjB : pjA;
+          const fuerza = Math.abs(ventaja);
+
+          if (atacante) {
+            // El repertorio: la espada es la base y los otros movimientos entran de
+            // vez en cuando. Se reparten con el **contador de cruces** y no con
+            // `Math.random`: al azar, una pelea corta puede no ver una patada nunca, y
+            // lo que se quiere es que el repertorio se note.
+            const toca = REPERTORIO[arena.cruce % REPERTORIO.length];
+            // Con ventaja clara entran mas patadas y puños, pero **no se deja la
+            // espada**: esto es una esgrima, y si el que va ganando solo pegara
+            // patadas dejaria de parecerlo.
+            const movimiento =
+              fuerza > 0.6
+                ? ["espada", "patada", "espada", "punetazo"][arena.cruce % 4]
+                : toca;
+            if (movimiento === "patada") personaje.patada(atacante, ahora);
+            else if (movimiento === "punetazo") personaje.punetazo(atacante, ahora);
+            else personaje.atacar(atacante, ahora);
+          }
+          arena.cruce += 1;
+
+          // El bloqueo solo se aplica cuando la pelea la decide el RITMO: ahi un
+          // intercambio parejo debe verse bloqueado. Por acumulado NO se bloquea,
+          // porque las diferencias entre el nº1 y el nº2 son pequenas y se quedaban
+          // bloqueando para siempre (medido: 16 s sin que bajara la vida).
+          const bloquea = porRitmo && fuerza < UMBRAL_BLOQUEO;
+
+          if (bloquea) {
+            // Chispas doradas del choque de las hojas: un bloqueo tambien es un golpe,
+            // solo que lo para el acero.
+            if (pjA && pjB) {
+              soltarChispas(
+                (pjA.x + pjB.x) / 2,
+                SUELO - ALTURA_PJ * 0.62,
+                8,
+                "#F5C451",
+              );
+            }
+            // La mitad de las veces se esquiva en vez de bloquear: el aguante hace lo
+            // mismo, pero la postura es otra y la pelea se ve menos repetida.
+            if (defensor) {
+              if (arena.cruce % 2 === 0) personaje.bloquear(defensor, ahora);
+              else personaje.esquivar(defensor, ahora);
+            }
+            mostrarAviso("¡BLOQUEADO!", ahora);
+            // Un bloqueo tambien desgasta un poco: sin esto, dos que vayan parejos
+            // se quedan en tablas y la arena no avanza nunca.
+            const desgaste = 1.5;
+            if (atacaDefensa) arena.hpAtaque = Math.max(0, arena.hpAtaque - desgaste);
+            else arena.hpDefensa = Math.max(0, arena.hpDefensa - desgaste);
+          } else {
+            // Por ritmo el golpe pega fuerte; por acumulado es un desgaste lento.
+            const dano = porRitmo ? 7 + 26 * fuerza : 4 + 11 * fuerza;
+            if (atacaDefensa) arena.hpAtaque = Math.max(0, arena.hpAtaque - dano);
+            else arena.hpDefensa = Math.max(0, arena.hpDefensa - dano);
+            if (defensor) personaje.herido(defensor, ahora);
+            // Las chispas saltan en el punto del golpe: entre los dos y a la altura del
+            // pecho, que es donde se cruzan las hojas.
+            if (pjA && pjB) {
+              soltarChispas(
+                (pjA.x + pjB.x) / 2,
+                SUELO - ALTURA_PJ * 0.6,
+                porRitmo ? 12 : 6,
+                atacaDefensa ? COLOR_ATAQUE : COLOR_DEFENSA,
+              );
+            }
+            if (fuerza > 0.6) {
+              mostrarAviso(porRitmo ? "¡GOLPE LIMPIO!" : "¡AGUANTA EL ACUMULADO!", ahora);
+              // Y la pantalla lo acusa: un golpe fuerte tiene que notarse en el sitio,
+              // no solo en el aviso.
+              arena.sacudida = Math.min(1, 0.45 + fuerza * 0.55);
+            }
+          }
+        }
+
+        function mostrarAviso(texto, ahora) {
+          arena.aviso = texto;
+          arena.avisoHasta = ahora + 700;
+        }
+
+        /** Termina el combate: el que cae sale y entra el siguiente. */
+        function resolver(ahora) {
+          const caeDefensa = arena.hpDefensa <= 0;
+          const ganador = caeDefensa ? arena.ataque : arena.defensa;
+          const perdedor = caeDefensa ? arena.defensa : arena.ataque;
+
+          arena.fase = "ko";
+          arena.cambio = ahora;
+          arena.luchando = false;
+
+          // El ganador celebra; el perdedor se va herido.
+          if (ganador === arena.defensa && pjA) personaje.celebrar(pjA, ahora);
+          else if (ganador === arena.ataque && pjB) personaje.celebrar(pjB, ahora);
+          if (perdedor === arena.defensa && pjA) personaje.herido(pjA, ahora);
+          else if (perdedor === arena.ataque && pjB) personaje.herido(pjB, ahora);
+
+          // La racha: solo cuenta si gana el que ya estaba.
+          if (ganador === arena.defensa) {
+            arena.racha += 1;
+          } else {
+            arena.racha = 1;
+          }
+
+          if (arena.racha >= RACHA_ESPECIAL) {
+            banner.textContent = "¡" + nombreDeClave(ganador.clave) + " EN RACHA ×" + arena.racha + "!";
+          } else {
+            banner.textContent = "¡" + nombreDeClave(ganador.clave) + " GANA!";
+          }
+          if (!rt().reducido) {
+            // Quitar y volver a poner la clase es lo unico que reinicia una
+            // animacion de CSS ya terminada. El `offsetWidth` fuerza al navegador
+            // a recalcular el estilo entre las dos, y sin el la segunda vuelta no
+            // se ve (el navegador agrupa los dos cambios en uno).
+            banner.classList.remove("ver");
+            void banner.offsetWidth;
+            banner.classList.add("ver");
+          }
+
+          // Se reordena la cola: el ganador se queda delante, el perdedor al final.
+          const resto = arena.cola.filter(
+            (p) => p.clave !== ganador.clave && p.clave !== perdedor.clave,
+          );
+          ganador.racha = arena.racha;
+          perdedor.racha = 0;
+          arena.cola = [ganador, ...resto, perdedor];
+        }
+
+        // ── El fotograma ─────────────────────────────────────────────────────
+
+        function dibujar(ahora) {
+          const dt = Math.min(0.05, (ahora - anterior) / 1000);
+          anterior = ahora;
+
+          // Crear los personajes cuando haga falta.
+          if (arena.luchando) {
+            if (!pjA && arena.defensa) {
+              pjA = personajeDe(arena.defensa, COLOR_DEFENSA, 90);
+              if (pjA) pjA.hacia = 1;
+            }
+            if (!pjB && arena.ataque) {
+              pjB = personajeDe(arena.ataque, COLOR_ATAQUE, ANCHO - 90);
+              if (pjB) pjB.hacia = -1;
+            }
+            if (pjA) pjA.corona = arena.racha >= 1 && arena.defensa;
+          }
+
+          if (arena.fase === "presentacion") {
+            // Caminan hacia el centro.
+            if (pjA) {
+              pjA.x += (centroA - pjA.x) * Math.min(1, dt * 3.2);
+              pjA.hacia = 1;
+              personaje.andar(pjA, 1);
+            }
+            if (pjB) {
+              pjB.x += (centroB - pjB.x) * Math.min(1, dt * 3.2);
+              pjB.hacia = -1;
+              personaje.andar(pjB, -1);
+            }
+            if (Math.abs((pjA?.x ?? 0) - centroA) < 6 && Math.abs((pjB?.x ?? 0) - centroB) < 6) {
+              arena.fase = "combate";
+              arena.ultimoCruce = ahora;
+            }
+          } else if (arena.fase === "combate") {
+            // Aqui **no** se les pone a andar.
+            //
+            // Estaban forzados a `andar` en cada fotograma de la fase de combate, y
+            // eso pisaba el estado que acababa de poner `cruzar`: el golpe se
+            // escribia y se borraba en el mismo fotograma, asi que la pelea eran dos
+            // muñecos andando en el sitio mientras los avisos de "¡GOLPE LIMPIO!"
+            // salian igual. Era el fallo de animacion que se veia: los golpes se
+            // decidían y no se dibujaban nunca.
+            //
+            // Entre golpe y golpe se quedan en guardia (`quieto`), que es lo que hace
+            // un esgrimista: esperar. El estado lo pone `cruzar` y lo retira
+            // `actualizar` cuando se le acaba la duracion.
+            const espera = arena.racha >= RACHA_ESPECIAL ? CRUCE_RACHA_MS : CRUCE_MS;
+            if (ahora - arena.ultimoCruce > espera) {
+              arena.ultimoCruce = ahora;
+              // Con la preferencia de menos movimiento activa no se cruzan: la
+              // pelea se quedaria a medias, pero es lo que pide el sistema.
+              if (!rt().reducido) cruzar(ahora);
+            }
+            if (arena.hpDefensa <= 0 || arena.hpAtaque <= 0) resolver(ahora);
+          } else if (arena.fase === "ko") {
+            // El perdedor se retira por su lado.
+            if (ahora - arena.cambio > 1900) {
+              // El siguiente aspirante entra: se rehace el combate con la cola nueva.
+              const campeon = arena.cola[0];
+              const retador = arena.cola[1] ?? null;
+              if (retador) {
+                // Empalme: el campeon se queda donde esta y el retador entra.
+                arena.defensa = campeon;
+                arena.ataque = retador;
+                arena.hpDefensa = HP_MAX;
+                arena.hpAtaque = HP_MAX;
+                pjB = null;
+                arena.fase = "presentacion";
+                arena.cambio = ahora;
+                arena.luchando = true;
+              } else {
+                arena.luchando = false;
+                arena.fase = "hueco";
+              }
+            }
+          }
+
+          if (pjA) personaje.actualizar(pjA, dt, ahora);
+          if (pjB) personaje.actualizar(pjB, dt, ahora);
+
+          // Cada uno sabe a que distancia tiene al rival: es lo que le deja apuntarle
+          // con la espada en vez de sujetarla en un angulo fijo.
+          if (pjA && pjB) {
+            const distancia = Math.abs(pjB.x - pjA.x);
+            personaje.rival(pjA, distancia);
+            personaje.rival(pjB, distancia);
+          }
+          avanzarChispas(dt);
+          // La sacudida se apaga en unas decimas: si durase mas no seria un golpe, seria
+          // un temblor.
+          arena.sacudida = Math.max(0, arena.sacudida - dt * 5.5);
+
+          pintar(ahora);
+        }
+
+        // ── Pintado ──────────────────────────────────────────────────────────
+
+        /** Rectangulo redondeado: el respaldo de un texto o una barra. */
+        function redondear(c, x, y, ancho, alto, radio) {
+          c.beginPath();
+          c.moveTo(x + radio, y);
+          c.arcTo(x + ancho, y, x + ancho, y + alto, radio);
+          c.arcTo(x + ancho, y + alto, x, y + alto, radio);
+          c.arcTo(x, y + alto, x, y, radio);
+          c.arcTo(x, y, x + ancho, y, radio);
+          c.closePath();
+        }
+
+        /**
+         * Respaldo oscuro comun a todas las lineas de una ficha.
+         *
+         * Se hace **una sola** caja por ficha y no una por linea: sobre video
+         * claro el respaldo tiene que cubrir tambien los huecos entre lineas, y
+         * cada relleno de mas es un rectangulo de 400x80 pintado 60 veces por
+         * segundo en el renderer de OBS.
+         */
+        function respaldo(x, y, ancho, alto) {
+          lienzoCtx.fillStyle = RESPALDO;
+          redondear(lienzoCtx, x, y, ancho, alto, 14);
+          lienzoCtx.fill();
+        }
+
+        function pintar(ahora) {
+          // El lienzo va **transparente**: el overlay se compone sobre el video,
+          // asi que fuera de las figuras no se pinta nada.
+          lienzoCtx.clearRect(0, 0, ANCHO, ALTO);
+
+          // ── Sacudida ─────────────────────────────────────────────────────────
+          //
+          // Un golpe limpio mueve la escena entera unos pixeles durante unas decimas.
+          // Es el truco mas viejo del oficio y el que mas se nota: sin el, un golpe
+          // fuerte se ve igual que uno flojo. Se sacude **la arena** —suelo, muñecos y
+          // chispas— y no la interfaz: las fichas del aguante no tienen por que bailar.
+          const sacudir = arena.sacudida > 0.01 && !rt().reducido;
+          lienzoCtx.save();
+          if (sacudir) {
+            const golpe = arena.sacudida * 8;
+            lienzoCtx.translate((Math.random() - 0.5) * golpe, (Math.random() - 0.5) * golpe * 0.6);
+          }
+
+          // El suelo de la arena.
+          lienzoCtx.strokeStyle = "rgba(232,234,240,0.16)";
+          lienzoCtx.lineWidth = 3;
+          lienzoCtx.beginPath();
+          lienzoCtx.moveTo(40, SUELO + 2);
+          lienzoCtx.lineTo(ANCHO - 40, SUELO + 2);
+          lienzoCtx.stroke();
+          // Una elipse tenue: da sensacion de recinto sin tapar el video.
+          lienzoCtx.strokeStyle = "rgba(232,234,240,0.07)";
+          lienzoCtx.beginPath();
+          lienzoCtx.ellipse(ANCHO / 2, SUELO, 430, 62, 0, 0, Math.PI * 2);
+          lienzoCtx.stroke();
+
+          if (!arena.luchando) {
+            // Hace falta gente: se dice sobre el lienzo, con su respaldo.
+            lienzoCtx.font = "600 30px 'Segoe UI', system-ui, sans-serif";
+            lienzoCtx.textAlign = "center";
+            const texto = "Esperando aspirantes…";
+            const ancho = lienzoCtx.measureText(texto).width;
+            respaldo(ANCHO / 2 - ancho / 2 - 18, SUELO - 74, ancho + 36, 48);
+            lienzoCtx.fillStyle = COLOR_APAGADO;
+            lienzoCtx.fillText(texto, ANCHO / 2, SUELO - 40);
+          }
+
+          // Aura dorada del que va en racha.
+          if (arena.racha >= RACHA_ESPECIAL && pjA) {
+            lienzoCtx.beginPath();
+            lienzoCtx.ellipse(
+              pjA.x,
+              SUELO - ALTURA_PJ * 0.45,
+              ALTURA_PJ * 0.42,
+              ALTURA_PJ * 0.62,
+              0,
+              0,
+              Math.PI * 2,
+            );
+            lienzoCtx.fillStyle = "rgba(245,196,81,0.13)";
+            lienzoCtx.fill();
+          }
+
+          if (pjA) {
+            lienzoCtx.save();
+            lienzoCtx.translate(pjA.x, SUELO);
+            personaje.dibujar(lienzoCtx, pjA, ahora);
+            lienzoCtx.restore();
+          }
+          if (pjB) {
+            lienzoCtx.save();
+            lienzoCtx.translate(pjB.x, SUELO);
+            personaje.dibujar(lienzoCtx, pjB, ahora);
+            lienzoCtx.restore();
+          }
+
+          // Las chispas van encima de los muñecos pero debajo de las fichas: el impacto
+          // tapa a los que pelean, no a la interfaz.
+          pintarChispas(lienzoCtx);
+
+          // Se cierra la sacudida: a partir de aqui la interfaz va quieta.
+          lienzoCtx.restore();
+
+          // Las fichas de cada uno: nombre, taps y barra de aguante.
+          if (arena.defensa) {
+            ficha(140, arena.defensa.clave, arena.hpDefensa, COLOR_DEFENSA, "defiende", arena.racha);
+          }
+          if (arena.ataque) {
+            ficha(ANCHO - 140, arena.ataque.clave, arena.hpAtaque, COLOR_ATAQUE, "retador", 0);
+          }
+
+          // El aviso del cruce (bloqueo, golpe limpio…).
+          if (ahora < arena.avisoHasta && arena.aviso) {
+            lienzoCtx.globalAlpha = Math.min(1, (arena.avisoHasta - ahora) / 300);
+            lienzoCtx.font = "800 40px 'Segoe UI', system-ui, sans-serif";
+            lienzoCtx.textAlign = "center";
+            const ancho = lienzoCtx.measureText(arena.aviso).width;
+            respaldo(ANCHO / 2 - ancho / 2 - 20, 54, ancho + 40, 58);
+            lienzoCtx.fillStyle = arena.aviso.includes("BLOQUE") ? COLOR_ATAQUE : COLOR_DEFENSA;
+            lienzoCtx.fillText(arena.aviso, ANCHO / 2, 96);
+            lienzoCtx.globalAlpha = 1;
+          }
+        }
+
+        function ficha(centroX, clave, hp, color, papel, racha) {
+          const ancho = 400;
+          const x = centroX - ancho / 2;
+          const y = 40;
+
+          // Un solo respaldo para las tres lineas y la barra: ver `respaldo`.
+          respaldo(x - 14, y - 34, ancho + 28, racha >= RACHA_ESPECIAL ? 160 : 128);
+
+          lienzoCtx.textAlign = "center";
+          lienzoCtx.fillStyle = color;
+          lienzoCtx.font = "700 17px 'Segoe UI', system-ui, sans-serif";
+          lienzoCtx.fillText(papel.toUpperCase(), centroX, y - 12);
+
+          lienzoCtx.fillStyle = "#FFFFFF";
+          lienzoCtx.font = "800 30px 'Segoe UI', system-ui, sans-serif";
+          lienzoCtx.fillText(recortar(nombreDeClave(clave), 20), centroX, y + 18);
+
+          lienzoCtx.fillStyle = "#C3CAD4";
+          lienzoCtx.font = "600 22px 'Segoe UI', system-ui, sans-serif";
+          // La tasa va con un decimal fijo: se compara de un vistazo con la del
+          // otro, y `ctx.numero` la redondearia a entero y borraria justo la
+          // diferencia que decide el cruce. Los taps si van formateados.
+          const tasa = tasaDeClave(clave).toFixed(1);
+          lienzoCtx.fillText(rt().numero(tapsDeClave(clave)) + " taps · " + tasa + " t/s", centroX, y + 46);
+
+          // Barra de aguante.
+          const alto = 14;
+          lienzoCtx.fillStyle = "rgba(8,10,14,0.7)";
+          redondear(lienzoCtx, x, y + 60, ancho, alto, alto / 2);
+          lienzoCtx.fill();
+          lienzoCtx.fillStyle = color;
+          const parte = Math.max(0, Math.min(1, hp / HP_MAX));
+          if (parte > 0) {
+            redondear(lienzoCtx, x, y + 60, ancho * parte, alto, alto / 2);
+            lienzoCtx.fill();
+          }
+
+          if (racha >= RACHA_ESPECIAL) {
+            lienzoCtx.fillStyle = COLOR_RACHA;
+            lienzoCtx.font = "800 22px 'Segoe UI', system-ui, sans-serif";
+            lienzoCtx.fillText("RACHA ×" + racha, centroX, y + 100);
+          }
+        }
+
+        const recortar = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+
+        // El reloj del bucle. Arranca en 0 y se pone al dia en el primer
+        // fotograma: `ctx.animar` no entrega el instante de la llamada a `montar`.
+        let anterior = performance.now();
+        // La cabecera se refresca una vez por segundo, no en cada fotograma: es
+        // texto del DOM y reflow a 60 fps por un dato que llega a 1/s.
+        let marcador = 0;
+
+        // ── Datos ────────────────────────────────────────────────────────────
+        let primeraVez = true;
+
+        return {
+          /**
+           * Una vez, antes del primer pintado. Aqui se prepara el lienzo y se
+           * arranca el bucle: `ctx.animar` se encarga de que una excepcion de un
+           * fotograma no deje el overlay congelado y sin sintoma.
+           */
+          montar(raiz, contexto) {
+            lienzo = raiz.querySelector("#arena");
+            lienzoCtx = lienzo.getContext("2d");
+            banner = raiz.querySelector("#banner");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = contexto.titulo;
+            // Este diseno se mueve con el ritmo de taps: en regalos o seguidores
+            // no hay nada que pelear. Mejor decirlo que dejar la nota mintiendo.
+            raiz.querySelector("#nota").textContent = contexto.vista === "tap" ? NOTA : "";
+
+            // El tamano del lienzo esta en el atributo del marcado. Se vuelve a
+            // fijar aqui para que el dia que alguien toque el CSS no se pinte a
+            // otra escala sin que nadie se entere: las medidas del dibujo son
+            // constantes en pixeles.
+            lienzo.width = ANCHO;
+            lienzo.height = ALTO;
+
+            centroA = ANCHO / 2 - 90;
+            centroB = ANCHO / 2 + 90;
+
+            anterior = performance.now();
+            // El bucle va por `ctx.animar`, nunca por `requestAnimationFrame`
+            // directo: una excepcion dentro de un fotograma mata el bucle y el
+            // overlay se queda congelado sin ningun sintoma en OBS. `animar` la
+            // cuenta, la enseña en el aviso y sigue dibujando.
+            contexto.animar(dibujar);
+          },
+
+          /** En cada actualizacion, aproximadamente una vez por segundo. */
+          pintar(entradas, tasas, contexto) {
+            tasasActuales = tasas;
+            datosPorClave = new Map(entradas.map((e, i) => [window.ritmo.clave(e, i), e]));
+
+            // El resumen de la cabecera lo calcula el runtime (`ctx.total`), no
+            // este fichero, y la cifra se formatea con `ctx.numero`. Se refresca
+            // como mucho una vez por segundo aunque llegue mas a menudo.
+            const ahora = performance.now();
+            if (ahora - marcador > 900) {
+              marcador = ahora;
+              total.textContent = contexto.numero(contexto.total(entradas));
+            }
+
+            if (entradas.length === 0) return;
+
+            if (primeraVez) {
+              primeraVez = false;
+              reiniciar(entradas);
+              return;
+            }
+
+            // Si aparece gente nueva en la tabla y la arena esta parada, se rehace.
+            if (arena.fase === "hueco") reiniciar(entradas);
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

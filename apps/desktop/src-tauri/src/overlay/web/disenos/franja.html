@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Franja · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Franja: la pieza de un informativo. Cada persona es una linea con la cara
+         a la izquierda, su nombre sobre la etiqueta de la vista y la cifra al
+         final, con una banda de color bajo la foto. El cuerpo se apaga hacia la
+         derecha para que la franja se lea sobre el video sin taparlo. -->
+    <style>
+      /* Cada linea es una banda independiente: el hueco es lo que las separa, sin
+         necesidad de bordes ni de tarjeta que las envuelva. */
+      .franja {
+        display: grid;
+        gap: 6px;
+      }
+
+      /* La cabecera es la primera banda de la franja, con el mismo velo que las
+         lineas: suelta sobre el video, ni el rotulo ni el total se leerian. */
+      .cab {
+        background: linear-gradient(90deg, var(--velo) 0%, var(--velo) 94%, transparent 100%);
+        border-radius: 3px;
+        padding: 4px 10px;
+      }
+
+      /* Flex y no grid: la banda vive dentro de una columna de ancho fijo y con
+         rejilla el hijo crecia, de modo que la banda se salia de la tarjeta. */
+      .linea {
+        align-items: center;
+        display: flex;
+        gap: 0;
+      }
+
+      /* La banda cuelga de esta columna para medir exactamente lo que mide la
+         cara: al ser una columna flexible, el ancho lo fija el retrato y la banda
+         solo lo copia. Si colgara de la linea, se estiraria a lo ancho. */
+      .columna {
+        align-items: center;
+        display: flex;
+        flex: 0 0 auto;
+        flex-direction: column;
+        margin: 0 12px 0 10px;
+      }
+
+      .linea .banda {
+        background: var(--acento);
+        border-radius: 3px;
+        display: block;
+        height: 4px;
+        margin-top: 4px;
+        width: 100%;
+      }
+
+      .linea.uno .banda {
+        background: var(--lider);
+        height: 5px;
+        margin-top: 5px;
+      }
+
+      /* La cara lleva un borde claro para separarse del video tanto si esta claro
+         como si esta oscuro, y para no parecer pegada a la banda. */
+      .linea .retrato {
+        border-color: rgba(255, 255, 255, 0.9);
+      }
+
+      .cuerpo {
+        align-items: center;
+        background: linear-gradient(90deg, var(--velo) 0%, var(--velo) 94%, transparent 100%);
+        display: grid;
+        flex: 1 1 auto;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1fr) max-content;
+        min-width: 0;
+        padding: 5px 8px 5px 10px;
+      }
+
+      /* El nº1 se lleva la banda entera en color del lider: crece el cuerpo y la
+         cifra. El extremo derecho del degradado es un rojo mas oscuro y apagado,
+         porque el neon a plena saturacion sobre el video cantaba demasiado. */
+      .linea.uno .cuerpo {
+        background: linear-gradient(90deg, var(--lider) 0%, #96193a 94%, transparent 100%);
+        padding: 8px 10px;
+      }
+
+      .nombre {
+        color: #ffffff;
+        /* El nombre va debajo de la etiqueta: sin bloque, los dos caerian en el
+           mismo renglon. */
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* Al final de la banda el velo ya se apago: la sombra es lo que mantiene
+           el nombre legible sobre el video. */
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+        white-space: nowrap;
+      }
+
+      .linea.uno .nombre {
+        font-size: 17px;
+        font-weight: 800;
+      }
+
+      .cifra {
+        color: var(--acento);
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+      }
+
+      .linea.uno .cifra {
+        color: #ffffff;
+        font-size: 24px;
+      }
+
+      .etiqueta {
+        color: rgba(255, 255, 255, 0.75);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      /* El aviso cae fuera de la franja, sobre el video: necesita la misma sombra
+         que los nombres. */
+      .aviso {
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <div class="cab">
+        <h1 id="titulo"></h1>
+        <span class="total" id="total">0</span>
+      </div>
+      <div class="franja" id="filas"></div>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en todos los
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /** Retrato con su inicial de reserva cuando TikTok no manda foto. */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * linea: la misma clave sigue siendo el mismo nodo, que es lo que permite
+         * que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const nuevoLider = entradas[0] ? String(entradas[0].user?.id) : null;
+
+            reordenar(
+              entradas,
+              (entrada, indice) => {
+                const linea = document.createElement("div");
+                linea.className = indice === 0 ? "linea uno" : "linea";
+                linea.dataset.clave = String(entrada.user?.id);
+
+                // La banda vive en una columna propia, debajo de la foto: asi mide
+                // lo mismo que la cara y no se estira a lo ancho.
+                const columna = document.createElement("span");
+                columna.className = "columna";
+                const caja = retrato(entrada, indice === 0 ? 46 : 40);
+                // La caja es un par de pixeles mas ancha que la cara, para que la
+                // banda sobresalga y se lea como un subrayado y no como un borde.
+                caja.style.width = (indice === 0 ? 48 : 42) + "px";
+                const banda = document.createElement("span");
+                banda.className = "banda";
+                columna.append(caja, banda);
+
+                const cuerpo = document.createElement("span");
+                cuerpo.className = "cuerpo";
+                const izquierda = document.createElement("span");
+                const etiqueta = document.createElement("span");
+                etiqueta.className = "etiqueta";
+                // El rotulo sale del titulo de la vista y nunca escrito a mano: el
+                // mismo fichero sirve para tap, regalos y seguidores.
+                etiqueta.textContent = indice === 0 ? "Líder en " + ctx.titulo : ctx.titulo;
+                const nombre = document.createElement("span");
+                nombre.className = "nombre";
+                const completo = ctx.nombre(entrada);
+                nombre.textContent = completo;
+                nombre.title = completo;
+                izquierda.append(etiqueta, nombre);
+                const cifra = document.createElement("span");
+                cifra.className = "cifra";
+                cifra.textContent = ctx.numero(entrada.value);
+                cuerpo.append(izquierda, cifra);
+
+                linea.append(columna, cuerpo);
+                return linea;
+              },
+              () => {
+                // La corona se coloca despues de reordenar, sobre el DOM final: si
+                // se hiciera antes, la linea del nº1 seria otra.
+                const filaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, filaUno);
+                if (filaUno) anim.colocarCorona(filaUno, { esNueva: nuevoLider !== liderPrevio });
+                liderPrevio = nuevoLider;
+              },
+            );
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

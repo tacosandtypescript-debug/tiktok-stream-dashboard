@@ -1,0 +1,8 @@
+{
+  "identifier": "default",
+  "description": "Permisos de la ventana principal. Sin este fichero, la ventana no tiene permiso para escuchar eventos del bus: los comandos (invoke) seguirian funcionando, pero el chat solo se actualizaria al pedir un snapshot.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pelotas · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Pelotas: lienzo de 1080x1920 a pantalla completa. Las fotos del publico
+         rebotan en el cuarto de abajo —la zona que deja libre el video del
+         streamer—, crecen con los taps y se empujan entre ellas. El nº1 nada
+         como un tiburon y aparta a quien se cruza.
+
+         Es el unico diseno que anima a 60 fotogramas por segundo y el unico que
+         se quedo congelado en un directo, asi que aqui el dibujado va doblemente
+         protegido: por `ctx.animar` (que no deja morir el bucle) y por el
+         try/catch de dentro, que ademas revisa los valores antes de dibujarlos. -->
+    <style>
+      /* La previa escala el marco con el lienzo declarado en el catalogo, asi que
+         la caja tiene que medir exactamente 1080x1920: con una caja elastica el
+         canvas se estiraba a lo ancho y la franja de juego dejaba de cuadrar. */
+      #raiz {
+        height: 1920px;
+        padding: 0;
+        position: relative;
+        width: 1080px;
+      }
+
+      #lienzo {
+        display: block;
+        height: 1920px;
+        width: 1080px;
+      }
+
+      /* El aviso va sobre video y en una esquina, asi que necesita su propio
+         respaldo: aqui no hay tarjeta detras, y a 28 px sobre un fondo claro se
+         perdia. Es la leccion repetida de todos los disenos. */
+      .aviso {
+        background: var(--velo);
+        border: 1px solid var(--borde);
+        border-radius: 999px;
+        bottom: 26px;
+        font-size: 28px;
+        padding: 10px 22px;
+        position: absolute;
+        right: 30px;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+        z-index: 2;
+      }
+
+      /* Al pie del lienzo y del lado contrario al aviso, para no pisarlo. El
+         mismo hueco compartido que usan las pistas de las tablas: es texto
+         suelto sobre video y sin respaldo no se lee. */
+      .medida {
+        background: var(--hueco);
+        border-radius: 999px;
+        bottom: 30px;
+        color: #c3cad4;
+        font-size: 22px;
+        left: 30px;
+        padding: 6px 16px;
+        position: absolute;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <canvas id="lienzo" width="1080" height="1920"></canvas>
+      <p class="medida">1080 × 1920</p>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en todos los
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        // --- Lienzo ----------------------------------------------------------
+        //
+        // Cuadrado con el `<canvas>`: 1 pixel de lienzo por pixel de OBS. El
+        // parametro `escala` del Browser Source ya estira el resultado, asi que
+        // multiplicar por `devicePixelRatio` no daria mas detalle y si un backing
+        // store enorme (1080x1920 a 2x son 8,3 Mpx por fotograma).
+
+        const ANCHO = 1080;
+        const ALTO = 1920;
+
+        // --- Zona de juego ---------------------------------------------------
+        //
+        // La franja donde rebotan las pelotas es el cuarto de abajo del lienzo:
+        // arriba esta el video del streamer y ahi no se dibuja **nada**. El ancho
+        // es el del lienzo entero, para que las bolas crucen de lado a lado.
+
+        const ZONA_ALTO = ALTO / 4; // 480 px
+        const ZONA_Y = 1440; // ALTO - ZONA_ALTO
+        const ZONA_ANCHO = ANCHO;
+
+        // --- Tamano de las pelotas -------------------------------------------
+        //
+        // El radio sale de la RAIZ del valor, asi que lo proporcional es el
+        // **area**, que es lo que el ojo compara. El presupuesto es una fraccion
+        // del area de la franja: dar a cada una lo que pidiera sin mirar el
+        // conjunto dejaba el lienzo al 94% y no habia hueco para rebotar.
+
+        const RADIO_MIN = 30;
+        const RADIO_MAX = ZONA_ALTO * 0.26; // 124,8 px
+        const AREA_FRACCION = 0.22;
+        const TOPE = 12;
+
+        // --- Movimiento ------------------------------------------------------
+
+        const VELOCIDAD_MINIMA = 130;
+        const VELOCIDAD_MAXIMA = 900;
+        const EMPUJON_VELOCIDAD = 620;
+        const EMPUJON_MS = 2600; // cuanto dura la efervescencia
+        const RAFAGA_MS = 2500; // ventana en la que se mide el ritmo
+        const TAPS_RAFAGA = 4; // taps en una vuelta que cuentan como rafaga
+
+        // El nº1 nada a velocidad constante y se le suma una atraccion suave
+        // hacia el centro para que no se quede atrapado en una esquina.
+        const VELOCIDAD_TIBURON = 150;
+        const ATRAER_CENTRO = 120;
+        const EMPUJON_TIBURON = 1.9; // cuanto mas fuerte aparta a quien choca
+
+        // Sin tope, una rafaga fuerte soltaba 340 chispas y en el lienzo se veia
+        // un borron rosa, no chispas. Ademas cada chispa es un `arc` por
+        // fotograma: con 12 pelotas, el tope es lo que mantiene el coste acotado.
+        const CHISPAS_MAX = 70;
+
+        // --- Colores ---------------------------------------------------------
+        //
+        // Los mismos valores que los tokens de `comun.css` (--lider, --acento,
+        // --texto, --borde, --hueco, --vuelta). En el canvas no hay `var()`: el
+        // contexto 2D no resuelve variables CSS, asi que los tonos se repiten
+        // aqui a mano y **tienen que seguir cuadrando** con comun.css. El unico
+        // que se aparta es el respaldo de las etiquetas, que se queda en el
+        // #080A0E de la maqueta porque es una caja sobre video, no un token.
+
+        const LIDER = "#ff2e63";
+        const ACENTO = "#25f4ee";
+        const TEXTO = "#e8eaf0";
+        const APAGADO = "#8c93a3";
+        const BORDE = "#232936";
+        const HUECO = "rgba(44, 52, 68, 0.55)";
+        const VUELTA = "#f5c451";
+        const BLANCO = "#ffffff";
+        const TINTA = "#080a0e";
+        const TINTA_LIDER = "#12030a";
+        const CARA_SIN_FOTO = "#2c3444";
+
+        // --- Estado ----------------------------------------------------------
+
+        /** clave -> pelota. La clave es la del runtime, para que `tasas` cuadre. */
+        const pelotas = new Map();
+        /** url -> Image, para no volver a pedir la misma foto en cada vuelta. */
+        const imagenes = new Map();
+        let pincel = null;
+        let reducido = false;
+        /** Formateadores del runtime. Se copian en `montar`; ver el comentario. */
+        let numero = (valor) => String(valor);
+        let nombreDe = (entrada) => entrada?.user?.nickname ?? "?";
+        /** `performance.now()` del ultimo fotograma: lo leen las fisicas. */
+        let ahora = 0;
+        /** clave -> tasa de la vuelta anterior, para notar tambien las bajadas. */
+        let tasaDe = new Map();
+        /** Cajas de etiqueta ya pintadas, para que no se pisen entre ellas. */
+        let etiquetasPintadas = [];
+
+        const seSolapan = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+
+        /**
+         * Foto de reserva cuando TikTok no manda avatar, o cuando la que manda
+         * falla. Los `||` no son de mas: el runtime ya cae a `@usuario` si el
+         * apodo viene vacio, y aqui se hace lo mismo porque un apodo vacio deja
+         * la pelota en blanco.
+         */
+        function inicialDe(entrada) {
+          const nombre = (entrada?.user?.nickname || "").trim();
+          const usuario = (entrada?.user?.unique_id || "").trim();
+          return (nombre || usuario || "?").slice(0, 1).toUpperCase();
+        }
+
+        function cargarImagen(url) {
+          if (imagenes.has(url)) return imagenes.get(url);
+          const img = new Image();
+          // El overlay y el servidor de TikTok no son el mismo origen: sin esto
+          // la foto se descarga igual pero **no se puede pintar** en el canvas.
+          // Si aun asi faltan cabeceras CORS, `pintarPelota` lo detecta al
+          // comprobar `naturalWidth` y cae a la inicial. Nunca se pinta una foto
+          // de otro en el hueco de alguien.
+          img.crossOrigin = "anonymous";
+          img.referrerPolicy = "no-referrer";
+          img.src = url;
+          imagenes.set(url, img);
+          return img;
+        }
+
+        // --- Reparto de radios -----------------------------------------------
+
+        /**
+         * Reparte el area de la franja entre las pelotas segun su aportacion.
+         *
+         * El presupuesto es una fraccion del area de la franja, no la suma de lo
+         * que pida cada una: el radio va con la raiz del valor y lo proporcional
+         * es el area.
+         */
+        function repartirRadios(entradas) {
+          const maximo = entradas.reduce((tope, e) => Math.max(tope, Number(e.value) || 0), 0);
+          if (maximo <= 0) return new Map();
+
+          const raices = entradas.map((e) => Math.sqrt((Number(e.value) || 0) / maximo));
+          const sumaRaices = raices.reduce((suma, r) => suma + r * r, 0) || 1;
+          const areaDisponible = ZONA_ANCHO * ZONA_ALTO * AREA_FRACCION;
+          const k = Math.sqrt(areaDisponible / (Math.PI * sumaRaices));
+
+          const radios = new Map();
+          entradas.forEach((e, i) => {
+            radios.set(
+              window.ritmo.clave(e, i),
+              Math.max(RADIO_MIN, Math.min(RADIO_MAX, k * raices[i])),
+            );
+          });
+          return radios;
+        }
+
+        // --- Entrada y salida de las pelotas ---------------------------------
+
+        /**
+         * Crea o actualiza una pelota, conservando su sitio y su velocidad.
+         *
+         * Una pelota que ya estaba **no se recrea**: si se hiciera, cada
+         * actualizacion volveria a empezar la animacion de entrada y la franja
+         * pareceria un parpadeo.
+         */
+        function sincronizar(entradas) {
+          const visibles = entradas.slice(0, TOPE);
+          const radios = repartirRadios(visibles);
+
+          const vivas = new Set();
+          visibles.forEach((e, i) => {
+            const clave = window.ritmo.clave(e, i);
+            vivas.add(clave);
+
+            const radioObjetivo = radios.get(clave) ?? RADIO_MIN;
+            let p = pelotas.get(clave);
+            if (!p) {
+              const angulo = Math.random() * Math.PI * 2;
+              // La velocidad de arranque va con el tamano: una pelota pequena
+              // arranca despacio, para que no parezca tan importante como el
+              // lider. Es el mismo criterio que `pesoMovimiento`.
+              const velocidad =
+                (VELOCIDAD_MINIMA + Math.random() * 160) *
+                (0.3 + 0.7 * Math.pow(radioObjetivo / RADIO_MAX, 1.5));
+              p = {
+                clave,
+                x: Math.random() * ZONA_ANCHO,
+                y: ZONA_Y + Math.random() * ZONA_ALTO,
+                vx: Math.cos(angulo) * velocidad,
+                vy: Math.sin(angulo) * velocidad,
+                radio: radioObjetivo,
+                radioObjetivo,
+                valor: Number(e.value) || 0,
+                nombre: nombreDe(e),
+                inicial: inicialDe(e),
+                foto: null,
+                puesto: i,
+                // Nace a escala 0 y crece: antes la pelota aparecia de golpe.
+                escala: 0,
+                // Rastro: posiciones recientes, solo mientras dura la rafaga.
+                rastro: [],
+                empujadoHasta: 0,
+                morir: 0,
+                // Ritmo de esta persona. `empujonHasta` es cuando se le acaba la
+                // efervescencia, `pulso` la ultima subida (el aro que se expande)
+                // y `chispas` las particulas vivas de la rafaga.
+                ritmo: { ultimo: Number(e.value) || 0, t: false, empujonHasta: 0, pulso: 0, chispas: [] },
+              };
+              pelotas.set(clave, p);
+            }
+
+            p.radioObjetivo = radioObjetivo;
+            p.nombre = nombreDe(e);
+            p.inicial = inicialDe(e);
+            p.puesto = i;
+            p.morir = 0;
+            // El contador solo sube en TikTok, pero se copia igual: si algun dia
+            // bajara, la etiqueta no puede quedarse con una cifra vieja.
+            p.valor = Number(e.value) || 0;
+            p.foto = e.user?.avatar_url ? cargarImagen(e.user.avatar_url) : null;
+            // Dato nuevo: `pintar` mirara esta marca para decidir si hay rafaga.
+            p.ritmo.nuevo = true;
+          });
+
+          // Quien sale de la tabla **no desaparece de golpe**: se marca para
+          // encogerse y se quita del todo cuando acaba la animacion. Sus chispas
+          // se sueltan ya: si no, seguirian dibujandose en un sitio donde la
+          // pelota ha dejado de moverse.
+          for (const p of pelotas.values()) {
+            if (!vivas.has(p.clave) && p.morir === 0) {
+              p.morir = ahora;
+              p.ritmo.chispas.length = 0;
+            }
+          }
+
+          // El nº1 vuelve a estar al mando de los choques. Se comprueba despues
+          // de recorrer la tabla: el puesto tiene que estar ya actualizado en
+          // todas antes de que nadie choque.
+          for (const p of pelotas.values()) p.tiburon = p.puesto === 0;
+        }
+
+        // --- Ritmo de taps ---------------------------------------------------
+
+        /**
+         * Mira quien viene en racha y le suelta el empujon y las chispas.
+         *
+         * Va aqui, en `pintar`, y no en el bucle de dibujo, porque el dato solo
+         * cambia cuando llega una actualizacion: el bucle llama 60 veces por
+         * segundo a este paso y solo la primera de cada tanda ve `nuevo`.
+         */
+        function observarRitmo(p, valor, tasa) {
+          const r = p.ritmo;
+          // Cuanto subio de verdad el contador desde la ultima vez que miramos.
+          const subida = Math.max(0, valor - (r.ultimo ?? valor));
+          // El runtime suaviza la tasa (taps/segundo) entre vueltas justo para
+          // que una rafaga de 40 taps no de un pico: el suavizado se **suma** a
+          // la subida bruta en vez de sustituirla, porque la subida exacta es la
+          // que decide si hay rafaga y cuanto crece el empujon.
+          const empuje = Math.max(subida, Math.max(0, Number(tasa) || 0));
+          r.ultimo = valor;
+
+          if (subida >= TAPS_RAFAGA && (r.t === false || ahora - r.t < RAFAGA_MS)) {
+            r.t = ahora;
+            r.empujonHasta = ahora + EMPUJON_MS;
+            r.pulso = ahora;
+            const angulo = Math.random() * Math.PI * 2;
+            // Cuanto mas fuerte la rafaga, mas lejos sale.
+            const fuerza = EMPUJON_VELOCIDAD * Math.min(3, 1 + empuje / 20);
+            p.vx += Math.cos(angulo) * fuerza;
+            p.vy += Math.sin(angulo) * fuerza;
+            // El que calla pero no deja de tocar tiene que crecer con cada
+            // marca: sin esto solo contarian las rafagas.
+          } else if (subida >= 1) {
+            r.pulso = ahora;
+          }
+          if (subida >= TAPS_RAFAGA) r.t = ahora;
+
+          if (!reducido && subida >= TAPS_RAFAGA) {
+            soltarChispas(p, Math.min(26, 8 + subida / 3));
+          }
+        }
+
+        /** Chispas de una rafaga, con el tope que evita el borron rosa. */
+        function soltarChispas(p, cuantas) {
+          const sitio = CHISPAS_MAX - p.ritmo.chispas.length;
+          const cuantasDeVerdad = Math.max(0, Math.min(cuantas, sitio));
+          for (let i = 0; i < cuantasDeVerdad; i++) {
+            const angulo = Math.random() * Math.PI * 2;
+            const rapidez = 140 + Math.random() * 460;
+            p.ritmo.chispas.push({
+              x: p.x,
+              y: p.y,
+              vx: Math.cos(angulo) * rapidez,
+              vy: Math.sin(angulo) * rapidez,
+              vida: 1,
+              tam: 7 + Math.random() * 11,
+            });
+          }
+        }
+
+        // --- Fisica ----------------------------------------------------------
+
+        /**
+         * Masa de una pelota para los choques.
+         *
+         * Crece con el radio pero **suavizada** (r^1.3, no r^2): con el area la
+         * diferencia era tan brutal que una pequena salia disparada al rozar la
+         * grande. Y una pelota **en racha** pesa cuatro veces mas: es lo que le da
+         * fuerza para empujar a otras mas grandes que ella.
+         */
+        function masaDe(p) {
+          const base = Math.pow(Math.max(2, p.radio), 1.3);
+          return ahora < p.ritmo.empujonHasta ? base * 4 : base;
+        }
+
+        /** Margen para que la etiqueta no se salga: cuelga por debajo y a los lados. */
+        const margenLados = (p) => Math.max(14, p.radio * 0.28);
+        const margenAbajo = (p) => Math.max(44, p.radio * 0.32);
+
+        function rebotarEnBordes(p) {
+          // Quieto = sin rebote: la pelota se queda pegada al borde en vez de
+          // botar sin parar, que es lo que pide quien quita el movimiento.
+          const restitucion = reducido ? 0 : 0.92;
+          const lados = margenLados(p);
+          const abajo = margenAbajo(p);
+
+          if (p.x - p.radio < lados) {
+            p.x = p.radio + lados;
+            p.vx = Math.abs(p.vx) * restitucion;
+          }
+          if (p.x + p.radio > ZONA_ANCHO - lados) {
+            p.x = ZONA_ANCHO - p.radio - lados;
+            p.vx = -Math.abs(p.vx) * restitucion;
+          }
+          if (p.y - p.radio < ZONA_Y) {
+            p.y = ZONA_Y + p.radio;
+            p.vy = Math.abs(p.vy) * restitucion;
+          }
+          if (p.y + p.radio > ALTO - abajo) {
+            p.y = ALTO - p.radio - abajo;
+            p.vy = -Math.abs(p.vy) * restitucion;
+          }
+        }
+
+        function chocar(a, b) {
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const distancia = Math.hypot(dx, dy);
+          const suma = a.radio + b.radio;
+          // Ni divisiones por cero ni trabajo cuando no se tocan: es el bucle
+          // mas caliente del diseno (12 pelotas x 3 pasadas por fotograma).
+          if (distancia === 0 || distancia >= suma) return;
+
+          const nx = dx / distancia;
+          const ny = dy / distancia;
+          const masaA = masaDe(a);
+          const masaB = masaDe(b);
+          const total = masaA + masaB;
+          const solape = suma - distancia;
+
+          a.x -= nx * solape * (masaB / total);
+          a.y -= ny * solape * (masaB / total);
+          b.x += nx * solape * (masaA / total);
+          b.y += ny * solape * (masaA / total);
+
+          const acercamiento = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+          if (acercamiento > 0) return; // ya se estaban separando
+
+          const RESTITUCION = 0.95;
+          // Si en el choque va el nº1, la otra pelota sale **mucho** mas fuerte:
+          // es el "mordisco" del tiburon, aparte de lo que ya le toca por masa.
+          const conLider = a.tiburon || b.tiburon;
+          const refuerzo = conLider ? EMPUJON_TIBURON : 1;
+          const impulso =
+            (-(1 + RESTITUCION) * acercamiento) / (1 / masaA + 1 / masaB) * refuerzo;
+          a.vx -= (impulso * nx) / masaA;
+          a.vy -= (impulso * ny) / masaA;
+          b.vx += (impulso * nx) / masaB;
+          b.vy += (impulso * ny) / masaB;
+
+          // La victima del nº1 queda "empujada" un momento: sin esto, su crucero
+          // frenaba el empujon en el mismo fotograma y el mordisco no se veia
+          // (medido: 181 px/s, que es poco mas que su propio crucero).
+          if (conLider) {
+            const victima = a.tiburon ? b : a;
+            if (!victima.tiburon) victima.empujadoHasta = ahora + 700;
+          }
+        }
+
+        function sacudir(p, dt) {
+          const r = p.ritmo;
+          if (ahora > r.empujonHasta) return;
+          const intensidad = (r.empujonHasta - ahora) / EMPUJON_MS;
+          // La sacudida va con el tamano: una pequena tiembla poco y una grande
+          // mucho. Sin esto temblaban igual y las pequenas parecian el lider.
+          const peso = 0.28 + 0.72 * (p.radio / RADIO_MAX);
+          p.vx += (Math.random() - 0.5) * 2400 * intensidad * peso * dt;
+          p.vy += (Math.random() - 0.5) * 2400 * intensidad * peso * dt;
+        }
+
+        function avanzarChispas(p, dt) {
+          const chispas = p.ritmo.chispas;
+          if (!chispas.length) return;
+          let vivas = 0;
+          for (let i = 0; i < chispas.length; i++) {
+            const c = chispas[i];
+            c.vida -= dt * 0.9;
+            c.x += c.vx * dt;
+            c.y += c.vy * dt;
+            c.vx *= 0.94;
+            c.vy *= 0.94;
+            if (c.vida > 0) chispas[vivas++] = c;
+          }
+          // Se compacta en el sitio en vez de con `filter`: esto corre en cada
+          // fotograma y una lista nueva por pelota es basura para el recolector.
+          chispas.length = vivas;
+        }
+
+        /**
+         * Cuanto movimiento le toca a una pelota, de 0 a 1, segun su tamano.
+         *
+         * La mas pequena se mueve un 23% y el nº1 el 100%. Es lo que se pidio:
+         * menos movimiento en el overlay, y que el que se mueva sea el que
+         * importa. Con un minimo igual para todas, las pequenas correteaban como
+         * el lider y la franja parecia un hervidero.
+         *
+         * La curva va elevada a 1,5 para que la diferencia se note pronto: doblar
+         * el radio no dobla el movimiento, lo multiplica.
+         */
+        function pesoMovimiento(p) {
+          const relativo = Math.min(1, p.radio / RADIO_MAX);
+          return 0.23 + 0.77 * Math.pow(relativo, 1.5);
+        }
+
+        /**
+         * Devuelve la pelota a **su** velocidad de crucero, que va con su tamano.
+         *
+         * La primera version solo ponia un suelo: un mordisco lanzaba a una
+         * pequena a 300 px/s y ahi se quedaba, porque el techo tambien era alto.
+         * Medido, las pequenas acababan moviendose MAS que el lider (179 px/s
+         * frente a 188) y la franja parecia un hervidero.
+         *
+         * Ahora cada una tiene su crucero (el 23% del minimo la mas pequena, el
+         * 100% el nº1) y **vuelve a el**: un empujon se disipa en medio segundo.
+         * Cuanto mas pequena, antes frena.
+         */
+        function ajustarVelocidad(p, dt) {
+          const peso = pesoMovimiento(p);
+          // Si acaba de morderle el nº1, se le deja correr: el empujon se ve y
+          // despues vuelve solo a su crucero.
+          const empujada = p.empujadoHasta > ahora;
+          const crucero = VELOCIDAD_MINIMA * peso * (empujada ? 4 : 1);
+          const maxima = VELOCIDAD_MAXIMA * Math.pow(peso, 1.8) * (empujada ? 2.2 : 1);
+          const v = Math.hypot(p.vx, p.vy);
+
+          if (v <= 0.01) {
+            // Parada del todo: se le da una direccion nueva. Sin esto, con rebote
+            // 0.92 perdian energia en cada choque y acababan clavadas (medido: 4
+            // px/s de minima, o sea el diseno apagandose solo).
+            const a = Math.random() * Math.PI * 2;
+            p.vx = Math.cos(a) * crucero;
+            p.vy = Math.sin(a) * crucero;
+            return;
+          }
+
+          // Se acerca a su crucero: las pequenas frenan mas deprisa.
+          let objetivo = v + (crucero - v) * Math.min(1, dt * (1.6 + 2.6 * (1 - peso)));
+          if (objetivo > maxima) objetivo = maxima;
+
+          const f = objetivo / v;
+          p.vx *= f;
+          p.vy *= f;
+        }
+
+        /**
+         * Nado del nº1: crucero constante y una atraccion suave hacia el centro.
+         *
+         * Un tiburon no acelera ni se para: va siempre a la misma velocidad y gira
+         * despacio. La atraccion al centro evita que se quede encajado en una
+         * esquina, que es lo que pasaria con un rebote puro. Mientras dura una
+         * rafaga **no se aplica**, para que el empujon se note de verdad.
+         */
+        function nadar(p, dt) {
+          if (!p.tiburon || p.ritmo.empujonHasta > ahora) return;
+          const centroX = ZONA_ANCHO / 2;
+          const centroY = ZONA_Y + ZONA_ALTO / 2;
+          const dx = centroX - p.x;
+          const dy = centroY - p.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          p.vx += (dx / dist) * ATRAER_CENTRO * dt;
+          p.vy += (dy / dist) * ATRAER_CENTRO * dt;
+
+          // Velocidad de crucero: ni acelera ni se para.
+          const v = Math.hypot(p.vx, p.vy) || 1;
+          const f = VELOCIDAD_TIBURON / v;
+          p.vx *= f;
+          p.vy *= f;
+        }
+
+        // --- Paso de simulacion ----------------------------------------------
+
+        function paso(dt) {
+          for (const [clave, p] of pelotas) {
+            // Entrada y salida animadas. La escala corre tambien con el
+            // movimiento reducido: es lo unico que explica que una pelota cambie
+            // de tamano cuando alguien toca.
+            p.escala += ((p.morir > 0 ? 0 : 1) - p.escala) * Math.min(1, dt * 6);
+            if (p.morir > 0 && ahora - p.morir > 420) {
+              pelotas.delete(clave);
+              continue;
+            }
+
+            if (reducido) continue; // sin movimiento: solo tamanos
+
+            sacudir(p, dt);
+            avanzarChispas(p, dt);
+            nadar(p, dt);
+
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            ajustarVelocidad(p, dt);
+            rebotarEnBordes(p);
+
+            // Rastro: solo mientras dura la rafaga, para que no ensucie siempre.
+            // Se apaga recortando la lista vieja en vez de vaciarla, que es lo
+            // que deja la estela degradandose hacia atras.
+            if (ahora < p.ritmo.empujonHasta) {
+              p.rastro.push({ x: p.x, y: p.y });
+              if (p.rastro.length > 9) p.rastro.shift();
+            } else if (p.rastro.length > 0) {
+              p.rastro.shift();
+            }
+
+            p.radio += (p.radioObjetivo - p.radio) * Math.min(1, dt * 3);
+          }
+
+          if (reducido) return;
+
+          // Choques: tres pasadas, porque con una las grandes se solapaban cuando
+          // varias llegaban a la vez.
+          const lista = [...pelotas.values()];
+          for (let pasada = 0; pasada < 3; pasada++) {
+            for (let i = 0; i < lista.length; i++) {
+              for (let j = i + 1; j < lista.length; j++) chocar(lista[i], lista[j]);
+            }
+          }
+          // Y un recorte final: al separar dos pelotas, el empujon puede sacar una
+          // de la franja DESPUES del recorte de bordes, y entonces se quedaba fuera
+          // (medido: una asomaba por arriba). Aqui solo se corrige la posicion,
+          // sin tocar la velocidad, para no alterar el rebote.
+          for (const p of pelotas.values()) {
+            if (p.morir > 0) continue;
+            p.x = Math.min(
+              ZONA_ANCHO - p.radio - margenLados(p),
+              Math.max(p.radio + margenLados(p), p.x),
+            );
+            p.y = Math.min(ALTO - p.radio - margenAbajo(p), Math.max(ZONA_Y + p.radio, p.y));
+          }
+        }
+
+        // --- Pintado ---------------------------------------------------------
+
+        /**
+         * Una pelota: rastro, foto recortada, aro, corona, efectos y etiqueta.
+         *
+         * Todo lo que entra en `ctx.arc` esta acotado. La animacion de entrada
+         * lleva la escala a 0, el radio baja a ~3 px y `r - 4` salia NEGATIVO:
+         * `ctx.arc` lanzaba `IndexSizeError: radius -0.994 is negative` dentro del
+         * bucle, el `requestAnimationFrame` no se volvia a registrar y el overlay
+         * se quedaba congelado del todo, sin ningun sintoma en OBS. Fue un fallo
+         * real, medido, y no puede volver.
+         */
+        function pintarPelota(p) {
+          const r = Math.max(2, p.radio * p.escala);
+          const rAro = Math.max(1, r - 4);
+          const esLider = p.puesto === 0;
+
+          // Rastro de la rafaga: una estela que se apaga hacia atras.
+          if (p.rastro.length > 1) {
+            pincel.lineCap = "round";
+            pincel.strokeStyle = esLider ? LIDER : ACENTO;
+            for (let i = 1; i < p.rastro.length; i++) {
+              const a = p.rastro[i - 1];
+              const b = p.rastro[i];
+              const t = i / p.rastro.length;
+              pincel.beginPath();
+              pincel.moveTo(a.x, a.y);
+              pincel.lineTo(b.x, b.y);
+              pincel.lineWidth = Math.max(1, r * 1.5 * t);
+              pincel.globalAlpha = t * 0.22;
+              pincel.stroke();
+            }
+            pincel.globalAlpha = 1;
+          }
+
+          // Profundidad: las pequenas un poco apagadas, para que la composicion
+          // tenga fondo y el lider resalte.
+          pincel.globalAlpha = esLider ? 1 : 0.62 + 0.38 * (r / RADIO_MAX);
+
+          pincel.save();
+          pincel.beginPath();
+          pincel.arc(p.x, p.y, r, 0, Math.PI * 2);
+          pincel.closePath();
+          pincel.clip();
+          const foto = p.foto;
+          if (foto && foto.complete && foto.naturalWidth > 0) {
+            pincel.drawImage(foto, p.x - r, p.y - r, r * 2, r * 2);
+          } else {
+            // Respaldo: la inicial sobre el color del puesto. Nunca el hueco de
+            // otra persona. A 2 px de radio no se lee nada, asi que la letra solo
+            // se pinta cuando hay sitio para ella.
+            pincel.fillStyle = esLider ? LIDER : CARA_SIN_FOTO;
+            pincel.fillRect(p.x - r, p.y - r, r * 2, r * 2);
+            if (r >= 20) {
+              pincel.fillStyle = esLider ? TINTA_LIDER : TEXTO;
+              pincel.font = `700 ${Math.round(r * 0.7)}px "Segoe UI", system-ui, sans-serif`;
+              pincel.textAlign = "center";
+              pincel.textBaseline = "middle";
+              pincel.fillText(p.inicial, p.x, p.y);
+            }
+          }
+          pincel.restore();
+
+          // El aro.
+          pincel.beginPath();
+          pincel.arc(p.x, p.y, rAro, 0, Math.PI * 2);
+          pincel.lineWidth = esLider ? 14 : 8;
+          pincel.strokeStyle = esLider ? LIDER : ACENTO;
+          pincel.stroke();
+
+          // La corona del nº1, como en los otros disenos.
+          if (esLider && r > 40) {
+            pincel.font = `${Math.round(r * 0.52)}px "Segoe UI Emoji", serif`;
+            pincel.textAlign = "center";
+            pincel.textBaseline = "alphabetic";
+            pincel.fillText("👑", p.x, p.y - r + Math.round(r * 0.1));
+          }
+
+          pincel.globalAlpha = 1;
+          pintarEfectos(p, r);
+
+          // Etiqueta: solo en las pelotas que se leen, y solo si no pisa otra ya
+          // pintada (antes dos cajas juntas se solapaban y no se leia ninguna).
+          // Lleva caja propia porque va sobre video.
+          if (r >= 52) pintarEtiqueta(p, r, esLider);
+        }
+
+        function pintarEtiqueta(p, r, esLider) {
+          const etiqueta = `${p.nombre} · ${numero(p.valor)}`;
+          const tamano = Math.max(22, Math.min(56, r * 0.34));
+          pincel.font = `700 ${tamano}px "Segoe UI", system-ui, sans-serif`;
+          const anchoTexto = pincel.measureText(etiqueta).width;
+          const altoCaja = tamano + 14;
+          const relleno = 14;
+          // El ancho de la caja se acota al lienzo: con un apodo largo la caja
+          // salia por los lados y la mitad del nombre se veia fuera.
+          const medio = Math.min(anchoTexto / 2 + relleno, ZONA_ANCHO / 2 - 8);
+          const centroX = Math.min(Math.max(medio, p.x), ZONA_ANCHO - medio);
+          const x0 = centroX - medio;
+          const cajaY = Math.min(p.y + r - altoCaja * 0.7, ALTO - altoCaja - 6);
+          const caja = { x0, x1: x0 + medio * 2, y0: cajaY, y1: cajaY + altoCaja };
+
+          if (etiquetasPintadas.some((otra) => seSolapan(caja, otra))) return;
+          etiquetasPintadas.push(caja);
+
+          pincel.fillStyle = esLider ? "rgba(255,46,99,0.92)" : "rgba(8,10,14,0.78)";
+          const radioCaja = altoCaja / 2;
+          const x1 = x0 + medio * 2;
+          const y1 = cajaY + altoCaja;
+          pincel.beginPath();
+          pincel.moveTo(x0 + radioCaja, cajaY);
+          pincel.arcTo(x1, cajaY, x1, y1, radioCaja);
+          pincel.arcTo(x1, y1, x0, y1, radioCaja);
+          pincel.arcTo(x0, y1, x0, cajaY, radioCaja);
+          pincel.arcTo(x0, cajaY, x1, cajaY, radioCaja);
+          pincel.closePath();
+          pincel.fill();
+
+          pincel.fillStyle = esLider ? TINTA_LIDER : "#f2f4f8";
+          pincel.textAlign = "center";
+          pincel.textBaseline = "middle";
+          pincel.fillText(etiqueta, centroX, cajaY + altoCaja / 2);
+        }
+
+        function pintarEfectos(p, r) {
+          const rit = p.ritmo;
+          if (reducido) return;
+
+          for (const c of rit.chispas) {
+            // La chispa se descarta al pasar por cero, pero puede dibujarse con
+            // la `vida` ya negativa: `tam * vida` daba un radio NEGATIVO y
+            // `ctx.arc` lanzaba IndexSizeError. El radio se acota y las apagadas
+            // se saltan.
+            if (c.vida <= 0) continue;
+            pincel.globalAlpha = c.vida * 0.9;
+            pincel.fillStyle = p.puesto === 0 ? LIDER : ACENTO;
+            pincel.beginPath();
+            pincel.arc(c.x, c.y, Math.max(0.5, c.tam * c.vida), 0, Math.PI * 2);
+            pincel.fill();
+          }
+          pincel.globalAlpha = 1;
+
+          const desde = ahora - rit.pulso;
+          if (rit.pulso > 0 && desde >= 0 && desde < 620) {
+            const t = desde / 620;
+            pincel.beginPath();
+            pincel.arc(p.x, p.y, r + t * 46, 0, Math.PI * 2);
+            pincel.lineWidth = 10 * (1 - t) + 2;
+            pincel.strokeStyle = p.puesto === 0 ? LIDER : ACENTO;
+            pincel.globalAlpha = (1 - t) * 0.9;
+            pincel.stroke();
+            pincel.globalAlpha = 1;
+          }
+
+          if (ahora < rit.empujonHasta) {
+            const latido = 0.5 + 0.5 * Math.sin(ahora / 85);
+            pincel.beginPath();
+            pincel.arc(p.x, p.y, Math.max(1, r - 2), 0, Math.PI * 2);
+            pincel.lineWidth = 10;
+            pincel.strokeStyle = p.puesto === 0 ? LIDER : ACENTO;
+            pincel.globalAlpha = 0.4 + 0.6 * latido;
+            pincel.stroke();
+
+            // Aro blanco por fuera: es lo que hace que el parpadeo se note sobre
+            // cualquier fondo.
+            pincel.beginPath();
+            pincel.arc(p.x, p.y, r + 7, 0, Math.PI * 2);
+            pincel.lineWidth = 5;
+            pincel.strokeStyle = BLANCO;
+            pincel.globalAlpha = 0.25 + 0.55 * latido;
+            pincel.stroke();
+            pincel.globalAlpha = 1;
+          }
+        }
+
+        function pintar(tiempo) {
+          // `clearRect` y no un relleno: fuera de las bolas el lienzo tiene que
+          // quedar transparente para que el video del streamer se vea.
+          pincel.clearRect(0, 0, ANCHO, ALTO);
+          etiquetasPintadas = [];
+          // Las pequenas primero: la grande queda por encima. La escala entra en
+          // el criterio porque una pelota que acaba de nacer mide cero.
+          const lista = [...pelotas.values()].sort(
+            (a, b) => a.radio * a.escala - b.radio * b.escala,
+          );
+          for (const p of lista) {
+            pincel.globalAlpha = 1;
+            pintarPelota(p);
+          }
+          pincel.globalAlpha = 1;
+        }
+
+        // --- Bucle -----------------------------------------------------------
+
+        let anterior = 0;
+
+        /**
+         * Un fotograma. Se le pasa la marca de tiempo de `ctx.animar`, que es la
+         * misma que la de `performance.now()`: asi el lienzo y las fisicas miden
+         * el tiempo con el mismo reloj.
+         */
+        function fotograma(tiempo) {
+          // El paso se acota: si la pestana estuvo oculta (OBS pausa el Browser
+          // Source), un salto de varios segundos despediria las pelotas.
+          const dt = Math.min(0.032, Math.max(0, (tiempo - anterior) / 1000));
+          anterior = tiempo;
+          ahora = tiempo;
+          paso(dt);
+          pintar(tiempo);
+        }
+
+        return {
+          montar(raiz, contexto) {
+            const lienzo = raiz.querySelector("#lienzo");
+            // Un solo contexto para toda la vida del diseno: pedirlo en cada
+            // fotograma devolveria el mismo objeto, pero ademas asi se falla una
+            // sola vez y en `montar`, donde `comun.js` lo enseña en el aviso.
+            pincel = lienzo.getContext("2d", { alpha: true });
+
+            reducido = !!contexto.reducido;
+            // Se copian los formateadores del runtime en vez de llamarlos en cada
+            // fotograma: son dos indirecciones por pelota y por segundo, pero
+            // sobre todo dejan claro que este diseno no formatea cifras por su
+            // cuenta. Un segundo formato en la misma pantalla se nota.
+            numero = (valor) => contexto.numero(valor);
+            nombreDe = (entrada) => contexto.nombre(entrada);
+
+            // Nada de `requestAnimationFrame` directo: si un fotograma lanza,
+            // `ctx.animar` lo cuenta, lo enseña en el aviso y **sigue dibujando**.
+            // Es exactamente el fallo que congelo este diseno en un directo.
+            contexto.animar(() => {
+              try {
+                fotograma(performance.now());
+              } catch (error) {
+                // Aviso como mucho una vez. `ctx.animar` ya protege el bucle; lo
+                // que evita este try es que el primer fotograma roto deje el
+                // lienzo a medias y encima salga por consola sesenta veces por
+                // segundo, que en la consola de OBS no le sirve a nadie.
+                if (!window.__pelotasAvisado) {
+                  window.__pelotasAvisado = true;
+                  contexto.anunciar("Error al dibujar: " + (error?.message ?? error), false);
+                }
+              }
+            });
+          },
+
+          pintar(entradas, tasas) {
+            // `pintar` corre una vez por segundo, pero el bucle sigue a 60: la
+            // primera marca de cada tanda decide quien esta en racha y la fisica
+            // hace el resto.
+            sincronizar(entradas);
+
+            const tasasNuevas = new Map();
+            for (const [clave, p] of pelotas) {
+              const tasa = Number(tasas.get(clave)) || 0;
+              tasasNuevas.set(clave, tasa);
+              // Las que se estan yendo ya no tocan: su tasa se guarda, pero no se
+              // les da empujon.
+              if (p.morir > 0) continue;
+              // Se mira tambien la bajada: cuando alguien deja de tocar, la tasa
+              // cae y eso es justo lo que apaga la efervescencia.
+              if (!p.ritmo.nuevo && tasa === tasaDe.get(clave)) continue;
+              p.ritmo.nuevo = false;
+              observarRitmo(p, p.valor, tasa);
+            }
+            tasaDe = tasasNuevas;
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

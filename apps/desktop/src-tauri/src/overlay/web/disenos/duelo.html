@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Duelo · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Duelo: el nº1 y su perseguidor se empujan. Los TOTALES solo dicen quien va
+         delante; lo que mueve la cuerda es el RITMO de taps, que es el "ahora
+         mismo". La cuerda lleva un nudo: donde esta el nudo es quien gana el
+         pulso, y el terreno que cada uno ha comido se ve en el dibujo, no en una
+         cifra.
+
+         El momento que justifica el diseno es el relevo: el nº1 cambia de dueno y
+         el que entra se corona. No es instantaneo a proposito —la cuerda cede, se
+         avisa y despues llega la corona—, porque un cambio de puesto que ocurre
+         entre dos fotogramas no lo ve nadie.
+
+         Los AGUANTES (HP) son el mismo pulso medido de otra forma: el desgaste se
+         acumula y se ve vaciarse una barra, en vez de depender solo del instante
+         de la cuerda.
+
+         Los tamaños si son proporcion a los totales (el que dobla en taps se ve
+         mas grande), igual que en la maqueta. -->
+    <style>
+      /* Solo lo propio de este diseno. Los tokens (--velo, --lider, --acento…) y
+         la base transparente viven en comun.css. */
+      .vista.duelo {
+        padding: 0;
+        position: relative;
+        /* El lienzo es cuadrado: 1080x1080, el cuarto de arriba de un directo
+           vertical. Aqui no hay fondo que pintar, todo lo que se ve lo pone el
+           canvas. */
+        width: 1080px;
+      }
+
+      #tablero {
+        display: block;
+        height: 1080px;
+        width: 1080px;
+      }
+
+      /* El rotulo de la vista SI va en HTML: lo rellena `montar` con `ctx.titulo`
+         y no cambia de sitio ni de tamaño con el pulso.
+         `display: block` no sobra: `comun.css` define `.cab` como **fila flex**
+         —es la cabecera de las tablas, con el total a la derecha— y sin
+         deshacerlo aqui el rotulo y el total salian pegados en la misma linea
+         ("TAP TAP10"). Aqui van apilados. */
+      .cab {
+        display: block;
+        left: 34px;
+        position: absolute;
+        top: 26px;
+      }
+
+      .cab h1 {
+        color: var(--texto);
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        margin: 0;
+        /* Sobre video claro un rotulo sin respaldo desaparece: la leccion
+           repetida del proyecto. */
+        text-shadow: 0 3px 12px rgba(0, 0, 0, 0.95);
+        text-transform: uppercase;
+      }
+
+      .cab .total {
+        color: var(--lider);
+        display: block;
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        margin-top: 4px;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+      }
+
+      /* El aviso de conexion lo rellena comun.js y va sobre el video, no dentro
+         del dibujo. */
+      .aviso {
+        color: var(--apagado);
+        font-size: 15px;
+        padding: 0 34px 14px 0;
+        text-align: right;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+      }
+
+      .aviso.conectado {
+        color: var(--exito);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista duelo" id="raiz">
+      <div class="cab">
+        <h1 id="titulo"></h1>
+        <span class="total" id="total">0</span>
+      </div>
+      <canvas id="tablero" width="1080" height="1080"></canvas>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en todos
+         los disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        // ---------------------------------------------------------------------
+        // Colores
+        //
+        // En el canvas no existen las `var()` de CSS, asi que los tokens van
+        // copiados a mano con el MISMO valor que comun.css. Si un token cambia
+        // alli, hay que cambiarlo aqui: es el precio de pintar con canvas.
+        // ---------------------------------------------------------------------
+        const LIDER = "#ff2e63"; // --lider, el nº1: aro, cifra, corona y su lado
+        const ACENTO = "#25f4ee"; // --acento, el retador
+        const TEXTO = "#e8eaf0"; // --texto
+        const APAGADO = "#8c93a3"; // --apagado
+        const VUELTA = "#f5c451"; // --vuelta, el oro de la corona
+        const HUECO = "rgba(44, 52, 68, 0.55)"; // --hueco, la pista vacia
+        const VELO = "rgba(11, 13, 18, 0.88)"; // --velo, respaldo del aviso grande
+        const NEGRO = "rgba(8, 10, 14, 0.72)"; // la pista de la cuerda (maqueta)
+        const BLANCO = "#ffffff";
+
+        // ---------------------------------------------------------------------
+        // Lienzo
+        // ---------------------------------------------------------------------
+        const ANCHO = 1080;
+        const ALTO = 1080;
+        const CX = ANCHO / 2;
+
+        // Los dos contrincantes: la misma geometria a izquierda y derecha, para
+        // que se lean como un espejo y no como dos fichas distintas.
+        const LADO_A = 286; // centro del nº1
+        const LADO_B = ANCHO - LADO_A; // centro del retador
+        const RADIO = 124; // radio del aro
+        const Y_RETRATO = 262; // centro de los aros
+        const Y_NOMBRE = 500;
+        const Y_CIFRA = 598;
+
+        // La cuerda: la pista, el nudo y la marca del centro.
+        const CUERDA_Y = 902;
+        const CUERDA_ALTO = 52;
+        const CUERDA_X0 = 76;
+        const CUERDA_X1 = ANCHO - 76;
+        const CUERDA_ANCHO = CUERDA_X1 - CUERDA_X0;
+
+        const Y_BANNER = 700; // el golpe del DESTRONADO
+        const Y_PULSO = 762; // el aviso corto del pulso
+
+        const FUENTE = "'Segoe UI', system-ui, sans-serif";
+
+        // Topes de particulas: el bucle corre a 60 fotogramas por segundo en un
+        // renderer de OBS y cada Browser Source es un CEF mas. La maqueta ya traia
+        // tope; aqui se mantiene, no se sube.
+        // Dos emisores de particulas —las chispas del nudo y el polvo de los pies—
+        // y un tope que sigue siendo pequeño: el plan prohibe dibujar de mas porque
+        // cada Browser Source de OBS es un renderer.
+        const TOPE_PARTICULAS = 64;
+        const CHISPAS_TANDA = 6;
+
+        // Aguante: dos barras que se vacian empujando.
+        const HP_MAX = 100;
+        // Fuerza de empuje por debajo de la cual no se gana terreno: sin esto, dos
+        // ritmos casi iguales hacian temblar la cuerda sin que pasara nada.
+        const UMBRAL = 0.06;
+        // Escala del empuje cuando la pelea la decide el acumulado (chat parado):
+        // no es lo mismo "ahora mismo" que "en toda la noche", y al ir mas lento
+        // se ve el relevo venir.
+        const ESCALA_QUIETA = 0.55;
+        // A partir de esta suma de ritmos el pulso lo decide el ritmo. Por debajo,
+        // el acumulado: el respaldo que evita que el duelo se quede parado para
+        // siempre con el chat callado.
+        const RITMO_MINIMO = 1;
+
+        // ---------------------------------------------------------------------
+        // Fisica del nudo
+        // ---------------------------------------------------------------------
+        //
+        // El nudo es una **masa atada a una cuerda elastica**, no un valor que
+        // persigue a otro. Antes se movia con `nudo += (objetivo - nudo) * dt * 2.6`:
+        // eso no tiene inercia —al cambiar la ventaja el nudo daba la vuelta en el
+        // mismo fotograma— y ademas **se congelaba** cuando la ventaja era pequena,
+        // porque el `return` de la fuerza se lo saltaba. En un pulso igualado la
+        // cuerda parecia una barra pintada.
+        //
+        //   RIGIDEZ        la cuerda tira hacia el centro cuando se estira
+        //   AMORTIGUACION  le quita energia: sin esto oscilaria para siempre
+        //   EMPUJE         cuanto mueve la diferencia de traccion
+        //
+        // Con estos tres, una ventaja clara lleva el nudo al 92% en ~1,5 s y, al
+        // cambiar de lado, el nudo **sigue de largo** medio segundo antes de dar la
+        // vuelta. Eso es el peso, y es lo que faltaba.
+        const RIGIDEZ = 12;
+        const AMORTIGUACION = 2.4;
+        const EMPUJE = 5;
+
+        // Traccion a la que un lado empuja "la mitad". La fuerza se satura con
+        // `x / (x + media)`: pasar de 20 a 40 taps por segundo no puede doblar la
+        // velocidad del nudo, o un directo movido seria imposible de leer.
+        const TRACCION_MEDIA = 4;
+
+        // El nudo nunca llega a los extremos: la cuerda tiene que verse entera.
+        const NUDO_MIN = 0.07;
+        const NUDO_MAX = 0.93;
+
+        // Cuanto se inclina cada lado hacia el centro y cuanto arrastra la cuerda
+        // al que va perdiendo. Son pixeles: el aro mide 124 de radio.
+        const INCLINACION = 20;
+        const ARRASTRE = 54;
+
+        // Fases del relevo. No se pasa del nº1 viejo al nuevo en un fotograma: la
+        // cuerda cede (CEDE), se avisa del destronamiento (AVISO) y solo despues se
+        // corona al que entra (CORONA).
+        const LUCHA = 0;
+        const CEDE = 1;
+        const AVISO = 2;
+        const CORONA = 3;
+        const DURACION_CEDE = 420;
+        const DURACION_AVISO = 2400;
+        const DURACION_CORONA = 900;
+
+        // ---------------------------------------------------------------------
+        // Estado
+        // ---------------------------------------------------------------------
+        let lienzo = null;
+        let pincel = null;
+        let contexto = null;
+        let unidad = "taps"; // la etiqueta de la cifra, segun la vista
+
+        const duelo = {
+          reducido: false,
+          fase: LUCHA,
+          tiempoFase: Infinity,
+          lider: null, // clave del nº1 que defiende ahora mismo
+          duo: [], // [{ clave, entrada, valor, tasa }] de los dos de la cuerda
+          hp: { a: HP_MAX, b: HP_MAX },
+          // Dibujado (no logico): valores que persiguen al objetivo para que nada
+          // de un salto entre dos actualizaciones.
+          hpVisto: { a: HP_MAX, b: HP_MAX },
+          // --- Fisica de la cuerda ---
+          nudo: 0.5,
+          /// Velocidad del nudo, en unidades de cuerda por segundo. Es lo que le da
+          /// inercia: al cambiar la ventaja de lado, el nudo sigue de largo.
+          velocidad: 0,
+          /// Traccion de cada lado, suavizada. El ritmo llega a saltos de un segundo
+          /// (el overlay agrega a 1/s) y sin suavizar el nudo pegaria tirones.
+          traccion: { a: 0, b: 0 },
+          /// 0..1, para el dibujo: la cuerda esta tensa cuando alguien tira.
+          tension: 0,
+          /// Diferencia de traccion ya saturada, -1..1. Es lo que mueve el nudo.
+          empuje: 0,
+          // Direccion del ultimo empuje: +1 empuja el nº1, -1 el retador.
+          direccion: 1,
+          // Quien defendia cuando el pulso decidio: es el que se corona si el
+          // primer puesto cambio de dueno.
+          heredero: "a",
+          anuncio: "",
+          anuncioHasta: 0,
+          anuncioDesde: 0,
+          quieto: false, // la ultima vuelta la decidio el acumulado
+          corona: 0, // 0..1, entrada de la corona
+          coronaLado: "a",
+          // Ya se ha armado el relevo del nº1 que defiende ahora. Sin esta bandera,
+          // un primer puesto que se intercambia en cada actualizacion volveria a
+          // armar el relevo una y otra vez y no se llegaria a coronar a nadie.
+          destronado: false,
+          avisoDesde: 0,
+          avisoHasta: 0,
+          esperando: true,
+        };
+
+        /** Chispas del nudo. Se recortan por arriba y mueren solas. */
+        let chispas = [];
+
+        // ---------------------------------------------------------------------
+        // Piezas de dibujo
+        // ---------------------------------------------------------------------
+
+        /** Rectangulo redondeado. El canvas no trae uno. */
+        function caja(c, x, y, ancho, alto, radio) {
+          const r = Math.max(0, Math.min(radio, alto / 2, ancho / 2));
+          c.beginPath();
+          c.moveTo(x + r, y);
+          c.arcTo(x + ancho, y, x + ancho, y + alto, r);
+          c.arcTo(x + ancho, y + alto, x, y + alto, r);
+          c.arcTo(x, y + alto, x, y, r);
+          c.arcTo(x, y, x + ancho, y, r);
+          c.closePath();
+        }
+
+        /** Recorta un texto largo: los apodos de TikTok no tienen tope. */
+        function recortar(c, texto, maximo, fuente) {
+          c.font = fuente;
+          if (c.measureText(texto).width <= maximo) return texto;
+          let corte = texto;
+          while (corte.length > 1 && c.measureText(corte + "…").width > maximo) {
+            corte = corte.slice(0, -1);
+          }
+          return corte + "…";
+        }
+
+        /**
+         * Texto con contorno oscuro.
+         *
+         * Es la leccion repetida del proyecto: esto se compone sobre el video del
+         * streamer y hay directos con el fondo casi blanco. El contorno se pinta
+         * ANTES con `strokeText`, y a 1px, para que no se coma la letra.
+         */
+        function texto(c, cadena, x, y, { fuente, color, align = "center" }) {
+          c.font = fuente;
+          c.textAlign = align;
+          c.textBaseline = "alphabetic";
+          c.lineWidth = 1.6;
+          c.lineJoin = "round";
+          c.strokeStyle = "rgba(0, 0, 0, 0.92)";
+          c.strokeText(cadena, x, y);
+          c.fillStyle = color;
+          c.fillText(cadena, x, y);
+        }
+
+        const numero = (valor) => contexto.numero(valor);
+        const nombreDe = (entrada) => contexto.nombre(entrada);
+
+        // ---------------------------------------------------------------------
+        // Fotos
+        //
+        // Se cargan una sola vez por URL y se olvidan cuando nadie las usa: en un
+        // directo de horas, guardar cada foto que pasa por la tabla es memoria que
+        // no se recupera. En la maqueta venian del WebSocket; ahora vienen del
+        // contrato.
+        // ---------------------------------------------------------------------
+        const fotos = new Map();
+
+        function fotoDe(entrada) {
+          const url = entrada?.user?.avatar_url;
+          if (!url) return null;
+          let foto = fotos.get(url);
+          if (!foto) {
+            foto = new Image();
+            foto.referrerPolicy = "no-referrer";
+            // Una foto que no carga se olvida: si no, se queda en el mapa para
+            // siempre y la reserva de la inicial no llega a verse limpia. En un
+            // directo de horas eso es memoria que no se recupera.
+            foto.addEventListener("error", () => fotos.delete(url), { once: true });
+            // Sin `crossOrigin`: en la vista previa son SVG en linea del propio
+            // runtime y en directo vienen del mismo origen.
+            foto.src = url;
+            fotos.set(url, foto);
+          }
+          return foto;
+        }
+
+        /** Tira las fotos que ya no estan en la mesa. */
+        function olvidarFotos(entradasNuevas) {
+          if (fotos.size <= 24) return;
+          const vivas = new Set(
+            entradasNuevas.map((e) => e.user?.avatar_url).filter((url) => typeof url === "string"),
+          );
+          for (const url of [...fotos.keys()]) {
+            if (!vivas.has(url)) fotos.delete(url);
+          }
+        }
+
+        /**
+         * Retrato: foto si la hay y esta cargada; si no, disco con la inicial.
+         *
+         * La reserva importa porque `avatar_url` puede faltar —el contrato lo dice
+         * y TikTok lo hace—. Y si se pide una foto, el aro y la inicial se pintan
+         * igual debajo: `drawImage` de una imagen a medio cargar no pinta nada y
+         * dejaria un hueco transparente.
+         */
+        function retrato(c, entrada, cx, cy, radio, color) {
+          const foto = fotoDe(entrada);
+          const lista = foto && foto.complete && foto.naturalWidth > 0;
+
+          c.save();
+          c.beginPath();
+          c.arc(cx, cy, radio, 0, Math.PI * 2);
+          c.closePath();
+
+          // El disco: siempre, es lo que tapa el video detras de la cabeza.
+          c.fillStyle = "#1a1f2b";
+          c.fill();
+
+          if (lista) {
+            c.clip();
+            c.drawImage(foto, cx - radio, cy - radio, radio * 2, radio * 2);
+          } else {
+            const nombre = entrada?.user?.nickname || entrada?.user?.unique_id || "?";
+            const inicial = String(nombre).slice(0, 1).toUpperCase();
+            texto(c, inicial, cx, cy + Math.round(radio * 0.36), {
+              fuente: `800 ${Math.round(radio * 0.78)}px ${FUENTE}`,
+              color: APAGADO,
+            });
+          }
+          c.restore();
+
+          // El aro, por encima del recorte.
+          c.beginPath();
+          c.arc(cx, cy, radio, 0, Math.PI * 2);
+          c.lineWidth = 6;
+          c.strokeStyle = color;
+          c.stroke();
+
+          // El halo del que defiende: un aro mas, tenue. La maqueta usaba una
+          // sombra de 30px; aqui es un trazo, que no obliga a repintar desenfoques
+          // a 60 fotogramas por segundo.
+          if (color === LIDER) {
+            c.beginPath();
+            c.arc(cx, cy, radio + 9, 0, Math.PI * 2);
+            c.lineWidth = 3;
+            c.globalAlpha = 0.4;
+            c.strokeStyle = LIDER;
+            c.stroke();
+            c.globalAlpha = 1;
+          }
+        }
+
+        /**
+         * La corona, dibujada como forma y no como el emoji del sistema: a 60
+         * fotogramas por segundo no se cambia de fuente y sale igual en cualquier
+         * maquina. `escala` es la entrada del relevo.
+         */
+        function corona(c, cx, cy, tam, escala) {
+          const t = tam * escala;
+          if (t <= 0.5) return;
+          c.save();
+          c.translate(cx, cy);
+          c.globalAlpha = Math.min(1, escala);
+          c.beginPath();
+          c.moveTo(-t * 0.5, t * 0.3);
+          c.lineTo(-t * 0.5, -t * 0.3);
+          c.lineTo(-t * 0.25, -t * 0.02);
+          c.lineTo(0, -t * 0.46);
+          c.lineTo(t * 0.25, -t * 0.02);
+          c.lineTo(t * 0.5, -t * 0.3);
+          c.lineTo(t * 0.5, t * 0.3);
+          c.closePath();
+          c.fillStyle = VUELTA;
+          c.fill();
+          c.lineWidth = 3;
+          c.strokeStyle = "rgba(0, 0, 0, 0.8)";
+          c.stroke();
+          // Las tres puntas, para que se lea como corona y no como un poligono.
+          for (const dx of [-0.5, 0, 0.5]) {
+            c.beginPath();
+            c.arc(dx * t, dx === 0 ? -t * 0.46 : -t * 0.3, t * 0.075, 0, Math.PI * 2);
+            c.fillStyle = dx === 0 ? BLANCO : VUELTA;
+            c.fill();
+          }
+          c.restore();
+          c.globalAlpha = 1;
+        }
+
+        // ---------------------------------------------------------------------
+        // Datos
+        // ---------------------------------------------------------------------
+
+        const datoDe = (clave) =>
+          clave ? duelo.duo.find((d) => d.clave === clave) ?? null : null;
+
+        // ---------------------------------------------------------------------
+        // El pulso
+        // ---------------------------------------------------------------------
+
+        /** Reparte chispas en el nudo. Tope duro por arriba. */
+        function soltarChispas(x, y, cuantas, color) {
+          for (let i = 0; i < cuantas; i++) {
+            if (chispas.length >= TOPE_PARTICULAS) return;
+            const angulo = Math.random() * Math.PI * 2;
+            const rapidez = 90 + Math.random() * 320;
+            chispas.push({
+              x,
+              y: y + (Math.random() - 0.5) * CUERDA_ALTO * 0.8,
+              vx: Math.cos(angulo) * rapidez,
+              vy: Math.sin(angulo) * rapidez * 0.6 - 90,
+              vida: 1,
+              tam: 4 + Math.random() * 7,
+              color,
+            });
+          }
+        }
+
+        function avanzarChispas(dt) {
+          if (chispas.length === 0) return;
+          chispas = chispas.filter((ch) => {
+            ch.vida -= dt * 1.6;
+            ch.x += ch.vx * dt;
+            ch.y += ch.vy * dt;
+            ch.vy += 320 * dt;
+            ch.vx *= 0.93;
+            return ch.vida > 0;
+          });
+        }
+
+        /** Traccion de un lado, saturada a 0..1. */
+        const fuerzaDe = (lado) => {
+          const t = duelo.traccion[lado];
+          return t > 0 ? t / (t + TRACCION_MEDIA) : 0;
+        };
+
+        /**
+         * Un fotograma de pulso.
+         *
+         * Aqui no se decide nada del relevo: eso es de `pintar`, que es quien
+         * recibe los datos. Esto solo mueve la cuerda, vacia las barras y suelta
+         * chispas.
+         */
+        function avanzarPulso(dt, ahora) {
+          const a = datoDe(duelo.duo[0]?.clave);
+          const b = datoDe(duelo.duo[1]?.clave);
+          if (!a) return;
+
+          const tasaA = a.tasa || 0;
+          const tasaB = b?.tasa || 0;
+          const suma = tasaA + tasaB;
+          duelo.quieto = suma < RITMO_MINIMO;
+
+          // Respaldo por totales: sin ritmo manda el acumulado, que es justo quien
+          // lleva mas y por tanto quien debe defender la corona.
+          const objetivoA = duelo.quieto ? a.valor || 0 : tasaA;
+          const objetivoB = duelo.quieto ? b?.valor || 0 : tasaB;
+
+          // La traccion se suaviza hacia lo que llega: el overlay agrega a 1/s, asi
+          // que el ritmo viene a saltos y sin suavizar el nudo pegaria un tiron por
+          // actualizacion en vez de moverse.
+          const suavizado = Math.min(1, dt * 5);
+          duelo.traccion.a += (objetivoA - duelo.traccion.a) * suavizado;
+          duelo.traccion.b += (objetivoB - duelo.traccion.b) * suavizado;
+
+          const fuerzaA = fuerzaDe("a");
+          const fuerzaB = fuerzaDe("b");
+          const empuje = fuerzaA - fuerzaB;
+          duelo.empuje = empuje;
+          duelo.direccion = empuje >= 0 ? 1 : -1;
+
+          // --- La cuerda ---
+          //
+          // Una masa con muelle y rozamiento. El termino del estirado tira hacia el
+          // centro: es la goma de la cuerda, y es lo que hace que el nudo **oscile**
+          // al cambiar la fuerza en vez de deslizarse hacia el nuevo sitio.
+          const estirado = duelo.nudo - 0.5;
+          const aceleracion =
+            empuje * EMPUJE - AMORTIGUACION * duelo.velocidad - RIGIDEZ * estirado;
+          duelo.velocidad += aceleracion * dt;
+          duelo.nudo += duelo.velocidad * dt;
+
+          // En el tope se para en seco. Sin esto la velocidad se seguiria acumulando
+          // contra el limite y el nudo saldria disparado al aflojar.
+          if (duelo.nudo < NUDO_MIN) {
+            duelo.nudo = NUDO_MIN;
+            duelo.velocidad = Math.max(0, duelo.velocidad);
+          } else if (duelo.nudo > NUDO_MAX) {
+            duelo.nudo = NUDO_MAX;
+            duelo.velocidad = Math.min(0, duelo.velocidad);
+          }
+
+          // La tension es para el dibujo, y se mide con el **ritmo**, no con el
+          // acumulado: un chat callado no esta tirando de la cuerda aunque alguien
+          // lleve diez mil taps de ventaja. Es lo que hace que la cuerda se vea
+          // floja —y cuelgue— cuando no pasa nada, en vez de salir tiesa siempre.
+          const tensionRitmo = Math.max(
+            tasaA / (tasaA + TRACCION_MEDIA),
+            tasaB / (tasaB + TRACCION_MEDIA),
+          );
+          duelo.tension += (tensionRitmo - duelo.tension) * Math.min(1, dt * 3);
+
+          // El daño se sigue midiendo con la ventaja **relativa** de antes: el
+          // aguante ya estaba afinado y no es lo que se ha venido a cambiar.
+          const total = duelo.traccion.a + duelo.traccion.b;
+          const ventaja =
+            total > 0
+              ? (duelo.traccion.a - duelo.traccion.b) / Math.max(duelo.traccion.a, duelo.traccion.b)
+              : 0;
+          const fuerza = Math.abs(ventaja) * (duelo.quieto ? ESCALA_QUIETA : 1);
+
+          if (!duelo.reducido) {
+            // Chispas: el nudo suelta lo que le pegan. La probabilidad va por
+            // SEGUNDO —`dt * n`— y no por fotograma: un `if` a secas escupia 60
+            // tandas por segundo en vez de unas pocas.
+            if (Math.random() < dt * (3 + 9 * duelo.tension)) {
+              const x = CUERDA_X0 + duelo.nudo * CUERDA_ANCHO;
+              soltarChispas(
+                x,
+                CUERDA_Y + CUERDA_ALTO / 2,
+                CHISPAS_TANDA,
+                duelo.direccion > 0 ? LIDER : ACENTO,
+              );
+            }
+
+            // Polvo en los pies del que va perdiendo, y solo cuando la cuerda
+            // arrastra de verdad: se mide por lo rapido que se mueve el nudo, que es
+            // lo que se ve. Reutiliza las chispas con otro color y menos cantidad;
+            // un sistema de particulas aparte seria mas codigo para lo mismo.
+            const arrastre = Math.abs(duelo.velocidad);
+            if (arrastre > 0.12 && Math.random() < dt * 7 * Math.min(1, arrastre * 3)) {
+              const perdiendo = duelo.direccion > 0 ? LADO_B : LADO_A;
+              soltarChispas(perdiendo, Y_RETRATO + 140, 3, "rgba(178, 185, 198, 0.55)");
+            }
+          }
+
+          if (fuerza <= UMBRAL || duelo.fase !== LUCHA) return;
+
+          const dano = (5 + 14 * fuerza) * dt;
+          if (duelo.direccion > 0) duelo.hp.b = Math.max(0, duelo.hp.b - dano);
+          else duelo.hp.a = Math.max(0, duelo.hp.a - dano);
+        }
+
+        // ---------------------------------------------------------------------
+        // Pintado
+        // ---------------------------------------------------------------------
+
+        function pintarCabecera(c) {
+          // La nota de la derecha es lo unico que dice QUE se esta midiendo. Sin
+          // ella, la cuerda es un adorno.
+          texto(c, "quien empuja ahora · el nº1 contra su perseguidor", ANCHO - 34, 62, {
+            fuente: `600 19px ${FUENTE}`,
+            color: APAGADO,
+            align: "right",
+          });
+        }
+
+        /** Rotulo de un lado: nombre, cifra y su unidad. */
+        function pintarRotulo(c, entrada, cx, esLider) {
+          const color = esLider ? LIDER : ACENTO;
+          const valor = numero(entrada.value);
+          const nombre = recortar(c, nombreDe(entrada), 420, `700 36px ${FUENTE}`);
+
+          texto(c, nombre, cx, Y_NOMBRE, { fuente: `700 36px ${FUENTE}`, color: BLANCO });
+          texto(c, valor, cx, Y_CIFRA, { fuente: `800 104px ${FUENTE}`, color });
+
+          // La unidad es la vista: el mismo diseno sirve para taps, regalos o
+          // seguidores, asi que no se escribe a mano.
+          c.font = `800 104px ${FUENTE}`;
+          const anchoValor = c.measureText(valor).width;
+          texto(c, unidad, cx + anchoValor / 2 + 14, Y_CIFRA, {
+            fuente: `700 20px ${FUENTE}`,
+            color: APAGADO,
+            align: "left",
+          });
+        }
+
+        /**
+         * La cuerda: el terreno comido, la banda y el nudo.
+         *
+         * La banda va **curva**: cuelga cuando esta floja y se estira cuando los dos
+         * tiran. Antes era un rectangulo y la tension habia que leerla en un
+         * triangulo de adorno; ahora se ve en la forma.
+         */
+        function pintarCuerda(c, ahora) {
+          // En el relevo la cuerda baja de intensidad: es lo que se ve ceder.
+          const alfa = duelo.fase === CEDE || duelo.fase === AVISO ? 0.55 : 1;
+          const x0 = CUERDA_X0;
+          const y0 = CUERDA_Y;
+          const ancho = CUERDA_ANCHO;
+
+          // Cuanto cuelga y cuanto se afina: una cuerda estirada es una cuerda recta
+          // y mas fina, y eso se lee sin pensar.
+          const caida = (1 - duelo.tension) * 14;
+          const grosor = CUERDA_ALTO * (1 - duelo.tension * 0.36);
+
+          // El nudo tiembla cuando los dos tiran fuerte y estan igualados: es lo que
+          // se ve en un pulso igualado de verdad. Sin esto, la cuerda parece una
+          // barra pintada por bien que se mueva el nudo.
+          const igualdad =
+            Math.min(1, duelo.tension * 2) * Math.max(0, 1 - Math.abs(duelo.nudo - 0.5) * 3.4);
+          const temblor = duelo.reducido ? 0 : Math.sin(ahora / 26) * 5 * igualdad;
+          const nudoX = x0 + duelo.nudo * ancho + temblor;
+
+          /** Altura de la curva en una x. La usa todo lo que va encima de la banda. */
+          const curva = (x) => {
+            const t = (x - x0) / ancho;
+            return y0 + 4 * caida * t * (1 - t);
+          };
+
+          /** El contorno de la banda, que es lo que se recorta y lo que se perfila. */
+          const banda = () => {
+            c.beginPath();
+            c.moveTo(x0, y0);
+            c.quadraticCurveTo(x0 + ancho / 2, y0 + caida * 2, x0 + ancho, y0);
+            c.lineTo(x0 + ancho, y0 + grosor);
+            c.quadraticCurveTo(x0 + ancho / 2, y0 + grosor + caida * 2, x0, y0 + grosor);
+            c.closePath();
+          };
+
+          c.globalAlpha = alfa;
+          c.save();
+
+          // Se recorta a la banda: asi el terreno y las vueltas siguen la curva sin
+          // tener que calcularlas una a una.
+          banda();
+          c.clip();
+
+          c.fillStyle = NEGRO;
+          c.fillRect(x0 - 4, y0 - 24, ancho + 8, grosor + 48);
+
+          // El terreno: cada lado come hacia el centro. Son rectangulos porque el
+          // recorte ya les da la curva.
+          c.globalAlpha = alfa * 0.72;
+          c.fillStyle = LIDER;
+          c.fillRect(x0, y0 - 24, Math.max(0, nudoX - x0), grosor + 48);
+          c.fillStyle = ACENTO;
+          c.fillRect(nudoX, y0 - 24, Math.max(0, x0 + ancho - nudoX), grosor + 48);
+          c.globalAlpha = alfa;
+
+          // Las vueltas de la cuerda: rayas que siguen la curva. Es lo que la hace
+          // parecer una cuerda y no una barra de color.
+          c.strokeStyle = "rgba(255, 255, 255, 0.10)";
+          c.lineWidth = 3;
+          c.beginPath();
+          for (let x = x0 + 9; x < x0 + ancho; x += 18) {
+            const y = curva(x);
+            c.moveTo(x, y + 2);
+            c.lineTo(x - 7, y + grosor - 2);
+          }
+          c.stroke();
+
+          c.restore();
+
+          // El perfil: es lo que separa la cuerda del video.
+          banda();
+          c.lineWidth = 3;
+          c.strokeStyle = NEGRO;
+          c.stroke();
+
+          // La marca del centro: sin ella no se sabe quien va ganando.
+          const xCentro = x0 + ancho / 2;
+          const yCentro = curva(xCentro) + grosor / 2;
+          c.beginPath();
+          c.moveTo(xCentro, yCentro - grosor / 2 - 7);
+          c.lineTo(xCentro, yCentro + grosor / 2 + 7);
+          c.lineWidth = 2;
+          c.strokeStyle = "rgba(255, 255, 255, 0.22)";
+          c.stroke();
+
+          // El nudo, sobre la curva.
+          const yNudo = curva(nudoX) + grosor / 2;
+          c.beginPath();
+          c.arc(nudoX, yNudo, 14, 0, Math.PI * 2);
+          c.fillStyle = BLANCO;
+          c.fill();
+          c.lineWidth = 3;
+          c.strokeStyle = NEGRO;
+          c.stroke();
+
+          // La vuelta del nudo gira con la velocidad: al arrastrarlo, el nudo no solo
+          // se desplaza, se retuerce.
+          const giro = ahora / 90 + duelo.nudo * 6;
+          c.beginPath();
+          c.arc(nudoX, yNudo, 7, giro, giro + Math.PI * 1.2);
+          c.lineWidth = 2;
+          c.strokeStyle = "rgba(11, 13, 18, 0.55)";
+          c.stroke();
+
+          c.globalAlpha = 1;
+        }
+
+        /** Las dos barras de aguante y quien esta empujando. */
+        function pintarAguante(c) {
+          const ancho = 396;
+          const alto = 22;
+          const y = CUERDA_Y + CUERDA_ALTO + 62;
+
+          for (const [lado, cx, color, esLider] of [
+            ["a", LADO_A, LIDER, true],
+            ["b", LADO_B, ACENTO, false],
+          ]) {
+            const x = cx - ancho / 2;
+            const parte = Math.max(0, Math.min(1, duelo.hpVisto[lado] / HP_MAX));
+
+            // El respaldo oscuro de la pista, y encima el aguante que queda.
+            caja(c, x, y, ancho, alto, alto / 2);
+            c.fillStyle = HUECO;
+            c.fill();
+            if (parte > 0) {
+              caja(c, x, y, ancho * parte, alto, alto / 2);
+              c.fillStyle = color;
+              c.fill();
+            }
+
+            texto(c, esLider ? "defiende" : "retador", cx, y - 14, {
+              fuente: `700 17px ${FUENTE}`,
+              color,
+            });
+            texto(c, numero(Math.round(duelo.hpVisto[lado])) + " de " + HP_MAX, cx, y + alto + 28, {
+              fuente: `600 17px ${FUENTE}`,
+              color: APAGADO,
+            });
+          }
+
+          // Quien empuja: sale del nudo, que es lo que el ojo ya esta mirando.
+          let empuja;
+          let color;
+          if (duelo.fase !== LUCHA) {
+            empuja = "aguante perdido";
+            color = VUELTA;
+          } else if (duelo.quieto) {
+            empuja = "sin ritmo · manda el acumulado";
+            color = APAGADO;
+          } else if (Math.abs(duelo.nudo - 0.5) < 0.02) {
+            empuja = "empate";
+            color = APAGADO;
+          } else {
+            const gana = duelo.nudo > 0.5 ? duelo.duo[0] : duelo.duo[1];
+            empuja = gana ? "empuja " + nombreDe(gana.entrada) : "empate";
+            color = duelo.nudo > 0.5 ? LIDER : ACENTO;
+          }
+          texto(c, empuja, CX, CUERDA_Y - 30, { fuente: `700 24px ${FUENTE}`, color });
+        }
+
+        /** El aviso corto del pulso: sube y se apaga. */
+        function pintarAnuncio(c, ahora) {
+          if (!duelo.anuncio || ahora >= duelo.anuncioHasta) return;
+          const total = Math.max(1, duelo.anuncioHasta - duelo.anuncioDesde);
+          const t = Math.min(1, (ahora - duelo.anuncioDesde) / total);
+          const escala = 0.88 + 0.24 * Math.min(1, t * 4);
+          const alfa = t > 0.78 ? Math.max(0, (1 - t) / 0.22) : 1;
+
+          c.save();
+          c.globalAlpha = alfa;
+          c.translate(CX, Y_PULSO);
+          c.scale(escala, escala);
+          texto(c, duelo.anuncio, 0, 0, { fuente: `800 40px ${FUENTE}`, color: VUELTA });
+          c.restore();
+          c.globalAlpha = 1;
+        }
+
+        /**
+         * El golpe del destronamiento, con su respaldo oscuro.
+         *
+         * Tapa el centro del lienzo un momento y se va: es el momento que
+         * justifica el diseno, asi que se lleva el sitio mas visible sin llegar a
+         * tapar las caras.
+         */
+        function pintarBanner(c, ahora) {
+          if (duelo.fase !== AVISO || !duelo.destronado) return;
+          const total = Math.max(1, duelo.avisoHasta - duelo.avisoDesde);
+          const t = Math.min(1, (ahora - duelo.avisoDesde) / total);
+          const escala =
+            t < 0.12 ? 0.85 + (t / 0.12) * 0.23 : 1.08 - Math.min(1, (t - 0.12) / 0.1) * 0.08;
+          const alfa = t > 0.78 ? Math.max(0, (1 - t) / 0.22) : 1;
+
+          c.save();
+          c.globalAlpha = alfa;
+          c.translate(CX, Y_BANNER);
+          c.scale(escala, escala);
+          c.font = `800 62px ${FUENTE}`;
+          const anchoTexto = c.measureText("¡DESTRONADO!").width;
+          caja(c, -anchoTexto / 2 - 26, -58, anchoTexto + 52, 80, 14);
+          c.fillStyle = VELO;
+          c.fill();
+          c.lineWidth = 2;
+          c.strokeStyle = LIDER;
+          c.stroke();
+          texto(c, "¡DESTRONADO!", 0, 0, { fuente: `800 62px ${FUENTE}`, color: LIDER });
+          c.restore();
+          c.globalAlpha = 1;
+        }
+
+        function pintarChispas(c) {
+          if (chispas.length === 0) return;
+          for (const ch of chispas) {
+            // El radio se acota: con la vida ya negativa saldria un radio negativo
+            // y `ctx.arc` lanza IndexSizeError DENTRO del bucle. Fue un fallo real
+            // del diseno de pelotas.
+            if (ch.vida <= 0) continue;
+            c.globalAlpha = ch.vida * 0.9;
+            c.beginPath();
+            c.arc(ch.x, ch.y, Math.max(0.5, ch.tam * ch.vida), 0, Math.PI * 2);
+            c.fillStyle = ch.color;
+            c.fill();
+          }
+          c.globalAlpha = 1;
+        }
+
+        function pintarEspera(c, ahora) {
+          const latido = 0.5 + 0.5 * Math.sin(ahora / 320);
+          c.globalAlpha = 0.55 + 0.45 * latido;
+          texto(c, "Esperando taps…", CX, CUERDA_Y - 40, {
+            fuente: `700 34px ${FUENTE}`,
+            color: APAGADO,
+          });
+          c.globalAlpha = 1;
+        }
+
+        /** Un fotograma completo. */
+        function pintarTodo(ahora) {
+          const c = pincel;
+          if (!c) return;
+          // Transparente fuera de lo que se dibuja: el overlay se compone sobre el
+          // video del streamer. Nunca se rellena el fondo.
+          c.clearRect(0, 0, ANCHO, ALTO);
+
+          pintarCabecera(c);
+
+          if (duelo.esperando || duelo.duo.length === 0) {
+            pintarCuerda(c, ahora);
+            pintarEspera(c, ahora);
+            return;
+          }
+
+          const a = datoDe(duelo.duo[0]?.clave);
+          const b = datoDe(duelo.duo[1]?.clave);
+          if (!a) return;
+
+          // El que se corona en el relevo lleva la corona en su lado.
+          const ladoLider = duelo.fase === CORONA ? duelo.coronaLado : "a";
+
+          // Donde esta cada aro: su sitio, mas lo que se inclina al tirar, mas lo
+          // que la cuerda los ha arrastrado hacia el lado que va ganando. Es lo que
+          // ata la cuerda a alguien; sin esto el nudo se mueve solo y los dos aros
+          // parecen de adorno. Con la preferencia de menos movimiento se quedan
+          // quietos: lo que informa es el nudo, no el bamboleo.
+          const quietos = duelo.reducido || duelo.fase === AVISO;
+          const tiraA = quietos ? 0 : fuerzaDe("a") * INCLINACION;
+          const tiraB = quietos ? 0 : fuerzaDe("b") * INCLINACION;
+          const arrastre = (duelo.nudo - 0.5) * 2 * ARRASTRE;
+          const xDe = (esA) => (esA ? LADO_A : LADO_B) + arrastre + (esA ? tiraA : -tiraB);
+          const cxLider = xDe(ladoLider === "a");
+          // OJO: `duelo.duo` guarda **envoltorios** (`clave`, `entrada`, `valor`,
+          // `tasa`), y quien pinta el retrato y el rotulo espera la **entrada**
+          // —la que tiene `user`, `value` y el avatar—. Pasar el envoltorio no da
+          // ningun error: `ctx.nombre` cae a su reserva y sale "@?" con un cero y
+          // un hueco en vez de la foto. Por eso aqui se saca `.entrada` y el
+          // tamaño se pide con `.value`, que es el campo de la entrada.
+          const entradaLider = (ladoLider === "a" ? a : b ?? a).entrada;
+          const entradaReto = (ladoLider === "a" ? b : a)?.entrada ?? null;
+
+          // Los aros se igualan cuando el pulso ya no se mueve —aviso y chat
+          // parado—: un tambor que late durante un aviso distrae del aviso.
+          const maximo = Math.max(1, a.valor, b?.valor || 0);
+          // El tamaño va con la RAIZ de la proporcion: con el total a secas, el que
+          // dobla en taps se comia el lienzo entero y el otro desaparecia.
+          const tam = (valor) =>
+            duelo.quieto || duelo.fase === AVISO
+              ? RADIO
+              : Math.round(84 + (RADIO - 84) * Math.sqrt((valor || 0) / maximo));
+
+          // Primero el retador y el nº1 encima: el que defiende es el que importa.
+          if (entradaReto) {
+            const esA = ladoLider !== "a";
+            retrato(
+              c,
+              entradaReto,
+              xDe(esA),
+              Y_RETRATO,
+              tam(entradaReto.value),
+              esA ? LIDER : ACENTO,
+            );
+          }
+          retrato(c, entradaLider, cxLider, Y_RETRATO, tam(entradaLider.value), LIDER);
+
+          // La corona: quieta sobre el que defiende y, en el relevo, entrando con
+          // un rebote corto sobre el que acaba de llegar.
+          if (duelo.fase === CORONA) {
+            const subida = 6 * Math.sin(Math.min(1, duelo.corona) * Math.PI);
+            corona(c, cxLider, Y_RETRATO - RADIO - 46 - subida, 66, 0.6 + 0.4 * duelo.corona);
+          } else {
+            corona(c, cxLider, Y_RETRATO - RADIO - 46, 66, duelo.fase === AVISO ? 0.45 : 1);
+          }
+
+          texto(c, "VS", CX, Y_RETRATO + 18, {
+            fuente: `italic 800 56px ${FUENTE}`,
+            color: APAGADO,
+          });
+
+          pintarRotulo(c, entradaLider, cxLider, true);
+          if (entradaReto) {
+            const esA = ladoLider !== "a";
+            pintarRotulo(c, entradaReto, xDe(esA), false);
+          }
+
+          pintarCuerda(c, ahora);
+          pintarAguante(c);
+          pintarChispas(c);
+          pintarAnuncio(c, ahora);
+          pintarBanner(c, ahora);
+        }
+
+        // ---------------------------------------------------------------------
+        // Fases del relevo
+        // ---------------------------------------------------------------------
+        function cambiarFase(ahora) {
+          if (duelo.fase === CEDE) {
+            // La cuerda ya se ha visto ceder: ahora el aviso.
+            duelo.fase = AVISO;
+            duelo.tiempoFase = ahora + DURACION_AVISO;
+            duelo.avisoDesde = ahora;
+            duelo.avisoHasta = ahora + DURACION_AVISO;
+            return;
+          }
+          if (duelo.fase === AVISO) {
+            // El relevo: el nº1 nuevo pasa a defender. Hasta aqui no se habia
+            // tocado la mesa —la cuerda y las barras ya contaban el cambio—, asi
+            // que esto solo confirma quien se lleva la corona.
+            duelo.fase = CORONA;
+            duelo.tiempoFase = ahora + DURACION_CORONA;
+            duelo.corona = 0;
+            duelo.coronaLado = duelo.heredero;
+            duelo.lider = duelo.duo[duelo.heredero === "a" ? 0 : 1]?.clave ?? duelo.lider;
+            duelo.hp.a = HP_MAX;
+            duelo.hp.b = HP_MAX;
+            duelo.hpVisto.a = HP_MAX;
+            duelo.hpVisto.b = HP_MAX;
+            return;
+          }
+          // CORONA -> se vuelve al pulso.
+          duelo.fase = LUCHA;
+          duelo.tiempoFase = Infinity;
+        }
+
+        // ---------------------------------------------------------------------
+        // Bucle
+        //
+        // `ctx.animar` y no `requestAnimationFrame` a pelo: una excepcion dentro
+        // del fotograma mata el bucle y deja el overlay congelado sin ningun
+        // sintoma —es lo que paso con el diseno de pelotas en un directo—. Aqui
+        // `animar` la cuenta, la enseña en el aviso y sigue dibujando.
+        // ---------------------------------------------------------------------
+        let anterior = 0;
+
+        function fotograma() {
+          // `comun.js` arranca el bucle despues de `montar`, pero si algo faltara
+          // no se pinta nada en vez de llenar el aviso de errores.
+          if (!pincel || !contexto) return;
+          const ahora = performance.now();
+          // El paso se acota: si OBS pausa el Browser Source, un salto de varios
+          // segundos vaciaria las dos barras de aguante de golpe.
+          const dt = Math.min(0.032, Math.max(0, (ahora - anterior) / 1000));
+          anterior = ahora;
+
+          if (ahora >= duelo.tiempoFase) cambiarFase(ahora);
+
+          // Los valores dibujados persiguen al objetivo. Con movimiento reducido se
+          // saltan la persecucion: es la preferencia del sistema del streamer.
+          const suavizar = duelo.reducido ? 1 : Math.min(1, dt * 6);
+          duelo.hpVisto.a += (duelo.hp.a - duelo.hpVisto.a) * suavizar;
+          duelo.hpVisto.b += (duelo.hp.b - duelo.hpVisto.b) * suavizar;
+
+          if (duelo.fase === CORONA) {
+            duelo.corona = Math.min(1, duelo.corona + dt / (DURACION_CORONA / 1000));
+          }
+
+          if (!duelo.reducido) {
+            avanzarPulso(dt, ahora);
+            avanzarChispas(dt);
+          }
+
+          pintarTodo(ahora);
+        }
+
+        function avanzar() {
+          anterior = performance.now();
+          contexto.animar(fotograma);
+        }
+
+        // ---------------------------------------------------------------------
+        // Entrada de datos
+        // ---------------------------------------------------------------------
+
+        /** Deja un aviso en la banda del pulso durante `ms`. */
+        function anunciar(cadena, ms, ahora) {
+          duelo.anuncio = cadena;
+          duelo.anuncioDesde = ahora;
+          duelo.anuncioHasta = ahora + ms;
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contexto = ctx;
+            lienzo = raiz.querySelector("#tablero");
+            if (lienzo) pincel = lienzo.getContext("2d", { alpha: true });
+            duelo.reducido = !!ctx.reducido;
+            duelo.tiempoFase = Infinity;
+            // La unidad sale del rotulo de la vista, no de un texto fijo: el mismo
+            // fichero sirve para las tres vistas.
+            unidad = ctx.vista === "gifts" ? "diamantes" : ctx.vista === "follows" ? "seguidores" : "taps";
+
+            // El rotulo sale de `ctx.titulo`. Nunca se escribe "Duelo" a mano.
+            const titulo = raiz.querySelector("#titulo");
+            if (titulo) titulo.textContent = ctx.titulo;
+
+            avanzar();
+          },
+
+          pintar(entradasNuevas, tasasNuevas, ctx) {
+            contexto = ctx;
+            olvidarFotos(entradasNuevas);
+
+            const ahora = performance.now();
+            // `ctx.total` y no una suma propia: en regalos la cifra son diamantes y
+            // en las otras vistas, personas. Recalcularlo aqui seria contarlo mal.
+            const nodoTotal = document.getElementById("total");
+            if (nodoTotal) nodoTotal.textContent = ctx.numero(ctx.total(entradasNuevas));
+
+            const primera = entradasNuevas[0];
+            const segunda = entradasNuevas[1];
+            duelo.esperando = !primera;
+
+            // La clave, con `ritmo.clave`, que es la MISMA que usa `comun.js` para
+            // el mapa de tasas. Sacarla a mano (el id de usuario) se rompe en cuanto
+            // una entrada no trae id.
+            const claveA = primera ? window.ritmo.clave(primera, 0) : null;
+            const claveB = segunda ? window.ritmo.clave(segunda, 1) : null;
+            const tasaDe = (clave) => (clave && tasasNuevas ? tasasNuevas.get(clave) ?? 0 : 0);
+
+            if (claveA !== duelo.lider) {
+              // Si la vuelta anterior ya armo el relevo y no ha dado tiempo a
+              // completarlo, este cambio de dueno trae su propio aviso: la bandera
+              // vuelve a false y el primero que llegue se corona una sola vez.
+              duelo.destronado = false;
+              if (duelo.lider !== null && !duelo.reducido) {
+                // DESTRONAMIENTO: cambia el dueno del primer puesto. No se pinta de
+                // golpe —la cuerda cede primero—, y se anota quien iba ganando el
+                // pulso para coronarlo al final.
+                duelo.heredero =
+                  (Number(primera?.value) || 0) >= (Number(segunda?.value) || 0) ? "a" : "b";
+                duelo.destronado = true;
+                duelo.fase = CEDE;
+                duelo.tiempoFase = ahora + DURACION_CEDE;
+                duelo.lider = claveA;
+                // Y un **tiron** en la cuerda: el relevo no es un cambio de color, es
+                // que la cuerda se suelta y se va. Sin este impulso la fase CEDE solo
+                // bajaba la intensidad y el nudo se quedaba donde estaba.
+                duelo.velocidad += duelo.direccion * 1.5;
+                anunciar("se le acaba el aguante", DURACION_CEDE + 500, ahora);
+              } else {
+                duelo.hp.a = HP_MAX;
+                duelo.hp.b = HP_MAX;
+                duelo.hpVisto.a = HP_MAX;
+                duelo.hpVisto.b = HP_MAX;
+                duelo.lider = claveA;
+              }
+            }
+
+            duelo.duo = [];
+            if (primera) {
+              duelo.duo.push({
+                clave: claveA,
+                entrada: primera,
+                valor: Number(primera.value) || 0,
+                tasa: tasaDe(claveA),
+              });
+            }
+            if (segunda) {
+              duelo.duo.push({
+                clave: claveB,
+                entrada: segunda,
+                valor: Number(segunda.value) || 0,
+                tasa: tasaDe(claveB),
+              });
+            } else if (primera) {
+              // Solo hay uno: no hay a quien empujar, asi que no empuja nadie.
+              duelo.duo.push({
+                clave: null,
+                entrada: primera,
+                valor: Number(primera.value) || 0,
+                tasa: 0,
+              });
+            }
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

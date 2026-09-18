@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cintas · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Cintas: una fila de fichas —retrato con la cifra montada encima, como una
+         chapa— que se leen de izquierda a derecha. Cabe mas gente que en una tabla
+         y el orden lo fija la posicion; el nombre del primero se dice al pie,
+         porque la cinta no lleva nombre. -->
+    <style>
+      .cintas {
+        align-items: flex-end;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        /* La corona del nº1 se dibuja por encima de su retrato (`top: -15px`), y
+           sin este hueco aterrizaba sobre el rotulo de la cabecera. La maqueta no
+           lo necesitaba porque no tenia cabecera: era una tira de fichas suelta. */
+        padding-top: 16px;
+      }
+
+      .ficha {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      /* La chapa tapa el borde inferior del retrato, de ahi el margen negativo y
+         el z-index: sin ellos la cifra quedaria debajo de la foto. */
+      .valor {
+        background: var(--velo);
+        border-radius: 999px;
+        color: var(--acento);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        margin-top: -12px;
+        padding: 2px 8px;
+        position: relative;
+        z-index: 2;
+        transition:
+          background-color 400ms ease-out,
+          color 400ms ease-out;
+      }
+
+      /* --- La cinta del nº1 -------------------------------------------------- */
+
+      /* En rojo macizo la chapa se lee desde lejos; el texto tiene que ser oscuro
+         porque el blanco sobre este rosa no contrasta. */
+      .ficha.uno .valor {
+        background: var(--lider);
+        color: #12030a;
+        font-size: 16px;
+        padding: 3px 12px;
+      }
+
+      .ficha.uno .retrato {
+        border: 3px solid var(--lider);
+        box-shadow: 0 0 16px rgba(255, 46, 99, 0.5);
+      }
+
+      .pie {
+        color: var(--apagado);
+        font-size: 12px;
+        margin: 10px 0 0;
+        /* Los apodos de TikTok pueden ser largos y sin espacios: partirlos es
+           preferible a que desborden la tarjeta. */
+        overflow-wrap: anywhere;
+      }
+
+      .pie strong {
+        color: var(--texto);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <section class="tarjeta">
+        <div class="cab">
+          <h1 id="titulo"></h1>
+          <span class="total" id="total">0</span>
+        </div>
+        <div class="cintas" id="fichas"></div>
+        <p class="pie" id="pie"></p>
+      </section>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        let contenedor = null;
+        let total = null;
+        let pie = null;
+        let liderPrevio = null;
+
+        /**
+         * Retrato con su inicial de reserva cuando TikTok no manda foto.
+         *
+         * La caja `.retrato-caja` no es decorativa: es donde `anim.colocarCorona`
+         * busca el sitio para la corona. Sin ella el nº1 se quedaria sin corona
+         * sin que fallara nada, que es justo el tipo de averia que no se ve en
+         * consola.
+         */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * cinta: la misma clave sigue siendo el mismo `<div>`, que es lo que
+         * permite que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#fichas");
+            total = raiz.querySelector("#total");
+            pie = raiz.querySelector("#pie");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const nuevoLider = entradas[0] ? String(entradas[0].user?.id) : null;
+
+            reordenar(
+              entradas,
+              (entrada, indice) => {
+                const ficha = document.createElement("div");
+                ficha.className = indice === 0 ? "ficha uno" : "ficha";
+                ficha.dataset.clave = String(entrada.user?.id);
+
+                const valor = document.createElement("span");
+                valor.className = "valor";
+                valor.textContent = ctx.numero(entrada.value);
+
+                ficha.append(retrato(entrada, indice === 0 ? 64 : 50), valor);
+                return ficha;
+              },
+              () => {
+                // La corona se coloca despues de reordenar, sobre el DOM final: si
+                // se hiciera antes, la ficha del nº1 seria otra.
+                const fichaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, fichaUno);
+                if (fichaUno) anim.colocarCorona(fichaUno, { esNueva: nuevoLider !== liderPrevio });
+                liderPrevio = nuevoLider;
+              },
+            );
+
+            /* Quien va primero se dice con el nombre al pie: la cinta no lleva
+               nombre, asi que sin esta linea la lista seria una fila de caras. */
+            pie.textContent = "";
+            if (entradas[0]) {
+              const fuerte = document.createElement("strong");
+              fuerte.textContent = ctx.nombre(entradas[0]);
+              pie.append(fuerte, " va primero");
+            }
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

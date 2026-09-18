@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Alertas · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Alertas: el aviso que sale en pantalla cuando alguien regala, sigue,
+         comparte, se suscribe o suelta una rafaga de likes.
+
+         No es uno de los disenos de ranking y por eso no pasa por el mismo
+         contrato: un diseno de ranking pinta una tabla que cambia, y esto pinta un
+         aviso detras de otro que aparece y desaparece. -->
+    <style>
+      /* Todo el escenario ocupa la fuente entera de OBS y esta vacio: el aviso se
+         coloca en el centro y el resto del cuadro queda transparente para que se
+         vea el video del streamer. */
+      .escenario {
+        align-items: center;
+        display: flex;
+        height: 100vh;
+        justify-content: center;
+        width: 100vw;
+      }
+
+      .aviso-caja {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        max-width: 80vw;
+        /* La entrada y la salida son transiciones cortas que terminan, no un
+           bucle: el plan prohibe animaciones permanentes porque cada Browser
+           Source de OBS es un renderer mas. */
+        opacity: 0;
+        transform: scale(0.86);
+        transition:
+          opacity 220ms ease-out,
+          transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      .aviso-caja.visible {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      /* El medio nunca desborda al streamer: se le pone un tope de alto y ancho y
+         se respeta la proporcion. Un GIF de 800x2000 sin esto taparia el directo
+         entero. */
+      .aviso-medio {
+        display: none;
+        max-height: 62vh;
+        max-width: 70vw;
+        object-fit: contain;
+      }
+
+      .aviso-medio.puesto {
+        display: block;
+      }
+
+      /* El texto lleva respaldo oscuro y sombra: va sobre video de cualquier color,
+         que es la leccion repetida del proyecto. */
+      .aviso-texto {
+        background: var(--velo);
+        border: 1px solid var(--borde);
+        border-radius: 12px;
+        color: var(--texto);
+        font-size: 40px;
+        font-weight: 800;
+        line-height: 1.15;
+        margin: 0;
+        max-width: 70vw;
+        overflow-wrap: anywhere;
+        padding: 14px 26px;
+        text-align: center;
+        text-shadow: 0 3px 12px rgba(0, 0, 0, 0.95);
+      }
+
+      /* Sin texto, la caja es solo el medio y el hueco no debe separar nada. */
+      .aviso-texto:empty {
+        display: none;
+      }
+
+      /* Un aviso sin medio ni texto no se enseña, pero si queda uno vacio por lo
+         que sea, se ve el problema en vez de un cuadro en blanco. */
+      .aviso-texto.error {
+        border-color: var(--lider);
+        color: var(--lider);
+      }
+
+      .aviso {
+        bottom: 8px;
+        position: fixed;
+        right: 12px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .aviso-caja {
+          transform: none;
+          transition: opacity 220ms linear;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="escenario">
+      <div class="aviso-caja" id="caja">
+        <img class="aviso-medio" id="imagen" alt="" />
+        <video class="aviso-medio" id="video" playsinline></video>
+        <p class="aviso-texto" id="texto"></p>
+      </div>
+    </div>
+    <audio id="sonido"></audio>
+    <p class="aviso" id="aviso">Conectando…</p>
+    <script src="alertas.js"></script>
+  </body>
+</html>

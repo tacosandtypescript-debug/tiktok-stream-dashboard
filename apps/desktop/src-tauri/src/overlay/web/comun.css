@@ -1,0 +1,156 @@
+/* Tokens, base y piezas compartidas por TODOS los disenos del overlay.
+ *
+ * No es la hoja de la aplicacion: el overlay va sobre video, con fondo
+ * transparente y sin poder desplazarse.
+ *
+ * Esto es lo unico que comparten los once disenos. Lo que cada uno tiene de
+ * suyo —carriles, anillos, columnas, pelotas— vive en su propio `disenos/*.html`
+ * y no se mezcla aqui: si esto engordara, cambiar un diseno podria romper los
+ * otros diez.
+ *
+ * Tokens:
+ *   velo   #0B0D12 al 88%   fondo de la tarjeta
+ *   lider  #FF2E63          el nº1: su numero, su barra y su corona
+ *   acento #25F4EE          el resto de barras y cifras
+ *   texto  #E8EAF0 / apagado #8C93A3
+ *   exito  #3DDC97          aviso de conexion
+ *
+ * Reglas de rendimiento (docs/plan-review.md §38): sin animaciones permanentes,
+ * sin blur y sin sombras sobre lo que se repinta. Cada Browser Source de OBS es
+ * un renderer CEF mas, y el presupuesto de RAM es un objetivo del proyecto.
+ */
+:root {
+  --velo: rgba(11, 13, 18, 0.88);
+  --lider: #ff2e63;
+  --acento: #25f4ee;
+  --texto: #e8eaf0;
+  --apagado: #8c93a3;
+  --exito: #3ddc97;
+  --vuelta: #f5c451;
+  --borde: #232936;
+  --hueco: rgba(44, 52, 68, 0.55);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Pila de fuentes amplia a proposito: hay apodos de TikTok que usan caracteres
+ * Unicode adornados (letras negritas, cursivas, matematicas) que Segoe UI no
+ * tiene y se pintaban como cuadritos. Con estas familias de reserva se pinta casi
+ * todo; es un caso real, medido sobre un directo. */
+html,
+body {
+  background: transparent;
+  color: var(--texto);
+  font-family: "Segoe UI", system-ui, "Segoe UI Symbol", "Segoe UI Emoji", "Cambria Math",
+    "Noto Sans Symbols 2", "Noto Sans Math", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  /* Un overlay no se desplaza: lo que no quepa se recorta. Sin esto el navegador
+     reserva la barra de scroll y ensucia el video. */
+  overflow: hidden;
+}
+
+/* Lienzo de los disenos de tabla: ancho fijo de Browser Source. */
+.vista {
+  padding: 12px;
+  width: 420px;
+}
+
+/* --- Piezas compartidas por las tablas ----------------------------------- */
+
+.tarjeta {
+  background: var(--velo);
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+}
+
+.cab {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.cab h1 {
+  color: var(--apagado);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.cab .total {
+  color: var(--acento);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+/* El retrato y su caja comparten forma para que las filas no se desalineen
+   cuando unas personas tienen foto y otras no. */
+.retrato {
+  background: #1a1f2b;
+  border: 2px solid #2c3444;
+  border-radius: 50%;
+  display: block;
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+
+.retrato.inicial {
+  align-items: center;
+  color: var(--apagado);
+  display: flex;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.retrato-caja {
+  display: block;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* La corona va sobre el retrato, no dentro: asi no lo tapa y viaja con el nº1
+   cuando cambia de dueno. */
+.corona {
+  font-size: 19px;
+  left: 50%;
+  line-height: 1;
+  position: absolute;
+  top: -15px;
+  transform: translateX(-50%) rotate(-14deg);
+  z-index: 3;
+}
+
+/* --- Aviso de conexion --------------------------------------------------- */
+
+.aviso {
+  color: var(--apagado);
+  font-size: 11px;
+  padding-top: 6px;
+  text-align: right;
+}
+
+.aviso.conectado {
+  color: var(--exito);
+}
+
+/* Quien pide menos movimiento en su sistema no lo ve. No es opcional: es una
+   preferencia del sistema del streamer. Se acorta todo en vez de desactivarlo
+   caso por caso, porque los disenos anaden sus propias animaciones. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Marcador · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Marcador: el nº1 se lleva una ficha propia arriba —foto grande, su nombre
+         y la cifra a 40px— y el resto va en una lista corta debajo. La jerarquia
+         la marca el cuerpo de la cifra, no una barra: a distancia de directo un
+         numero grande se lee antes que una barra proporcional. -->
+    <style>
+      .heroe {
+        align-items: center;
+        background: linear-gradient(120deg, rgba(255, 46, 99, 0.22), rgba(255, 46, 99, 0.02));
+        border: 1px solid rgba(255, 46, 99, 0.35);
+        border-radius: 10px;
+        display: flex;
+        gap: 12px;
+        padding: 12px 14px 14px 12px;
+      }
+
+      /* El aro rojo y el resplandor son lo que separa al nº1 de la lista de abajo.
+         El resplandor es fijo, no se anima: una sombra repintandose cada segundo
+         es justo lo que el presupuesto de OBS no admite. */
+      .heroe .retrato {
+        border: 3px solid var(--lider);
+        box-shadow: 0 0 18px rgba(255, 46, 99, 0.5);
+      }
+
+      .etiqueta {
+        color: var(--lider);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+      }
+
+      .heroe-nombre {
+        color: #ffffff;
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-top: 2px;
+        /* Hay apodos de TikTok largos y sin espacios: partirlos es preferible a
+           que desborden la tarjeta. */
+        overflow-wrap: anywhere;
+      }
+
+      .heroe-cifra {
+        color: var(--lider);
+        font-size: 40px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        line-height: 1.05;
+      }
+
+      .heroe-cifra .unidad {
+        color: var(--apagado);
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 6px;
+      }
+
+      .mini-lista {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+      }
+
+      /* La linea que separa los puestos es el borde de la tarjeta con
+         transparencia: opaco partiria la lista en dos bloques. */
+      .mini-fila {
+        align-items: center;
+        border-top: 1px solid rgba(35, 41, 54, 0.7);
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 18px 26px minmax(0, 1fr) max-content;
+        padding: 4px 0;
+      }
+
+      .mini-fila .pos {
+        color: var(--apagado);
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+      }
+
+      .mini-fila .nombre {
+        color: #c9d0de;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mini-fila .cifra {
+        color: var(--acento);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <section class="tarjeta">
+        <div class="cab">
+          <h1 id="titulo"></h1>
+          <span class="total" id="total">0</span>
+        </div>
+        <div id="heroe"></div>
+        <ol class="mini-lista" id="filas"></ol>
+      </section>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        let heroe = null;
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /**
+         * Retrato con su inicial de reserva cuando TikTok no manda foto.
+         *
+         * La caja `.retrato-caja` no es decorativa: es donde `anim.colocarCorona`
+         * busca el sitio para la corona. Sin ella el nº1 se quedaria sin corona
+         * sin que fallara nada, que es justo el tipo de averia que no se ve en
+         * consola.
+         */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /** Ficha del nº1. Es la unica que se rehace, y solo cuando cambia de dueno. */
+        function fichaHeroe(entrada, ctx) {
+          const caja = document.createElement("div");
+          caja.className = "heroe";
+
+          const texto = document.createElement("div");
+
+          const etiqueta = document.createElement("span");
+          etiqueta.className = "etiqueta";
+          etiqueta.textContent = "LÍDER";
+
+          const nombre = document.createElement("div");
+          nombre.className = "heroe-nombre";
+          nombre.textContent = ctx.nombre(entrada);
+
+          const valor = document.createElement("div");
+          valor.className = "heroe-cifra";
+          valor.textContent = ctx.numero(entrada.value);
+          const unidad = document.createElement("span");
+          unidad.className = "unidad";
+          /* Que mide la cifra depende de la vista —taps, diamantes o seguidores—,
+             asi que la etiqueta sale del rotulo de la vista y no de un texto fijo
+             en el fichero: este mismo diseno sirve para las tres. */
+          unidad.textContent = ctx.titulo.toLowerCase();
+          valor.appendChild(unidad);
+
+          texto.append(etiqueta, nombre, valor);
+          caja.append(retrato(entrada, 76), texto);
+          return caja;
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * fila: la misma clave sigue siendo el mismo `<li>`, que es lo que permite
+         * que la animacion tenga un destino coherente.
+         *
+         * Aqui no hay paso de `colocar`: la corona del nº1 vive en el heroe y estas
+         * filas no llevan corona ni barra que ajustar.
+         */
+        function reordenar(entradas, crear) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+        }
+
+        return {
+          montar(raiz, ctx) {
+            heroe = raiz.querySelector("#heroe");
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const primero = entradas[0];
+            const nuevoLider = primero ? String(primero.user?.id) : null;
+
+            /* El heroe solo se rehace cuando cambia el nº1 —y si quedo vacio, para
+               no dejarlo en blanco para siempre—: repintarlo en cada actualizacion
+               haria parpadear la foto y la cifra grande, que es justo lo que el
+               publico mira. */
+            if (!primero) {
+              // Sin filas no se deja al lider anterior en pantalla: enganaria.
+              heroe.textContent = "";
+              liderPrevio = null;
+            } else if (nuevoLider !== liderPrevio || !heroe.firstChild) {
+              const esNuevoLider = liderPrevio !== null;
+              liderPrevio = nuevoLider;
+              heroe.textContent = "";
+              const caja = fichaHeroe(primero, ctx);
+              heroe.appendChild(caja);
+              // La corona se coloca sobre la caja ya montada: sobre un nodo que
+              // todavia no esta en el DOM, su animacion de entrada no se ve.
+              // `esNueva` deja el gesto para el primer pintado y lo calla en un
+              // relevo de puesto, donde el movimiento ya lo cuenta la lista.
+              anim.colocarCorona(caja, { esNueva: esNuevoLider });
+            } else {
+              // Mismo nº1: se cambia la cifra y nada mas.
+              const valor = heroe.querySelector(".heroe-cifra");
+              if (valor?.firstChild) valor.firstChild.textContent = ctx.numero(primero.value);
+            }
+
+            // El nº1 no sale en esta lista —vive en el heroe—, asi que empieza en 2.
+            reordenar(entradas.slice(1), (entrada, indice) => {
+              const li = document.createElement("li");
+              li.className = "mini-fila";
+              li.dataset.clave = String(entrada.user?.id);
+
+              const pos = document.createElement("span");
+              pos.className = "pos";
+              pos.textContent = String(indice + 2);
+
+              const nombre = document.createElement("span");
+              nombre.className = "nombre";
+              const completo = ctx.nombre(entrada);
+              nombre.textContent = completo;
+              nombre.title = completo;
+
+              const cifra = document.createElement("span");
+              cifra.className = "cifra";
+              cifra.textContent = ctx.numero(entrada.value);
+
+              li.append(pos, retrato(entrada, 26), nombre, cifra);
+              return li;
+            });
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

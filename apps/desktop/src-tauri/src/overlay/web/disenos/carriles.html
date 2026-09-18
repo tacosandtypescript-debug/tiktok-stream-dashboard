@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Carriles · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Carriles: cada persona ocupa una fila con puesto, foto, nombre con su
+         cifra y, debajo, una barra proporcional a su aportacion. La barra es lo
+         que hace visible la ventaja —que el primero dobla al cuarto—, cosa que
+         las cifras solas no cuentan. Es el diseno que traia el proyecto. -->
+    <style>
+      .carriles {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .carril {
+        align-items: center;
+        display: grid;
+        gap: 9px;
+        grid-template-columns: 18px 30px minmax(0, 1fr);
+        padding: 5px 0;
+      }
+
+      .carril .pos {
+        color: var(--apagado);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      .cuerpo {
+        display: block;
+        min-width: 0;
+      }
+
+      .linea {
+        align-items: baseline;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .nombre {
+        color: var(--texto);
+        font-size: 13px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cifra {
+        color: #c9d0de;
+        flex: 0 0 auto;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+      }
+
+      /* La pista es el fondo y la barra la aportacion, proporcional al primero.
+         Escalarlo contra el total dejaria todas las barras cortas cuando hay
+         mucha gente y no diria nada. */
+      .pista {
+        background: var(--hueco);
+        border-radius: 3px;
+        display: block;
+        height: 6px;
+        margin-top: 4px;
+        overflow: hidden;
+      }
+
+      .barra {
+        background: var(--acento);
+        border-radius: 3px;
+        display: block;
+        height: 100%;
+        transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+        width: 0;
+      }
+
+      /* --- El nº1 ---------------------------------------------------------- */
+
+      .carril.uno .pos {
+        color: var(--lider);
+        font-size: 14px;
+      }
+
+      .carril.uno .retrato {
+        border-color: var(--lider);
+      }
+
+      .carril.uno .nombre {
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .carril.uno .cifra {
+        color: var(--lider);
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .carril.uno .barra {
+        background: var(--lider);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <section class="tarjeta">
+        <div class="cab">
+          <h1 id="titulo"></h1>
+          <span class="total" id="total">0</span>
+        </div>
+        <ol class="carriles" id="filas"></ol>
+      </section>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        const porcentaje = (valor, maximo) =>
+          maximo > 0 ? Math.max(4, Math.round((valor / maximo) * 100)) : 100;
+
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /** Retrato con su inicial de reserva cuando TikTok no manda foto. */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * fila: la misma clave sigue siendo el mismo `<li>`, que es lo que permite
+         * que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const maximo = entradas.reduce((tope, e) => Math.max(tope, e.value || 0), 0);
+            const nuevoLider = entradas[0] ? String(entradas[0].user?.id) : null;
+
+            reordenar(
+              entradas,
+              (entrada, indice) => {
+                const li = document.createElement("li");
+                li.className = indice === 0 ? "carril uno" : "carril";
+                li.dataset.clave = String(entrada.user?.id);
+
+                const pos = document.createElement("span");
+                pos.className = "pos";
+                pos.textContent = String(indice + 1);
+
+                const cuerpo = document.createElement("span");
+                cuerpo.className = "cuerpo";
+                const linea = document.createElement("span");
+                linea.className = "linea";
+
+                const nombre = document.createElement("span");
+                nombre.className = "nombre";
+                const completo = ctx.nombre(entrada);
+                nombre.textContent = completo;
+                nombre.title = completo;
+
+                const cifra = document.createElement("span");
+                cifra.className = "cifra";
+                cifra.textContent = ctx.numero(entrada.value);
+
+                linea.append(nombre, cifra);
+
+                const pista = document.createElement("span");
+                pista.className = "pista";
+                const barra = document.createElement("span");
+                barra.className = "barra";
+                barra.dataset.objetivo = String(porcentaje(entrada.value, maximo));
+                pista.appendChild(barra);
+
+                cuerpo.append(linea, pista);
+                li.append(pos, retrato(entrada, 30), cuerpo);
+                return li;
+              },
+              () => {
+                // La corona y las barras se ajustan despues de reordenar, sobre
+                // el DOM final: si se hiciera antes, la fila del nº1 seria otra.
+                const filaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, filaUno);
+                if (filaUno) anim.colocarCorona(filaUno, { esNueva: nuevoLider !== liderPrevio });
+                for (const entrada of entradas) {
+                  const fila = porClave(String(entrada.user?.id));
+                  const barra = fila?.querySelector(".barra");
+                  if (barra) anim.animarBarra(barra, Number(barra.dataset.objetivo));
+                }
+                liderPrevio = nuevoLider;
+              },
+            );
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

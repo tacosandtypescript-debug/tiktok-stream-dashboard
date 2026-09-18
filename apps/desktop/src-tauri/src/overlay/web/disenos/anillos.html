@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Anillos · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Anillos: cada persona es un aro con su cara dentro y su aportacion
+         dibujada como arco alrededor. La lista cabe en cuatro columnas porque el
+         aro se lee de un golpe —quien va lleno y quien casi vacio— sin comparar
+         cifra a cifra, cosa que la tabla de carriles si necesita. -->
+    <style>
+      .lista {
+        display: grid;
+        gap: 10px 6px;
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .anillo {
+        align-items: center;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+        /* Respaldo tenue solo detras de la cifra y el nombre: el aro va sobre
+           video, sin tarjeta propia, y con un fondo claro o con textura el texto
+           se perdia (fallo real visto al probarlo). */
+        background: linear-gradient(180deg, rgba(8, 10, 14, 0) 44%, rgba(8, 10, 14, 0.72) 100%);
+        padding-bottom: 3px;
+      }
+
+      .aro {
+        position: relative;
+      }
+
+      .aro svg {
+        display: block;
+      }
+
+      .aro .pista {
+        stroke: var(--hueco);
+      }
+
+      .aro .progreso {
+        stroke: var(--acento);
+        stroke-linecap: round;
+        transition: stroke-dashoffset 620ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      /* Dentro del aro el borde de 2 px que el retrato lleva en comun.css no
+         pinta nada: se comeria por dentro el trazo del aro, que ya hace de
+         borde, y engordaria la cara. */
+      .aro .retrato {
+        border: 0;
+      }
+
+      /* La sombra es lo unico que separa estas dos lineas del video cuando el
+         fondo es claro. Son 13 px de texto que se repintan una vez por segundo:
+         no hay animacion de sombra detras, solo el respaldo de legibilidad. */
+      .cifra {
+        color: var(--texto);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        line-height: 1.1;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+      }
+
+      /* Mas claro que `--apagado`: a 10 px y sobre video, el tono apagado de la
+         tabla no se lee. Es el mismo motivo por el que la maqueta lo subio. */
+      .nombre {
+        color: #c3cad4;
+        font-size: 10px;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+      }
+
+      /* --- El nº1 ---------------------------------------------------------- */
+
+      .anillo.uno .progreso {
+        stroke: var(--lider);
+      }
+
+      .anillo.uno .cifra {
+        color: var(--lider);
+        font-size: 16px;
+      }
+
+      .anillo.uno .nombre {
+        color: var(--texto);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <section class="tarjeta">
+        <div class="cab">
+          <h1 id="titulo"></h1>
+          <span class="total" id="total">0</span>
+        </div>
+        <div class="lista" id="filas"></div>
+      </section>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        /* Geometria del aro, en pixeles. El perimetro es el largo del trazo: el
+           arco se dibuja recortandolo con `stroke-dashoffset`, que es lo unico
+           que un SVG sabe animar sin recalcular el trazo en cada vuelta. */
+        const RADIO = 24;
+        const GROSOR = 4;
+        const PERIMETRO = 2 * Math.PI * RADIO;
+        const LADO = (RADIO + GROSOR) * 2;
+
+        /** Arco proporcional al primero, con un minimo para que el cero se vea. */
+        const porcentaje = (valor, maximo) =>
+          maximo > 0 ? Math.max(4, Math.round((valor / maximo) * 100)) : 100;
+
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /** Retrato con su inicial de reserva cuando TikTok no manda foto. */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        /**
+         * La cara, colocada en absoluto y anclada a la esquina de su contenedor.
+         *
+         * El `position: absolute` no es decorativo: `left` y `top` solo aplican a
+         * un elemento posicionado, asi que sin el el navegador **ignora las dos**
+         * y la cara se sale del aro (fallo real de esta maqueta: la foto caia 56
+         * px por debajo del anillo). El desplazamiento es el grosor del trazo,
+         * que es justo lo que hay que saltar para caer dentro del hueco.
+         */
+        function retratoAbsoluto(entrada, tam, desplazamiento) {
+          const caja = retrato(entrada, tam);
+          caja.style.position = "absolute";
+          caja.style.left = desplazamiento + "px";
+          caja.style.top = desplazamiento + "px";
+          return caja;
+        }
+
+        /** Aro completo: pista, arco de aportacion y la cara en el centro. */
+        function aro(entrada, maximo) {
+          const caja = document.createElement("div");
+          caja.className = "aro";
+          caja.style.height = LADO + "px";
+          caja.style.width = LADO + "px";
+
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("height", String(LADO));
+          svg.setAttribute("width", String(LADO));
+
+          const circulo = (clase) => {
+            const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            c.setAttribute("class", clase);
+            c.setAttribute("cx", String(LADO / 2));
+            c.setAttribute("cy", String(LADO / 2));
+            c.setAttribute("r", String(RADIO));
+            c.setAttribute("fill", "none");
+            c.setAttribute("stroke-width", String(GROSOR));
+            return c;
+          };
+
+          const pista = circulo("pista");
+          const progreso = circulo("progreso");
+          progreso.setAttribute("stroke-dasharray", String(PERIMETRO));
+          progreso.setAttribute("stroke-dashoffset", String(PERIMETRO));
+          progreso.dataset.objetivo = String(porcentaje(entrada.value, maximo));
+
+          // El giro va **dentro** del SVG y con el centro explicito. Con
+          // `transform: rotate(-90deg)` en CSS el giro cae sobre la esquina de la
+          // caja, el circulo se sale de ella y el arco salia recortado: tambien
+          // fue un fallo real y no puede volver.
+          const giro = "rotate(-90 " + LADO / 2 + " " + LADO / 2 + ")";
+          pista.setAttribute("transform", giro);
+          progreso.setAttribute("transform", giro);
+
+          svg.append(pista, progreso);
+
+          // La cara va despues del SVG para quedar por encima del trazo.
+          caja.append(svg, retratoAbsoluto(entrada, LADO - GROSOR * 2, GROSOR));
+          return caja;
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * fila: la misma clave sigue siendo el mismo `<div>`, que es lo que
+         * permite que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const maximo = entradas.reduce((tope, e) => Math.max(tope, e.value || 0), 0);
+            const nuevoLider = entradas[0] ? String(entradas[0].user?.id) : null;
+
+            reordenar(
+              entradas,
+              (entrada, indice) => {
+                const div = document.createElement("div");
+                div.className = indice === 0 ? "anillo uno" : "anillo";
+                div.dataset.clave = String(entrada.user?.id);
+
+                const cifra = document.createElement("span");
+                cifra.className = "cifra";
+                cifra.textContent = ctx.numero(entrada.value);
+
+                const nombre = document.createElement("span");
+                nombre.className = "nombre";
+                const completo = ctx.nombre(entrada);
+                nombre.textContent = completo;
+                nombre.title = completo;
+
+                div.append(aro(entrada, maximo), cifra, nombre);
+                return div;
+              },
+              () => {
+                // La corona y los arcos se ajustan despues de reordenar, sobre el
+                // DOM final: si se hiciera antes, la fila del nº1 seria otra.
+                const filaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, filaUno);
+                if (filaUno) anim.colocarCorona(filaUno, { esNueva: nuevoLider !== liderPrevio });
+                for (const entrada of entradas) {
+                  const fila = porClave(String(entrada.user?.id));
+                  const arco = fila?.querySelector(".progreso");
+                  if (!arco) continue;
+                  const objetivo = Number(arco.dataset.objetivo);
+                  const destino = String(PERIMETRO * (1 - objetivo / 100));
+                  if (anim.prefiereQuieto()) {
+                    arco.setAttribute("stroke-dashoffset", destino);
+                    continue;
+                  }
+                  // El aro nace entero (trazo completo) y se recorta en el
+                  // fotograma siguiente: es la misma idea que `anim.animarBarra`
+                  // —el navegador solo ve un cambio si el valor cambia ya dentro
+                  // del documento— y lo que hace que la transicion de CSS corra.
+                  requestAnimationFrame(() => arco.setAttribute("stroke-dashoffset", destino));
+                }
+                liderPrevio = nuevoLider;
+              },
+            );
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

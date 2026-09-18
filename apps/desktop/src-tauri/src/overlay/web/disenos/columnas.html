@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Columnas · Overlay</title>
+    <link rel="stylesheet" href="comun.css" />
+    <!-- Columnas: la misma tabla que carriles, pero la aportacion se mide en
+         alto. Cada persona es una columna que crece desde la base, con su cifra
+         encima y su cara y su nombre debajo. La ventaja del primero se ve como
+         una silueta —de un vistazo, sin leer— y por eso caben menos personas que
+         filas en una lista. -->
+    <style>
+      /* Ocho columnas y no diez: con diez, cada una baja de 40 px y ni el nombre
+         ni la cifra caben. El alto fijo evita que la tarjeta cambie de tamano
+         cuando alguien entra o sale: en OBS un marcador que crece mueve lo que
+         tenga debajo.
+         Las cajas **estiran** (el valor por defecto) en vez de ajustarse a su
+         contenido como en la maqueta: `anim.animarCambioDePuesto` mueve cada
+         columna segun la diferencia entre su techo anterior y el nuevo, y una
+         caja que crece con la barra tiene ese techo justo el alto de la barra. Al
+         repintar cada segundo, el valor, la cara y el nombre —que van abajo—
+         bajarian y volverian a subir. Con todas las cajas del mismo alto el techo
+         no cambia y la fila de caras se queda quieta, que es lo que se mira. Las
+         barras siguen creciendo desde la base y el orden sigue siendo el de la
+         tabla; lo unico que se pierde es un movimiento vertical que no era el que
+         la maqueta queria enseñar (el que queria era el del ascenso de puesto, y
+         en una fila de columnas ese ascenso es horizontal). */
+      .grafico {
+        align-items: stretch;
+        display: flex;
+        gap: 4px;
+        height: 220px;
+        padding-top: 22px;
+      }
+
+      .columna {
+        align-items: center;
+        display: flex;
+        flex: 1 1 0;
+        flex-direction: column;
+        justify-content: flex-end;
+        min-width: 0;
+      }
+
+      .columna .valor {
+        color: var(--acento);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        margin-bottom: 3px;
+      }
+
+      /* La barra crece hacia arriba: la base es el cero y el alto es la cifra
+         contra el primero. El minimo de 4 px deja ver a quien aporto poco, que
+         si no desapareceria y pareceria que no esta en la tabla. */
+      .columna .barra {
+        background: var(--acento);
+        border-radius: 4px 4px 0 0;
+        height: 0;
+        min-height: 4px;
+        transition: height 620ms cubic-bezier(0.22, 1, 0.36, 1);
+        width: 100%;
+      }
+
+      /* La maqueta traia aqui una regla `.cara` que nunca se aplicaba, porque esa
+         clase no se anadia en ningun sitio: el margen va sobre la caja del
+         retrato, que es el elemento que de verdad existe. */
+      .columna .retrato-caja {
+        margin-top: 5px;
+      }
+
+      .columna .nombre {
+        color: var(--apagado);
+        font-size: 9px;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* --- El nº1 ---------------------------------------------------------- */
+
+      .columna.uno .barra {
+        background: var(--lider);
+      }
+
+      .columna.uno .valor {
+        color: var(--lider);
+        font-size: 14px;
+      }
+
+      .columna.uno .nombre {
+        color: var(--texto);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="vista" id="raiz">
+      <section class="tarjeta">
+        <div class="cab">
+          <h1 id="titulo"></h1>
+          <span class="total" id="total">0</span>
+        </div>
+        <div class="grafico" id="filas"></div>
+      </section>
+      <p class="aviso" id="aviso">Conectando…</p>
+    </div>
+
+    <script src="anim.js"></script>
+    <script>
+      /* Solo **define** el diseno. Arrancar es cosa de `comun.js`, que se carga
+         despues: asi el orden (montar, y luego los datos) es el mismo en los once
+         disenos y no depende de como este escrito cada uno. */
+      window.diseno = (() => {
+        /** Alto de la columna mas alta, en pixeles: fija la escala de todas. */
+        const ALTO_MAXIMO = 150;
+        /** Columnas que se pintan, de las diez que como mucho manda la tabla. */
+        const VISIBLES = 8;
+
+        /** Alto proporcional al primero, con un minimo para que el cero se vea. */
+        const alto = (valor, maximo) =>
+          maximo > 0 ? Math.max(4, Math.round((valor / maximo) * ALTO_MAXIMO)) : ALTO_MAXIMO;
+
+        let contenedor = null;
+        let total = null;
+        let liderPrevio = null;
+
+        /** Retrato con su inicial de reserva cuando TikTok no manda foto. */
+        function retrato(entrada, tam) {
+          const caja = document.createElement("span");
+          caja.className = "retrato-caja";
+          if (entrada.user?.avatar_url) {
+            const img = document.createElement("img");
+            img.className = "retrato";
+            img.src = entrada.user.avatar_url;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.style.height = tam + "px";
+            img.style.width = tam + "px";
+            caja.appendChild(img);
+          } else {
+            const inicial = document.createElement("span");
+            inicial.className = "retrato inicial";
+            inicial.style.height = tam + "px";
+            inicial.style.width = tam + "px";
+            inicial.style.fontSize = Math.round(tam * 0.4) + "px";
+            inicial.textContent = (entrada.user?.nickname || entrada.user?.unique_id || "?")
+              .slice(0, 1)
+              .toUpperCase();
+            caja.appendChild(inicial);
+          }
+          return caja;
+        }
+
+        /**
+         * Sube la barra a su alto en el fotograma siguiente.
+         *
+         * No se usa `anim.animarBarra` porque ese ayudante escribe **anchura** y
+         * aqui la barra crece en alto; lo que se repite es su idea, que es la que
+         * importa: el elemento se crea con la barra a cero y el valor se aplica
+         * despues, porque un elemento que nace ya con su alto final no tiene nada
+         * que transicionar y apareceria lleno de golpe.
+         */
+        function subirBarra(barra, destino) {
+          if (anim.prefiereQuieto()) {
+            barra.style.height = destino + "px";
+            return;
+          }
+          barra.style.height = "0px";
+          requestAnimationFrame(() => {
+            barra.style.height = destino + "px";
+          });
+        }
+
+        function porClave(clave) {
+          return [...contenedor.children].find((hijo) => hijo.dataset.clave === clave);
+        }
+
+        /**
+         * Reordena el DOM segun el orden nuevo, sin tocar la identidad de cada
+         * columna: la misma clave sigue siendo el mismo `<div>`, que es lo que
+         * permite que la animacion tenga un destino coherente.
+         */
+        function reordenar(entradas, crear, colocar) {
+          const antes = anim.recogerPosiciones(contenedor);
+          const vivas = new Set(entradas.map((entrada) => String(entrada.user?.id)));
+          anim.retirarAusentes(contenedor, vivas);
+
+          entradas.forEach((entrada, indice) => {
+            const nuevo = crear(entrada, indice);
+            const actual = porClave(nuevo.dataset.clave);
+            if (actual) actual.replaceWith(nuevo);
+            else contenedor.appendChild(nuevo);
+          });
+          entradas.forEach((entrada, indice) => {
+            const hijo = porClave(String(entrada.user?.id));
+            if (hijo && contenedor.children[indice] !== hijo) {
+              contenedor.insertBefore(hijo, contenedor.children[indice] ?? null);
+            }
+          });
+
+          anim.animarCambioDePuesto(contenedor, antes);
+          colocar();
+        }
+
+        return {
+          montar(raiz, ctx) {
+            contenedor = raiz.querySelector("#filas");
+            total = raiz.querySelector("#total");
+            raiz.querySelector("#titulo").textContent = ctx.titulo;
+          },
+
+          pintar(entradas, _tasas, ctx) {
+            total.textContent = ctx.numero(ctx.total(entradas));
+            const maximo = entradas.reduce((tope, e) => Math.max(tope, e.value || 0), 0);
+            const visibles = entradas.slice(0, VISIBLES);
+            const nuevoLider = visibles[0] ? String(visibles[0].user?.id) : null;
+
+            reordenar(
+              visibles,
+              (entrada, indice) => {
+                const div = document.createElement("div");
+                div.className = indice === 0 ? "columna uno" : "columna";
+                div.dataset.clave = String(entrada.user?.id);
+
+                const completo = ctx.nombre(entrada);
+                // Una columna mide unos 45 px: el apodo entero no cabe ni con
+                // puntos suspensivos, asi que se usa la primera palabra y el
+                // nombre completo queda en el titulo, para la vista previa.
+                div.title = completo + ": " + ctx.numero(entrada.value);
+
+                const valor = document.createElement("span");
+                valor.className = "valor";
+                valor.textContent = ctx.numero(entrada.value);
+
+                const barra = document.createElement("span");
+                barra.className = "barra";
+                barra.dataset.objetivo = String(alto(entrada.value, maximo));
+
+                const nombre = document.createElement("span");
+                nombre.className = "nombre";
+                nombre.textContent = completo.split(" ")[0];
+
+                div.append(valor, barra, retrato(entrada, 24), nombre);
+                return div;
+              },
+              () => {
+                // La corona y las barras se ajustan despues de reordenar, sobre
+                // el DOM final: si se hiciera antes, la columna del nº1 seria
+                // otra.
+                const filaUno = nuevoLider ? porClave(nuevoLider) : null;
+                anim.limpiarCoronas(contenedor, filaUno);
+                if (filaUno) anim.colocarCorona(filaUno, { esNueva: nuevoLider !== liderPrevio });
+                for (const entrada of visibles) {
+                  const fila = porClave(String(entrada.user?.id));
+                  const barra = fila?.querySelector(".barra");
+                  if (barra) subirBarra(barra, Number(barra.dataset.objetivo));
+                }
+                liderPrevio = nuevoLider;
+              },
+            );
+          },
+        };
+      })();
+    </script>
+    <script src="comun.js"></script>
+  </body>
+</html>

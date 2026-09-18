@@ -1,0 +1,1847 @@
+/* Estilos del panel. Reglas de rendimiento (docs/plan-review.md §38):
+   sin animaciones permanentes, sin blur, sin sombras costosas, sin fondos
+   animados. Todo es CSS plano y barato de pintar. */
+
+:root {
+  /* Los **colores de la marca**, que son dos: el cian y el rojo. Todo lo demas es
+     negro y blanco, en tema oscuro.
+
+     Se conservan los nombres de los tokens —`brasa`, `ambar`— para no volver a
+     tocar el CSS de las pantallas: `brasa` es el rojo (en directo, lo urgente) y
+     `ambar` es el cian (el primero, lo que destaca). Asi el significado sigue
+     siendo el mismo y solo cambia el color que lo viste. */
+  --tiktok-cian: #25f4ee;
+  --tiktok-rojo: #fe2c55;
+
+  --tinta: #000000;
+  --bg: #0a0a0b;
+  --panel: #141416;
+  --panel-2: #1e1e21;
+  --border: #2a2a2e;
+  --border-soft: rgba(42, 42, 46, 0.6);
+  --text: #ffffff;
+  --muted: #9a9aa2;
+
+  /* El color significa siempre lo mismo, en las cinco pantallas: el rojo es en
+     directo, el cian es el primero y lo que funciona. Nunca decorativo. */
+  --brasa: var(--tiktok-rojo);
+  --ambar: var(--tiktok-cian);
+  --menta: var(--tiktok-cian);
+  --humo: #9a9aa2;
+  --accent: var(--tiktok-cian);
+  --accent-2: var(--tiktok-rojo);
+  --ok: var(--tiktok-cian);
+  --warn: var(--tiktok-rojo);
+  /* Fuentes que **trae Windows**, elegidas por caracter y no por costumbre: el
+     proyecto funciona sin internet y sin assets, asi que no se descarga ninguna.
+     Bahnschrift es una grotesca condensada tipo DIN —la letra de los marcadores— y
+     es la que le quita a esto el aire de programa generico. */
+  --fuente-titulo: Bahnschrift, "Segoe UI", system-ui, sans-serif;
+  --fuente-datos: Bahnschrift, Consolas, monospace;
+  --fuente-codigo: Consolas, "Cascadia Mono", monospace;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+
+  /* Escala de espaciado. Antes cada regla elegia su numero (2, 6, 7, 8, 9, 10,
+     12, 16, 22) y al redimensionar eso se nota: la separacion entre bloques
+     cambiaba de golpe segun que regla ganara. Con la escala, todos los huecos
+     salen de los mismos cuatro valores. */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 10px;
+  --sp-4: 14px;
+  --sp-5: 18px;
+
+  --radio: 6px;
+  --radio-panel: 8px;
+
+  /* A partir de aqui la interfaz se aprieta: por debajo de este ancho, las dos
+     columnas de tarjetas dejan de caber con dignidad. */
+  --ancho-apretado: 1080px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+button {
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #06131a;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 500;
+}
+
+button.ghost:hover:not(:disabled),
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 9px;
+}
+
+input:focus {
+  outline: 1px solid var(--accent);
+}
+
+/* --- Estructura ---------------------------------------------------------- */
+
+/* Cuatro filas: cabecera, franja de emision, marcador y cuerpo elastico.
+   `min-height: 0` en el cuerpo y `overflow: hidden` en la raiz evitan que un hijo
+   alto empuje la ventana entera: el que se desplaza es el area de contenido, no
+   la aplicacion. */
+.app {
+  display: grid;
+  /* Cuatro filas, **en el orden en que van los hijos**: cabecera, franja de
+   * emision, **marcador** y cuerpo.
+   *
+   * Tanto la franja como el marcador tienen que estar declarados aqui, y en su
+   * sitio. Al añadir la franja como hijo sin tocar la plantilla, cayo en la fila
+   * `1fr` —que era la del cuerpo— y el cuerpo se fue a una fila implicita: la
+   * ficha acababa aplastada en una tira de dos pixeles sobre el chat.
+   *
+   * La elastica `minmax(0, 1fr)` es la **ultima** de la lista porque el cuerpo es
+   * el ultimo hijo: es el unico que se estira y el unico que se desplaza. La
+   * cabecera, la franja y el marcador miden lo que miden. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* El area de contenido NO lleva relleno propio.
+   Ese relleno era la causa de los 49 px de desbordamiento permanentes: un hijo
+   con `height: 100%` resuelve contra el *content box* del padre, y el relleno
+   del padre se sumaba por encima. El relleno vive ahora en cada pagina
+   (`.grid-panel` / `.page-fill`), que ademas son las que se desplazan si el
+   contenido no cabe. */
+main {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Una pagina que ocupa todo el alto de `main`.
+   Sin esto la tarjeta crece con su contenido, el que desplaza es `main` y el
+   autoscroll de la lista (que apunta a la propia lista) no tiene nada que
+   mover: los mensajes nuevos entran fuera de la vista y la lista parece
+   congelada. Con el alto acotado, la lista vuelve a ser el contenedor que
+   desplaza, que es como se penso `ul.chat` (`flex: 1; min-height: 0`). */
+.page-fill {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+}
+
+/* Los cuatro paneles de Inicio: el chat a la izquierda y, a la derecha, follow,
+   seguidores y actividad apilados.
+   El chat lleva la columna elastica porque es lo que se lee de verdad; los otros
+   tres van con ancho acotado porque son frases cortas y cifras.
+   Todos los hijos van con `grow`, asi que cada lista se desplaza sola y la pagina
+   no crece. */
+.inicio-paneles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--sp-3);
+  height: 100%;
+  min-height: 0;
+}
+
+/* La columna derecha, con su propio reparto de alto: la actividad es la fila mas
+   alta (1.4) porque es la que mas contenido mueve —regalos, compartidos,
+   suscripciones y rafagas de likes—, y follow la mas baja (1) porque son lineas
+   de una sola frase.
+   `minmax(0, ...)` en las tres filas: sin eso una lista larga empuja el panel y
+   la columna se sale por debajo. */
+.inicio-columna {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr);
+  gap: var(--sp-3);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* En ventanas apretadas los cuatro se apilan en una columna y el chat se queda el
+   doble de alto que los demas: sigue siendo el panel que se usa. El contenedor de
+   la derecha se disuelve (`display: contents`) para que los tres pasen a ser filas
+   de la rejilla de arriba, sin un nivel de mas que estorbe al reparto de alto. */
+@media (max-width: 1080px) {
+  .inicio-paneles {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr);
+  }
+
+  .inicio-columna {
+    display: contents;
+  }
+}
+
+/* Cuerpo: menu lateral de ancho fijo y area de contenido elastica.
+   `minmax(0, 1fr)` (y no `1fr`) es lo que permite que la columna de contenido
+   encoja por debajo de su ancho minimo de contenido: sin eso, una tabla o una
+   fila larga empujan el layout y sacan el menu de la ventana. */
+.body {
+  display: grid;
+  /* La fila del cuerpo va **clavada**: es la unica elastica de la plantilla y no
+     puede depender de cuantos hermanos se pinten. Cuando la franja de emision
+     esta vacia se oculta (`display: none` en `.emision-banda:empty`), y sin esta
+     linea el reparto automatico le daba al cuerpo la fila `auto` que quedaba
+     libre y dejaba la elastica para el marcador: el contenido se apelotonaba
+     arriba y el marcador se estiraba. */
+  grid-row: 4;
+  grid-template-columns: 172px minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* --- Barras de desplazamiento -------------------------------------------- */
+
+/* La barra de serie de Windows es **clara y con flechas**, y sobre el negro del
+   panel se ve como una ventana rota: es lo que mas afeaba la lista de mensajes,
+   que es la que mas se mira. Aqui se le da el color de la hoja —carril
+   transparente, pulgar en `--border`— y se le quitan las flechas. Con los tokens
+   y no con colores sueltos: si cambia la paleta, la barra va con ella.
+ *
+ * Se pinta **solo por la via WebKit**, que es la que usan los dos motores que
+ * existen de verdad aqui: el WebView2 de Tauri y el Chrome de pruebas. Y no es
+ * una preferencia: en cuanto `scrollbar-color` o `scrollbar-width` toman un valor
+ * distinto de `auto`, el motor **descarta todas** las reglas `::-webkit-scrollbar*`
+ * —incluida la que quita los botones— y la barra fina nativa recupera sus dos
+ * flechas. Medido en el banco: era lo unico que quedaba del aspecto de serie.
+ *
+ * Va en `.app` y no en `:root`/`html` a proposito: asi queda dicho que esto es la
+ * hoja del panel y no puede alcanzarle el lienzo a ningun overlay (`comun.css` es
+ * otro fichero, pero el alcance se lee de un vistazo). El `*` hace falta porque
+ * estas reglas hay que declararlas en cada elemento que se desplaza. */
+.app *::-webkit-scrollbar {
+  height: 10px;
+  /* 10 px es lo mas fino que sigue siendo comodo de agarrar con el raton. */
+  width: 10px;
+}
+
+/* El carril, transparente: el fondo del panel ya hace de carril. */
+.app *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app *::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+.app *::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Las flechas son la mitad de lo que afea la barra de serie: fuera. Esta regla es
+   la razon de que arriba no se declaren las propiedades estandar. */
+.app *::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Donde se cruzan dos barras no puede quedar un cuadro claro. */
+.app *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* La puerta abierta para un motor **sin** WebKit: aqui no la usa nadie, pero si
+   algun dia se abre el panel en uno, la barra no se le queda de serie.
+   Va dentro de `@supports not ...` a proposito: si el motor entiende
+   `::-webkit-scrollbar`, este bloque ni se aplica, asi que las estandar no pueden
+   ganarle a las reglas de arriba y las flechas no pueden volver. */
+@supports not selector(::-webkit-scrollbar) {
+  .app,
+  .app * {
+    scrollbar-color: var(--border) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* --- Cabecera ------------------------------------------------------------ */
+
+/* La cabecera se envuelve cuando no cabe: con una ventana estrecha, el handle,
+   los dos botones y el estado no entran en una sola linea y antes se
+   comprimian unos a otros hasta solaparse. */
+.topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.brand h1 {
+  font-family: var(--fuente-titulo);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+/* En directo el punto **late**, y solo entonces: el latido es la señal de que esto
+   esta saliendo al aire, y es lo que se ve de reojo sin leer nada.
+
+   Es la unica animacion permanente de la aplicacion, y se permite por dos razones:
+   es un elemento de 9 px con una animacion de opacidad —que el navegador resuelve
+   en la capa de composicion, sin repintar— y vive en la ventana del panel, no
+   dentro de una fuente de OBS, que es donde el plan (§38) si las prohibe. Con la
+   preferencia de menos movimiento activa, se queda fijo. */
+@keyframes latido {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.dot-connected {
+  background: var(--brasa);
+  animation: latido 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-connected {
+    animation: none;
+  }
+}
+
+.dot-connecting,
+.dot-starting,
+.dot-reconnecting,
+.dot-waiting_for_live {
+  background: var(--ambar);
+}
+
+.dot-error {
+  background: var(--brasa);
+}
+
+.connect {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.connect input {
+  min-width: 0;
+  max-width: 320px;
+  flex: 1 1 180px;
+}
+
+/* El estado cede espacio antes que el formulario: es informativo, no un control.
+   Antes tenia `max-width: 280px` fijo, que en ventana estrecha dejaba el texto
+   cortado sin puntos suspensivos porque el recorte estaba en el contenedor y no
+   en la linea. */
+/* El estado, en pastilla. El color dice cual es sin leerlo —que es la regla de
+   «saber sin leer»— y el texto esta por si acaso: `brasa` es en directo, `ambar` es
+   esperando o conectando, `menta` es dentro. */
+.estado {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.estado-connected {
+  border-color: var(--brasa);
+  color: var(--brasa);
+}
+
+.estado-connecting,
+.estado-starting,
+.estado-reconnecting,
+.estado-waiting_for_live {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.estado-error {
+  border-color: var(--brasa);
+  background: var(--brasa);
+  color: var(--tinta);
+}
+
+/* La franja de emision: quien emite, cuanto lleva y por que esta asi.
+ *
+ * Vive **fuera de la cabecera** porque una ficha con avatar, nombre, @usuario,
+ * contadores y bio no cabe en una barra de una sola fila: metida ahi empujaba
+ * `Conectar` y `Desconectar` a dos alturas y recortaba los contadores y la bio.
+ *
+ * El reparto: la cabecera es para lo que se **pulsa**, esta franja para lo que se
+ * **mira**. */
+.emision-banda {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  /* `flex: 0 0 auto` y **sin** `min-height: 0`. Con `min-height: 0` el flex deja
+     comprimir la franja hasta su contenido minimo y desaparecia: la ficha se
+     aplastaba sobre el chat en una tira de dos pixeles. La franja mide lo que mide
+     su contenido y no se encoge nunca; quien cede es el cuerpo, que es el que
+     tiene que desplazarse. */
+  flex: 0 0 auto;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+}
+
+/* Sin sesion, sin ficha y sin motivo no hay nada que enseñar: la franja no pinta
+   una tira vacia. */
+.emision-banda:empty {
+  display: none;
+}
+
+/* El tiempo se va a la derecha; la ficha manda. */
+.emision-banda .emision-tiempo {
+  margin-left: auto;
+}
+
+.emision-usuario {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La ficha del streamer, cuando la sala trajo perfil.
+   Sustituye al @usuario suelto del mismo sitio: foto, nombre, cifras y bio. Sin
+   botones a proposito —los del perfil de TikTok son mandos de su pagina y aqui
+   no harian nada—, y con todo recortado a una linea porque la cabecera no puede
+   crecer ni empujar los botones de la derecha. */
+.perfil {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.perfil-avatar {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  /* 56 y no 34: la ficha vive en su propia franja, que si tiene alto, y la foto es
+     lo primero que se reconoce de un vistazo. El motor ya pide la version grande
+     (`avatarLarger` antes que `avatarMedium` y `avatarThumb`), asi que el tamaño no
+     se paga en nitidez. */
+  height: 56px;
+  object-fit: cover;
+  width: 56px;
+}
+
+/* Disco con la inicial: el mismo recurso que usa el overlay de esgrima cuando
+   TikTok no manda la foto o el CDN la niega. */
+.perfil-avatar-vacio {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 22px;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.perfil-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.perfil-nombre {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perfil-usuario {
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Las cifras, en la letra de los datos: son numeros que no pueden bailar. */
+.perfil-contadores {
+  color: var(--text);
+  font-family: var(--fuente-datos);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  /* Sin tope: los 34ch de antes cortaban los contadores en `123,7…` con la franja
+     vacia de la derecha. Ahora el ancho lo decide lo que haya, y si de verdad no
+     cabe, el recorte vuelve a hacer su trabajo. */
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La bio, en una linea: es un adorno de la ficha, no el contenido de la pagina. */
+.perfil-bio {
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El tiempo de directo, en la letra de las cifras: es un numero que cambia solo y
+   no puede bailar al pasar de 9 a 10. */
+.emision-tiempo {
+  color: var(--text);
+  font-family: var(--fuente-datos);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.topbar-motivo {
+  color: var(--muted);
+  flex: 0 1 auto;
+  font-size: 12px;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El boton de diagnostico de la cabecera. Se marca cuando esta abierto porque no
+   tiene pestaña en la barra que lo delate: sin esto, el panel de diagnostico no
+   tendria ninguna señal de estar activo. */
+.topbar > button.ghost.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --- Menu lateral -------------------------------------------------------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-3);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar button {
+  background: transparent;
+  border: none;
+  border-radius: var(--radio);
+  color: var(--muted);
+  font-weight: 500;
+  overflow: hidden;
+  padding: 8px 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar button:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.sidebar button.active {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* --- Tarjetas ------------------------------------------------------------ */
+
+/* La pagina es una rejilla de filas que miden lo que su contenido.
+   Antes era `display: flex; height: 100%`: con el alto fijo de la ventana, las
+   filas se repartian ese alto y **encogian por debajo de su contenido**. Medido
+   a 960x600, la tarjeta de Sesion se quedaba en 144 px con 79 px de contenido
+   fuera y la de Volumen en 41 px con 233 px fuera: el texto se salia de la
+   tarjeta. Con `grid-auto-rows: min-content` cada fila mide lo que necesita y,
+   si la suma no cabe, se desplaza la pagina entera (`overflow-y: auto`), que es
+   el comportamiento correcto: se pierde de vista, nunca se recorta. */
+.grid-panel {
+  box-sizing: border-box;
+  display: grid;
+  grid-auto-rows: min-content;
+  align-content: start;
+  /* El aire es lo que separa una seccion de la siguiente desde que las secciones
+     no llevan borde: con `--sp-3` se pegaban y no se sabia donde empezaba cada
+     una. Es la contrapartida de quitar las cajas, y por eso sube. */
+  gap: var(--sp-5);
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+}
+
+/* Columnas de tarjetas. `auto-fit` + `minmax` sustituye a las dos columnas
+   fijas: con dos tarjetas se ven dos, con tres (Desarrollador) se ven tres si
+   caben, y al estrechar la ventana van cayendo a una sola sin dejar huecos ni
+   filas descolgadas. */
+.grid-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* `.stack` agrupa varias tarjetas en una misma columna y las separa igual que
+   la rejilla, para que la columna derecha no parezca de otra pantalla. */
+.stack {
+  display: grid;
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* Una `Card` **no es una tarjeta**: es una seccion.
+ *
+ * Sin fondo, sin borde y sin radio. Seis cajas con borde por pantalla convierten
+ * el panel en un rack de instrumentos, que es exactamente lo que hacia parecer
+ * esto un centro de control. Con aire y un rotulo, la misma informacion se lee
+ * como una emision.
+ *
+ * El componente mantiene su API (`title`, `actions`, `children`), asi que las
+ * cinco pantallas no cambian ni una linea: esto se arregla en un sitio. */
+.card {
+  display: flex;
+  flex-direction: column;
+  /* `min-height: min-content` y no `0`: la seccion puede encogerse (para que la
+     lista de dentro se desplace) pero nunca por debajo de su cabecera. Con `0` se
+     comprimia hasta 41 px y el contenido se salia. */
+  min-height: min-content;
+  min-width: 0;
+}
+
+.card.grow {
+  flex: 1;
+}
+
+/* Un hijo de seccion que sea lista o tabla puede encogerse y desplazarse; el
+   resto (parrafos, controles) conserva su alto. */
+.card > * {
+  min-width: 0;
+}
+
+/* El rotulo. Es lo unico que separa una seccion de la siguiente, asi que tiene
+   que leerse de un vistazo: mayusculas, muy espaciado y apagado, para que no
+   compita con las cifras —que son lo unico que va grande en toda la pantalla. */
+.card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  min-width: 0;
+}
+
+.card-head h2 {
+  color: var(--humo);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* El buscador del chat cede antes que los botones. */
+.card-actions input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* --- Sesion -------------------------------------------------------------- */
+
+.session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.session-live .session-handle {
+  color: var(--ok);
+}
+
+/* `flex-wrap` + `min-width: 0`: con un handle largo, el handle y la pildora de
+   estado se comprimian hasta pisarse. Envolviendo, la pildora baja de linea y
+   ninguna de las dos se corta. */
+.session-main {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+}
+
+.session-handle {
+  font-size: 20px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.session-title {
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+  opacity: 0.9;
+  overflow-wrap: anywhere;
+}
+
+.status-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 9px;
+  text-transform: uppercase;
+}
+
+.status-connected {
+  border-color: #1d4d3a;
+  color: var(--ok);
+}
+.status-error {
+  border-color: #4a1f2c;
+  color: var(--accent-2);
+}
+.status-connecting,
+.status-starting,
+.status-reconnecting,
+.status-waiting_for_live {
+  border-color: #4a412a;
+  color: var(--warn);
+}
+
+/* Cuatro metricas que se reparten el ancho disponible y caen a menos columnas
+   cuando no caben, en vez de comprimirse en cuatro columnas minusculas. */
+.session-metrics {
+  display: grid;
+  gap: var(--sp-2) var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.metric-value {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* --- Listas -------------------------------------------------------------- */
+
+ul.chat,
+ul.feed,
+ol.ranking {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Las listas de ranking tambien se escriben como `ul` (Panel, Regalos,
+   Desarrollador y la cola de Voz) y no estaban en la regla de arriba: sin
+   `min-height: 0` no podian encogerse y sin scroll propio su contenido empujaba
+   la pagina. Era el desbordamiento de 4 px del Panel: con la lista «Por tipo de
+   regalo» a dos filas (~38 px) la tarjeta tenia ~71 px (12 de relleno arriba +
+   25 de cabecera + 22 para la lista), asi que 4 px asomaban por debajo del area
+   visible de `main`.
+   Se anade solo lo necesario para que encoja y se desplace: `list-style`,
+   `padding` y `flex` se dejan como estaban para no cambiar la apariencia. */
+ul.ranking {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+ul.chat {
+  display: flex;
+  flex-direction: column;
+}
+
+ul.chat li {
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 8px;
+  line-height: 1.4;
+  padding: 3px 0;
+  min-width: 0;
+}
+
+ul.chat li > * {
+  min-width: 0;
+}
+
+ul.chat.compact li:nth-child(n + 8) {
+  opacity: 0.75;
+}
+
+/* Un comentario borrado en TikTok se atenua y se rotula, pero sigue en su sitio:
+   quitarlo cortaria el hilo de la conversacion. */
+.content.deleted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Silenciar a un usuario en la voz. El boton vive en cada linea y se mantiene
+   discreto; el silencio marca al usuario en todas sus lineas, no solo en la que
+   se pulso (el motor silencia por `user_id`).
+   `flex: 0 0 auto` es imprescindible: con `min-width: 0` en los hijos de `li`
+   heredado de la regla de arriba, este boton se comprimia hasta dejar de ser
+   legible (se veia como un icono suelto pegado al borde). */
+ul.chat li .mute {
+  flex: 0 0 auto;
+  min-width: max-content;
+  opacity: 0.5;
+}
+
+ul.chat li .mute:hover,
+ul.chat li.muted .mute {
+  opacity: 1;
+}
+
+ul.chat li.muted .user {
+  opacity: 0.6;
+}
+
+/* Las columnas fijas (62px / 1fr / auto) no encogian con la ventana: la fila
+   pedia mas ancho que la tarjeta y el contenido se salia. Ahora la columna de
+   la hora se ajusta a su contenido y la del texto es la que cede. */
+ul.feed li {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+/* La lista de regalos lleva **cinco** hijos (hora, miniatura, usuario, texto,
+   diamantes) y opcionalmente la etiqueta de racha. Con `1fr` unico en el texto,
+   los cinco se reparten por columnas implicitas y la fila envuelve mal: la hora
+   caia en una columna de 52 px y los diamantes saltaban de linea.
+   Aqui cada columna mide lo que necesita salvo el texto, que es el que debe
+   ceder y envolver. */
+ul.feed.gifts li {
+  align-items: center;
+  grid-template-columns: max-content max-content minmax(0, 1fr) max-content max-content;
+}
+
+ul.feed li > * {
+  min-width: 0;
+}
+
+ul.feed li .feed-text {
+  overflow-wrap: anywhere;
+}
+
+ul.feed li .feed-time,
+ul.feed li .time {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* OJO: esta regla incluye `ul.ranking`, no solo `ol.ranking`.
+   En Panel, Regalos, Voz y Desarrollador los rankings se escriben como `ul`, y
+   solo existia la regla para `ol.ranking li`. Sin `display: grid`, los tres
+   spans de cada fila fluian como linea normal: no encogian, no se alineaban en
+   columnas y el contenido se salia de la tarjeta (medido: hasta 57 px por
+   debajo). */
+ul.ranking li,
+ol.ranking li {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 22px) minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+ul.ranking li > *,
+ol.ranking li > * {
+  min-width: 0;
+}
+
+ul.ranking .rank,
+ol.ranking .rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.user {
+  color: var(--accent);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.time {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.tag-gift {
+  background: rgba(37, 244, 238, 0.12);
+  color: var(--accent);
+}
+.tag-follow {
+  background: rgba(61, 220, 151, 0.12);
+  color: var(--ok);
+}
+.tag-share {
+  background: rgba(122, 162, 255, 0.14);
+  color: #9db8ff;
+}
+.tag-subscribe {
+  background: rgba(245, 196, 81, 0.14);
+  color: var(--warn);
+}
+.tag-like {
+  background: rgba(254, 44, 85, 0.12);
+  color: #ff6b86;
+}
+.tag-info {
+  background: rgba(152, 160, 176, 0.12);
+  color: var(--muted);
+}
+
+/* Miniatura del regalo: 22 px, diferida y sin bloquear el pintado. */
+.gift-thumb {
+  border-radius: 4px;
+  height: 22px;
+  margin-right: 6px;
+  object-fit: contain;
+  vertical-align: middle;
+  width: 22px;
+}
+
+.unhandled {
+  color: var(--warn);
+}
+
+/* --- Controles (pagina de voz) ------------------------------------------- */
+
+.control {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  min-width: 0;
+}
+
+.control label {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--sp-3);
+  justify-content: space-between;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.control input[type="range"] {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  font: inherit;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.switch {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 7px;
+  user-select: none;
+}
+
+button.tiny {
+  padding: 1px 8px;
+}
+
+/* La cola lleva prioridad, texto y boton de quitar. */
+ul.ranking.queue li {
+  grid-template-columns: minmax(0, 34px) minmax(0, 1fr) auto;
+}
+
+ul.ranking.queue .user {
+  color: var(--text);
+  white-space: normal;
+}
+
+/* --- Tablas de ranking con foto (dashboard) ------------------------------- */
+
+/* Puesto, foto, nombre y cifra. La foto se mide en una celda fija para que el
+   nombre empiece a la misma altura en todas las filas: sin eso, la lista se ve
+   escalonada cuando unas personas tienen avatar y otras no. */
+ol.ranking.board li {
+  align-items: center;
+  grid-template-columns: minmax(0, 20px) 28px minmax(0, 1fr) max-content;
+  padding: 4px 0;
+}
+
+.avatar {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  height: 24px;
+  object-fit: cover;
+  width: 24px;
+}
+
+/* Sustituto cuando TikTok no manda la foto: la inicial de la persona. Mantiene
+   la columna alineada y deja claro que no es una imagen que no ha cargado. */
+.avatar-vacio {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  justify-content: center;
+}
+
+/* El nombre es un boton (abre el perfil) pero debe leerse como texto: el marco
+   por defecto de `button` romperia la alineacion de la tabla. */
+ol.ranking.board .user {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+ol.ranking.board button.user:hover {
+  text-decoration: underline;
+}
+
+/* --- Tablas y utilidades ------------------------------------------------- */
+
+table.rows {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+table.rows td {
+  border-bottom: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
+  padding: 3px 0;
+  vertical-align: top;
+}
+
+table.rows .rows-label {
+  color: var(--muted);
+  width: 52%;
+}
+
+table.rows .rows-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.path {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.empty,
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.error {
+  border: 1px solid #4a1f2c;
+  border-radius: var(--radio);
+  background: rgba(254, 44, 85, 0.08);
+  color: #ffb3c4;
+  margin-bottom: var(--sp-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
+/* Pantalla de error de render: mejor un mensaje que una ventana en blanco. */
+.fatal {
+  margin: var(--sp-5) auto;
+  max-width: 620px;
+  width: calc(100% - 2 * var(--sp-4));
+  background: var(--panel);
+  border: 1px solid #4a1f2c;
+  border-radius: var(--radio-panel);
+  padding: var(--sp-5);
+}
+
+.fatal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.fatal pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #ffb3c4;
+  font-size: 12px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+.fatal button {
+  margin-top: 12px;
+}
+
+/* --- El marcador ---------------------------------------------------------- */
+
+/* La firma del rediseno: **el unico sitio con numeros grandes**. Si una cifra esta
+   grande en dos sitios, el ojo no aprende donde mirar y vuelve a buscar en cada
+   pantalla. Aqui estan todas, siempre en el mismo orden.
+
+   Y va **arriba**, pegado a la franja de emision: es lo que el streamer mira de
+   reojo mientras emite, y abajo del todo le obligaba a bajar la vista en cada
+   regalo. Por eso el borde que lo separa del contenido va **abajo**, que es lo
+   que tiene debajo ahora.
+
+   Dos bloques: el **dinero** —regalos y diamantes— y la **sesion** —espectadores,
+   likes, comentarios, seguidores y entradas—. Los separa un hueco mucho mayor que
+   el de las cifras de un mismo bloque, y no un rotulo ni una raya: el aire se lee
+   de un vistazo y no hay nada que leer, y una raya volveria a partir la pantalla
+   en cajas, que es justo lo que quito el rediseno.
+
+   Las cifras van en la letra de los marcadores —Bahnschrift— y los rotulos en
+   mayusculas diminutas: eso es lo que hace que se lean de un vistazo, sin leer.
+
+   La tira llevaba siete estadisticas con `gap: 22px` fijo y sin envolver: al
+   estrechar la ventana la suma no cabia y empujaba el layout a lo ancho (o
+   cortaba la ultima). Con `flex-wrap` en el pie y en cada bloque, las cifras
+   caen a una segunda fila cuando no caben, sin desbordar nunca. */
+footer.stats {
+  background: var(--tinta);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  /* Este hueco es el que separa los dos bloques; el de dentro de un bloque lo
+     pone `.stats-grupo`, que es el de siempre (14 px).
+     154 px y no 20: las cifras son cortas —un cero ocupa 25 px en una columna de
+     150— y el ancho de columna ya deja mucho aire dentro de cada bloque, asi que
+     una separacion discreta no se veria. Medido en el banco a 1280: el salto de
+     DIAMANTES a ESPECTADORES dobla al mayor de los de dentro de la sesion. */
+  column-gap: calc(var(--sp-4) * 11);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+/* Los dos bloques del marcador.
+ *
+ * Cada uno se lleva el ancho proporcional a sus cifras —2 el dinero, 5 la
+ * sesion— para que el ancho por cifra salga el mismo en los dos, que es como se
+ * leian cuando el marcador era una sola fila. Al añadir una cifra a un bloque hay
+ * que subir el numero de ese bloque: con otro reparto, las del dinero salen mas
+ * anchas que las de la sesion y el marcador parece descuadrado. */
+.stats-grupo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
+  min-width: 0;
+}
+
+.stats-grupo-dinero {
+  flex: 2 1 0;
+}
+
+.stats-grupo-sesion {
+  flex: 5 1 0;
+}
+
+/* Cada cifra se queda con lo que mida su bloque. `flex-basis` y no un ancho fijo:
+   asi el bloque reparte lo que le toca y ninguna cifra se sale. */
+.stat {
+  display: flex;
+  flex: 1 1 88px;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.stat-label {
+  color: var(--humo);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stat-value {
+  color: var(--text);
+  font-family: var(--fuente-datos);
+  font-size: 34px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+/* El cero se queda en su sitio, pero **apagado**. En un directo tranquilo hay
+   cifras a cero, y si desaparecieran las demas se moverian al llegar el primer
+   evento, que es peor que un cero. Con el color del rotulo dejan de competir con
+   las que si tienen numero, y el hueco ya esta reservado. En cuanto valen algo
+   vuelven al blanco de `.stat-value`. Sin transicion: esta tira cambia muchas
+   veces por minuto. */
+.stat-value-cero {
+  color: var(--humo);
+}
+
+/* --- Overlays para OBS ---------------------------------------------------- */
+
+/* Direcciones para OBS: se pegan una sola vez, asi que van juntas y con el texto
+   a la vista, seleccionable, en vez de escondidas tras un desplegable. */
+.direcciones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.direcciones li {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.direcciones li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.direccion-vista {
+  color: var(--muted);
+  flex: 0 0 88px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.copiar {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.copiar .path {
+  color: var(--text);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.copiar button {
+  flex: 0 0 auto;
+}
+
+/* Selector de vista. Cada vista tiene su propio diseno, y el boton enseña cual
+   esta en antena: sin eso habria que cambiar de pestaña para saberlo. */
+.vista-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.vista-switch button {
+  align-items: baseline;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.switch-diseno {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.vista-switch button.active .switch-diseno {
+  color: #06131a;
+  opacity: 0.72;
+}
+
+/* La vista previa: el diseno real, escalado.
+   El marco mide su lienzo entero (420 px, o 1080x1920 en los de pantalla
+   completa) y se reduce con `transform`; de ahi el `overflow: hidden`, que es lo
+   que recorta lo que sobresale en vez de dejar que empuje la tarjeta. */
+.previa-marco {
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  justify-self: start;
+  overflow: hidden;
+}
+
+/* La previa y la lista, en dos columnas. El ancho de la primera esta acotado
+   porque un marcador mide 420 px: dejarlo solo en una tarjeta de pantalla
+   completa llenaba de vacio los otros mil. */
+.diseno-panel {
+  align-items: start;
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 460px) minmax(240px, 1fr);
+  margin-top: var(--sp-3);
+}
+
+.diseno-columna {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.diseno-columna .hint {
+  margin: 0;
+}
+
+/* En ventanas apretadas, una columna: la lista debajo de la previa. */
+@media (max-width: 980px) {
+  .diseno-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.previa-barra {
+  align-items: center;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 4px var(--sp-3);
+}
+
+.previa-aviso {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.previa-caja {
+  overflow: hidden;
+}
+
+.previa {
+  border: 0;
+  display: block;
+  transform-origin: top left;
+}
+
+.disenos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.diseno {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.diseno + .diseno {
+  margin-top: var(--sp-2);
+}
+
+.diseno.activo {
+  border-color: var(--accent);
+}
+
+.diseno-texto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.diseno-texto strong {
+  font-size: 13px;
+}
+
+.diseno-texto span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.etiqueta {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* --- Alertas -------------------------------------------------------------- */
+
+/* La zona de soltar: se puede pulsar (abre el selector) o soltar un fichero
+   encima. El borde discontinuo es lo que dice que acepta algo. */
+.soltar {
+  align-items: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radio);
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-top: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+.soltar.encima {
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+.soltar strong {
+  font-size: 13px;
+}
+
+.soltar .hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.medios {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+}
+
+.medios li {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+  padding: var(--sp-2) 0;
+}
+
+.medio-nombre {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Un campo de formulario con su rótulo encima. El `min-width: 0` es lo que deja
+   encoger la columna dentro de la rejilla en vez de empujar la tarjeta. */
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  min-width: 0;
+}
+
+.campo label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.campo input[type="text"],
+.campo input:not([type]),
+.campo input[type="number"],
+.campo select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.campo input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.campo .hint {
+  margin: 0;
+}
+
+/* La lista de avisos y el editor, en dos columnas: la lista es un indice de cinco
+   nombres, asi que se queda con un ancho acotado, y el editor se lleva el resto,
+   que es donde estan los campos. Antes eran cinco formularios iguales apilados y
+   ninguno decia cual se estaba tocando. */
+.alertas-panel {
+  align-items: start;
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  min-width: 0;
+}
+
+/* En ventanas apretadas, una columna: la lista encima del editor. */
+@media (max-width: 980px) {
+  .alertas-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Los dos grupos de avisos. Se separan con aire y con su rotulo, no con una caja:
+   el proyecto quito las cajas a proposito (docs/interfaz.md §4). */
+.grupos-avisos {
+  display: grid;
+  gap: var(--sp-4);
+  /* Aire de sobra bajo la frase de ayuda: el rotulo del primer grupo es un
+     encabezado, no la ultima linea de la frase. */
+  margin-top: var(--sp-3);
+}
+
+/* El rotulo de grupo es del mismo material que el de una seccion —mayusculas,
+   apagado y espaciado—, un escalon por debajo: es un rotulo dentro de una seccion
+   y no puede competir con el de arriba. */
+.grupo-rotulo {
+  color: var(--humo);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  margin: 0 0 var(--sp-2);
+  text-transform: uppercase;
+}
+
+.avisos {
+  display: grid;
+  gap: var(--sp-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* La fila de un aviso lleva borde porque **se elige**, no porque sea una seccion:
+   las secciones se separan con aire y rotulo (docs/interfaz.md §4). */
+.aviso {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* El elegido se marca con forma ademas de color: barra a la izquierda y borde
+   encendido. Asi se distingue de un simple raton encima. */
+.aviso.elegido {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.aviso-nombre {
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aviso-nombre:hover {
+  color: var(--accent);
+}
+
+/* Apagado no se dice, se ve: el nombre pierde el color y la luz se queda en
+   anillo sin relleno. Cero palabras para un estado (docs/interfaz.md §2). */
+.aviso.apagado .aviso-nombre {
+  color: var(--humo);
+}
+
+/* La luz del interruptor: anillo apagado, disco encendido. Forma y color. */
+.aviso-interruptor .luz {
+  background: transparent;
+  border: 1px solid var(--humo);
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: block;
+  flex: 0 0 auto;
+  height: 12px;
+  width: 12px;
+}
+
+/* La casilla, del color de la casa: el azul que trae el navegador es el unico
+   color de la pantalla que no significa nada. */
+.aviso-interruptor input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.aviso-interruptor input[type="checkbox"]:checked + .luz {
+  background: var(--menta);
+  border-color: var(--menta);
+}
+
+.aviso-interruptor input[type="checkbox"]:focus-visible + .luz {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* La plantilla del texto con sus variables resaltadas. Va en la letra del codigo
+   —son llaves y nombres de campo— y el resalte es lo que deja ver de un golpe que
+   variables tiene puestas el aviso, sin componer la frase. */
+.plantilla {
+  color: var(--muted);
+  font-family: var(--fuente-codigo);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.plantilla .variable {
+  background: rgba(37, 244, 238, 0.14);
+  border-radius: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+/* --- Ajustes para ventanas apretadas ------------------------------------ */
+
+/* Por debajo de este ancho la interfaz se aprieta: menos relleno, cabecera y
+   pie mas compactos y tipografia un punto menor. No se oculta nada. */
+@media (max-width: 1080px) {
+  .grid-panel {
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+  }
+
+  .grid-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+
+  .stack {
+    gap: var(--sp-2);
+  }
+
+  .card {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .card-head {
+    margin-bottom: 6px;
+  }
+
+  .metric-value {
+    font-size: 16px;
+  }
+
+  .session-handle {
+    font-size: 18px;
+  }
+
+  footer.stats {
+    /* En ventana apretada el ancho es lo que escasea: menos relleno y menos hueco
+       entre los dos bloques. Aun asi la separacion sigue siendo el cuadruple que
+       la de dentro de un bloque, que es lo que distingue los dos grupos. Las
+       cifras caen solas a una segunda fila si no caben. */
+    column-gap: calc(var(--sp-4) * 4);
+    padding: var(--sp-1) var(--sp-3);
+  }
+
+  .stat-value {
+    font-size: 15px;
+  }
+}
+
+/* Ventanas bajas: la prioridad es que el contenido quepa y se pueda desplazar,
+   no que las tarjetas conserven su relleno generoso. */
+@media (max-height: 700px) {
+  .grid-panel {
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+  }
+
+  .grid-columns {
+    gap: var(--sp-2);
+  }
+
+  .card {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .card-head {
+    margin-bottom: 6px;
+  }
+
+  .session-title,
+  .hint {
+    font-size: 11px;
+  }
+}
