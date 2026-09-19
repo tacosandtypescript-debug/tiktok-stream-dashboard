@@ -451,9 +451,18 @@ export function Tts({ initial }: Props) {
                   const clave = `${voz.proveedor}:${voz.referencia}`;
                   return (
                     <li key={clave} className={activa ? "voz activa" : "voz"}>
-                      {/* El identificador va en el `title`: son 32 caracteres y no
-                          caben junto al nombre y los botones en 400 px. */}
-                      <span className="voz-nombre" title={voz.referencia}>
+                      {/* Lo que no cabe en la fila va en el `title`: el
+                          identificador son 32 caracteres y la descripción es una
+                          línea entera. Guardados se quedan los dos —es lo que
+                          evita volver a la API— y aquí se leen al pasar el ratón. */}
+                      <span
+                        className="voz-nombre"
+                        title={
+                          voz.descripcion
+                            ? `${voz.descripcion} · ${voz.referencia}`
+                            : voz.referencia
+                        }
+                      >
                         {voz.nombre || voz.referencia}
                       </span>
                       <span className="etiqueta">
