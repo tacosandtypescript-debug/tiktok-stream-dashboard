@@ -652,18 +652,21 @@ impl EdgeTtsSidecar {
 
         let mut command = if let Some(executable) = &self.config.executable {
             if !executable.is_file() {
-                bail!(
-                    "el ejecutable del sidecar no existe: {} (override TTSDASH_TTS_SIDECAR o artefacto Tauri)",
-                    executable.display()
+                // El detalle va al registro; a la pantalla, lo que se puede hacer.
+                tracing::warn!(
+                    executable = %executable.display(),
+                    "el ejecutable del motor de voz desaparecio despues de resolverlo"
                 );
+                bail!("{}", crate::tts::SIN_MOTOR);
             }
             Command::new(executable)
         } else {
             if !self.config.script.exists() {
-                bail!(
-                    "no se encuentra el script del sidecar de TTS en {} y no hay ejecutable congelado; ejecuta scripts/setup.ps1 y scripts/build-tts-sidecar.ps1",
-                    self.config.script.display()
+                tracing::warn!(
+                    script = %self.config.script.display(),
+                    "sin motor de voz: ni ejecutable congelado ni script de desarrollo"
                 );
+                bail!("{}", crate::tts::SIN_MOTOR);
             }
             let mut command = Command::new(&self.config.python);
             command.arg(&self.config.script);

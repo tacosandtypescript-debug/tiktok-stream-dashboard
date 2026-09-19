@@ -769,6 +769,32 @@ main {
   width: 7px;
 }
 
+/* --- Voz: dos vistas en la misma pestaña -------------------------------- */
+/*
+ * Los diez paneles de Voz suman 1.831 px para 674 de alto. Sacarlos a otra pestaña
+ * no vale: **las otras cinco estan exactamente llenas** (medido, 674/674), asi que
+ * mover el problema no lo resuelve. Se reparten en dos vistas —lo que suena y lo
+ * que tienes guardado— y cada una cabe entera.
+ *
+ * Cada tarjeta va en su **propia celda** (`.stack`) con la vista a la que
+ * pertenece, y la rejilla las reparte sola en tres columnas. Esconder las de la
+ * otra vista deja que las demas se recoloquen en el hueco: repartir de otra forma
+ * es cambiarle la clase a una tarjeta, no moverla de sitio en el marcado.
+ *
+ * El orden del marcado importa y no es casual: la rejilla coloca por filas, y una
+ * fila mide lo que su tarjeta mas alta. Estan puestas para que las altas caigan en
+ * filas distintas —si dos de 290 cayeran juntas, esa fila sola mediria 290—.
+ */
+.grid-panel.voz[data-vista="sonando"] .vista-voces,
+.grid-panel.voz[data-vista="voces"] .vista-sonando {
+  display: none;
+}
+
+/* Los dos botones de la vista, pegados a la cabecera. */
+.grid-panel.voz > .vista-switch {
+  margin-top: var(--sp-3);
+}
+
 /* --- Aportaciones: cuatro columnas por dos filas -------------------------- */
 /*
  * Seis paneles que tienen que caber en los 674 px de alto que deja la ventana
@@ -2365,8 +2391,13 @@ ul.claves li > * {
   gap: var(--sp-1);
 }
 
-/* El formulario de alta, en dos columnas: el nombre es corto y la clave larga. */
-.clave-alta {
+/* El formulario de alta en **una linea**: el nombre es corto, el codigo largo y
+ * el boton manda. Lo usan las claves y las voces, que se guardan igual.
+ *
+ * Los rotulos van dentro de su `.campo` —encima del campo, no al lado— y por eso
+ * la rejilla alinea por abajo (`align-items: end`): sin eso el boton, que no
+ * tiene rotulo, subiria a la altura del texto. */
+.alta-linea {
   align-items: end;
   display: grid;
   gap: var(--sp-2);
@@ -2375,8 +2406,56 @@ ul.claves li > * {
   min-width: 0;
 }
 
-.clave-alta .campo {
+.alta-linea .campo {
   margin-top: 0;
+}
+
+/* --- Voces de Fish guardadas ---------------------------------------------- */
+/*
+ * Una fila por voz: el nombre, y a la derecha el estado o el boton de usarla, y
+ * el de quitarla. El **codigo va en el `title`** y no en la fila: son 32
+ * caracteres y en 400 px de columna no cabe junto al nombre y los botones.
+ *
+ * Con tope de alto y desplazamiento propio, como la lista de claves: guardar
+ * veinte voces no puede empujar la pagina, y tres a la vista son suficientes
+ * para elegir.
+ */
+ul.voces {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  max-height: 96px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+ul.voces li {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+ul.voces li:last-child {
+  border-bottom: 0;
+}
+
+/* El nombre cede antes que los botones: es lo unico elastico de la fila. */
+.voz-nombre {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La que esta sonando, en el color de acento: la misma señal que en los diseños
+   de overlay, donde la elegida tambien se distingue por color y no por texto. */
+ul.voces li.activa .voz-nombre {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* El consumo, con la cifra grande: es lo unico de esta seccion que se mira de

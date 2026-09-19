@@ -434,7 +434,12 @@ export interface TtsSettings {
   enabled: boolean;
   voice_es: string;
   voice_en: string;
-  say_author: boolean;
+  /** Plantilla de lo que se lee para un mensaje de chat. */
+  chat_template: string;
+  /** Plantilla de lo que se lee para un regalo que cierra su racha. */
+  gift_template: string;
+  /** Plantilla de lo que se lee para un seguidor nuevo. */
+  follow_template: string;
   volume: number;
   rate: string;
   pitch: string;
@@ -465,6 +470,28 @@ export interface TtsFishSettings {
   reference_id: string;
   /** Modelo. El gratuito por defecto. */
   model: string;
+  /** Las voces guardadas con su nombre, de la mas nueva a la mas vieja. */
+  voces: TtsVozGuardada[];
+}
+
+/**
+ * Una voz de Fish guardada por el streamer.
+ *
+ * La `referencia` **no es un secreto**: es el identificador publico de la voz en
+ * Fish (`reference_id`), el mismo que se pega a mano. Por eso viaja con los demas
+ * ajustes, al contrario que las claves de la API.
+ */
+export interface TtsVozGuardada {
+  /** Como la llama el streamer. */
+  nombre: string;
+  /** El identificador de la voz en su proveedor. Unico dentro de él. */
+  referencia: string;
+  /** De qué motor salió: `edge` o `fish`. */
+  proveedor: string;
+  /** Idioma, si se sabe (`es`, `en`). Vacío cuando no. */
+  idioma: string;
+  /** Una línea de descripción, o vacío. **Nunca** se guarda audio. */
+  descripcion: string;
 }
 
 /** Un modelo de Fish, con su tarifa en dolares por millon de bytes de texto. */
@@ -597,7 +624,12 @@ export const api = {
     volume?: number;
     rate?: string;
     pitch?: string;
-    say_author?: boolean;
+    /** Plantilla de lo que se lee para un mensaje de chat. */
+    chat_template?: string;
+    /** Plantilla de lo que se lee para un regalo. */
+    gift_template?: string;
+    /** Plantilla de lo que se lee para un seguidor nuevo. */
+    follow_template?: string;
     voice_es?: string;
     voice_en?: string;
     read_gifts?: boolean;
@@ -605,6 +637,8 @@ export const api = {
     provider?: TtsProvider;
     fish_reference_id?: string;
     fish_model?: string;
+    /** La lista **entera**: la interfaz manda el resultado de anadir o quitar. */
+    fish_voces?: TtsVozGuardada[];
   }) => invoke<void>("tts_update", { patch }),
   ttsAction: (action: string, value?: string) =>
     invoke<void>("tts_action", { action, value: value ?? null }),

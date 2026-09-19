@@ -384,6 +384,12 @@ export const t = {
   },
   tts: {
     title: "Lectura del chat en voz alta",
+    /* Dos vistas dentro de la misma pestaña. La pagina no cabe entera —los diez
+       paneles suman 1.831 px para 674 de alto— y sacarlos a otra pestaña no vale:
+       las otras cinco estan exactamente llenas. Se reparten por lo que se hace con
+       cada una: lo que suena mientras emites, y lo que tienes guardado. */
+    vistaSonando: "Lo que suena",
+    vistaVoces: "Voces y claves",
     enabled: "Leer el chat",
     disabledHint: "Actívalo para que los mensajes nuevos se lean en voz alta.",
     nowPlaying: "Leyendo ahora",
@@ -396,6 +402,10 @@ export const t = {
     pause: "Pausar",
     resume: "Reanudar",
     volume: "Volumen",
+    /** El panel donde se elige **la voz** (ritmo, tono y las dos voces). */
+    voice: "La voz",
+    /** El panel de por donde sale: dispositivo y volumen. */
+    output: "Salida de audio",
     rate: "Velocidad",
     pitch: "Tono",
     device: "Dispositivo de audio",
@@ -411,7 +421,6 @@ export const t = {
     readFollows: "Seguidores nuevos",
     voiceEs: "Voz en español",
     voiceEn: "Voz en inglés",
-    sayAuthor: "Decir quién lo escribió",
     rejected: "Descartados por los filtros",
     rejectedEmpty: "Ningún mensaje descartado.",
     counters: "Actividad",
@@ -456,9 +465,34 @@ export const t = {
     /** Ajustes de Fish Audio. */
     fish: "Fish Audio",
     fishHint: "La clave se guarda solo en este equipo y no vuelve a la pantalla.",
-    fishVoice: "Código de voz",
-    fishVoicePlaceholder: "El identificador de la voz que copiaste de Fish",
-    fishVoiceHint: "Es el «reference_id» de la voz, no su nombre.",
+    /* Las voces guardadas con nombre. Antes habia **una sola casilla**: pegar un
+       codigo nuevo borraba el anterior. */
+    voiceName: "Cómo llamarla",
+    voiceNamePlaceholder: "mi voz de mujer",
+    voiceCode: "Código",
+    voiceCodePlaceholder: "el reference_id de Fish",
+    voiceAdd: "Guardar voz",
+    voiceInUse: "En uso",
+    voiceUse: "Usar esta",
+    voiceRemoveHint: "Quitar de la lista. La voz que está sonando no cambia.",
+    voicesSaved: "Voces guardadas",
+    voicesSavedHint: "Elige una y queda sonando, sin buscar nada.",
+    voicesEmpty:
+      "Todavía no hay ninguna. Guarda la que uses con «Guardar voz» y aparecerá aquí para elegirla de un clic.",
+    /* Lo que se guarda de cada voz. `proveedor` solo se enseña cuando hay más de
+       uno en la lista; con una sola, repetirlo en cada fila es ruido. */
+    voiceProvider: { edge: "Microsoft", fish: "Fish" } as Record<string, string>,
+    voiceSave: "Guardar voz",
+    voiceSaveHint: "La añade a la lista de arriba para no volver a buscarla.",
+
+    /* Las plantillas de lo que se lee. */
+    plantillas: "Cómo se lee",
+    plantillasHint:
+      "Escribe la frase con las variables entre llaves. Lo que no sea una variable se lee tal cual.",
+    chatTemplate: "Un mensaje del chat",
+    giftTemplate: "Un regalo",
+    followTemplate: "Un seguidor nuevo",
+    plantillasVariables: "Variables",
     fishModel: "Modelo",
     fishModelPrice: (precio: string) => (precio === "0" ? "gratis" : `${precio} $ por millón`),
     /** Las claves guardadas y su relevo automatico. */

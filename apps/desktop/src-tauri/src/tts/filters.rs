@@ -3,10 +3,15 @@
 //! El pipeline de docs/plan-review.md §15, en este orden:
 //!
 //! ```text
-//! normalize -> enabled -> usuario bloqueado -> palabras bloqueadas -> URL
+//! limpiar -> enabled -> usuario bloqueado -> palabras bloqueadas -> URL
 //!   -> spam -> duplicado -> caracteres repetidos -> longitud
 //!   -> cooldown por usuario
 //! ```
+//!
+//! `limpiar` quita los emojis ademas de colapsar espacios: un emoji leido en voz
+//! alta es ruido —y segun el motor, un balbuceo—, y hay mensajes que son **solo**
+//! emojis. Al quedarse vacios los descarta el filtro de longitud, que es donde
+//! tiene que pasar.
 //!
 //! El **cupo global** (token bucket) queda fuera del pipeline a proposito: es
 //! una decision de admision, no de contenido. Un mensaje puede pasar todos los
@@ -176,7 +181,7 @@ impl Filters {
     /// consumirlo, el descarte acabaria contado dos veces. Quien decide leer usa
     /// `admit`, que agrupa las dos cosas.
     pub fn evaluate(&mut self, user_id: &str, raw_text: &str, now: Instant) -> FilterOutcome {
-        let text = normalize(raw_text);
+        let text = limpiar(raw_text);
 
         let rejection = self
             .check_disabled()
@@ -404,16 +409,26 @@ impl Filters {
     }
 }
 
-/// Normaliza el texto: colapsa espacios, quita caracteres de control y recorta.
+/// Limpia un texto para leerlo en voz alta: quita los emojis, colapsa los
+/// espacios y descarta los caracteres de control.
 ///
 /// El orden importa: en Rust `\n` y `\t` **son** caracteres de control, asi que
 /// hay que tratar primero los espacios. Si no, "hola\nmundo" se convertiria en
 /// "holamundo" y el TTS leeria una palabra inventada.
-fn normalize(text: &str) -> String {
+///
+/// Los emojis se cambian por un **espacio**, no se borran sin mas: en
+/// "hola😀mundo" el emoji separa dos palabras, y quitarlo las pegaria en una
+/// sola que no existe. Con el espacio, el colapso de arriba hace el resto.
+///
+/// Es `pub` porque no se aplica solo al mensaje del chat: la linea que se lee
+/// lleva tambien el apodo del autor y, en los avisos, el nombre del regalo, y
+/// por ahi entraban los emojis igual. Se limpia la **linea entera** ya
+/// compuesta, y asi no hay tres sitios donde acordarse de hacerlo.
+pub fn limpiar(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut last_space = true;
     for character in text.chars() {
-        if character.is_whitespace() {
+        if character.is_whitespace() || es_emoji(character) {
             if !last_space {
                 out.push(' ');
                 last_space = true;
@@ -428,6 +443,43 @@ fn normalize(text: &str) -> String {
         last_space = false;
     }
     out.trim().to_string()
+}
+
+/// Si el caracter es un emoji, o una pieza de uno compuesto.
+///
+/// Los rangos son los que Unicode marca como pictogramas. Se dejan fuera a
+/// proposito los signos que se usan **como texto** —flechas, matematicos,
+/// monedas, formas geometricas— porque quitarlos cambiaria el sentido de una
+/// frase: «2 + 2 = 4» no lleva ningun emoji y no se toca.
+///
+/// Las piezas sueltas tambien cuentan: un corazon es `U+2764` **mas** el
+/// selector `U+FE0F`, y una bandera son dos indicadores regionales. Si solo se
+/// quitara el pictograma, el selector se quedaria en el texto y el motor de voz
+/// lo leeria como un caracter raro.
+fn es_emoji(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x1F1E6..=0x1F1FF      // banderas: dos indicadores regionales
+            | 0x1F300..=0x1F5FF // simbolos y pictogramas
+            | 0x1F600..=0x1F64F // caritas
+            | 0x1F680..=0x1F6FF // transporte y mapas
+            | 0x1F700..=0x1F77F // alquimia
+            | 0x1F780..=0x1F7FF // formas geometricas extendidas
+            | 0x1F800..=0x1F8FF // flechas suplementarias
+            | 0x1F900..=0x1F9FF // simbolos y pictogramas suplementarios
+            | 0x1FA00..=0x1FAFF // extendidos A: caritas y objetos nuevos
+            | 0x2600..=0x27BF   // simbolos varios y dingbats
+            | 0x2B00..=0x2BFF   // flechas y simbolos varios
+            | 0x231A..=0x231B   // reloj y reloj de arena
+            | 0x23E9..=0x23FA   // controles de reproduccion, relojes, pausa
+            | 0xFE00..=0xFE0F   // selectores de variacion
+            | 0x20E3            // tecla: une el numero con su recuadro
+            | 0x200D            // unidor de ancho cero
+            | 0x3030
+            | 0x303D
+            | 0x3297
+            | 0x3299
+    )
 }
 
 #[cfg(test)]
@@ -451,9 +503,41 @@ mod tests {
 
     #[test]
     fn normaliza_espacios_y_caracteres_de_control() {
-        assert_eq!(normalize("  hola   mundo  "), "hola mundo");
-        assert_eq!(normalize("hola\nmundo\t!"), "hola mundo !");
-        assert_eq!(normalize("\u{0}hola\u{7}"), "hola");
+        assert_eq!(limpiar("  hola   mundo  "), "hola mundo");
+        assert_eq!(limpiar("hola\nmundo\t!"), "hola mundo !");
+        assert_eq!(limpiar("\u{0}hola\u{7}"), "hola");
+    }
+
+    /// Los emojis no se leen. Se cambian por un espacio para no pegar dos
+    /// palabras, y una frase que sea **solo** emojis se queda vacia: el filtro de
+    /// longitud la descarta sola, que es lo correcto —no hay nada que leer—.
+    #[test]
+    fn quita_los_emojis_y_no_pega_las_palabras() {
+        assert_eq!(limpiar("hola 😀 mundo"), "hola mundo");
+        assert_eq!(limpiar("hola😀mundo"), "hola mundo");
+        assert_eq!(limpiar("jajaja😂😂😂"), "jajaja");
+        assert_eq!(limpiar("😀😀😀"), "");
+        // El apodo tambien los lleva, y la linea que se lee lo incluye.
+        assert_eq!(limpiar("Nick 🌸 dice: hola"), "Nick dice: hola");
+        // Corazon: el pictograma **y** su selector de variacion.
+        assert_eq!(limpiar("te quiero ❤️"), "te quiero");
+        // Bandera: dos indicadores regionales seguidos.
+        assert_eq!(limpiar("🇨🇴 Colombia"), "Colombia");
+        // Y lo que no es un emoji no se toca: los signos de texto se quedan.
+        assert_eq!(limpiar("2 + 2 = 4"), "2 + 2 = 4");
+        assert_eq!(
+            limpiar("precio: 5 $ (50 % menos)"),
+            "precio: 5 $ (50 % menos)"
+        );
+    }
+
+    #[test]
+    fn un_mensaje_de_solo_emojis_se_descarta_por_corto() {
+        let mut filters = filters();
+        assert_eq!(
+            filters.evaluate("u1", "😀😀😀", now()),
+            FilterOutcome::Reject(RejectReason::TooShort)
+        );
     }
 
     #[test]

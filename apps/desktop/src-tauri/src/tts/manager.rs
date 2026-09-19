@@ -40,16 +40,18 @@ use crate::core::event::{Event, EventKind};
 use crate::core::EventBus;
 
 use super::consumo::ConsumoStatus;
+use super::filters::limpiar;
 use super::filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
 use super::fish;
+use super::plantilla;
 use super::player::AudioSink;
 use super::provider::{
     ErrorVoz, MotivoFallo, ProviderSettings, Readiness, SharedTtsProvider, TtsCancellation,
     TtsRequest,
 };
 use super::queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
+use super::voice_for;
 use super::voices::{self, Language};
-use super::{chat_line, voice_for};
 
 /// Capacidad del bus si el gestor tuviera que crear uno.
 const BUS_CAPACITY: usize = 4096;
@@ -115,6 +117,37 @@ impl VoiceProvider {
     }
 }
 
+/// Una voz de Fish que el streamer guardo con su nombre.
+///
+/// La `referencia` **no es un secreto**: es el `reference_id` publico de la voz,
+/// el mismo que se pega a mano en la casilla. Por eso viaja a la interfaz con los
+/// demas ajustes, al contrario que las claves de la API, que solo salen
+/// enmascaradas.
+///
+/// Antes habia **una sola casilla**: pegar un identificador nuevo borraba el
+/// anterior, y volver a una voz de hace una semana obligaba a ir a buscarla otra
+/// vez a la web de Fish.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VozGuardada {
+    /// Como la llama el streamer. No tiene por que ser unico.
+    pub nombre: String,
+    /// El identificador de la voz en su proveedor (`reference_id` en Fish, el id
+    /// del catalogo en edge-tts). **Si** es unico dentro del proveedor.
+    pub referencia: String,
+    /// De que motor salio. Es lo que permite tener voces de los dos en la misma
+    /// lista sin confundirlas, y lo que hara que añadir un tercer proveedor no
+    /// obligue a tocar la lista: es el mismo criterio que la columna `provider`
+    /// de las claves.
+    pub proveedor: String,
+    /// Idioma, si se sabe (`es`, `en`). Vacio cuando no.
+    pub idioma: String,
+    /// Una linea de descripcion: el rotulo del catalogo o lo que escriba el
+    /// streamer. Vacio cuando no hay. **No** se guarda audio de ningun tipo: lo
+    /// que se reutiliza es la referencia, no lo que dijo.
+    pub descripcion: String,
+}
+
 /// Ajustes de Fish Audio que **no son secretos**.
 ///
 /// La clave no esta aqui y no puede estarlo: estos ajustes viajan a la interfaz
@@ -129,6 +162,8 @@ pub struct FishSettings {
     /// Modelo. El **gratuito** por defecto: el de pago cuesta 15 $ por millon de
     /// bytes de texto y tiene que ser una eleccion consciente.
     pub model: String,
+    /// Las voces guardadas, de la mas nueva a la mas vieja.
+    pub voces: Vec<VozGuardada>,
 }
 
 impl Default for FishSettings {
@@ -136,8 +171,14 @@ impl Default for FishSettings {
         Self {
             reference_id: String::new(),
             model: fish::MODELO_POR_DEFECTO.to_string(),
+            voces: Vec::new(),
         }
     }
+}
+
+/// Para `serde`: el interruptor viejo del nombre valia `true` de fabrica.
+fn verdadero() -> bool {
+    true
 }
 
 /// Configuracion del TTS tal como la ve la interfaz. Es el contrato que
@@ -148,7 +189,17 @@ pub struct TtsSettings {
     pub enabled: bool,
     pub voice_es: String,
     pub voice_en: String,
+    /// **Sustituido por `chat_template`.** Se sigue leyendo para poder migrar: un
+    /// perfil que lo tuviera apagado tiene que arrancar sin decir el nombre, y con
+    /// el `Default` a secas empezaria a decirlo. No lo usa nadie mas.
+    #[serde(default = "verdadero")]
     pub say_author: bool,
+    /// Plantilla de lo que se lee para un mensaje de chat.
+    pub chat_template: String,
+    /// Plantilla de lo que se lee para un regalo que cierra su racha.
+    pub gift_template: String,
+    /// Plantilla de lo que se lee para un seguidor nuevo.
+    pub follow_template: String,
     pub volume: f32,
     pub rate: String,
     pub pitch: String,
@@ -175,6 +226,9 @@ impl Default for TtsSettings {
             voice_es: voices::DEFAULT_VOICE.to_string(),
             voice_en: "en-US-AriaNeural".to_string(),
             say_author: true,
+            chat_template: plantilla::CHAT_POR_DEFECTO.to_string(),
+            gift_template: plantilla::REGALO_POR_DEFECTO.to_string(),
+            follow_template: plantilla::FOLLOW_POR_DEFECTO.to_string(),
             volume: 1.0,
             rate: "+0%".to_string(),
             pitch: "+0Hz".to_string(),
@@ -186,6 +240,32 @@ impl Default for TtsSettings {
             filters: FilterConfig::default(),
             queue_capacity: 32,
         }
+    }
+}
+
+impl TtsSettings {
+    /// Lee un perfil guardado y lo pone al dia.
+    ///
+    /// El interruptor «decir quien lo escribio» desaparecio: su trabajo lo hace
+    /// ahora la plantilla del chat, que ademas deja cambiar el verbo. Un perfil
+    /// que lo tuviera **apagado** tiene que seguir leyendo solo el mensaje, asi que
+    /// se mira el JSON viejo antes de descartarlo.
+    ///
+    /// Se mira el JSON y no la estructura ya leida porque el `Default` de
+    /// contenedor rellena `chat_template` cuando falta, y a partir de ahi ya no se
+    /// puede distinguir «no venia» de «venia con el valor de fabrica».
+    pub fn desde_json(json: &str) -> serde_json::Result<Self> {
+        let mut ajustes: Self = serde_json::from_str(json)?;
+        let crudo: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+        let traia_plantilla = crudo.get("chat_template").is_some();
+        let decia_autor = crudo
+            .get("say_author")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        if !traia_plantilla && !decia_autor {
+            ajustes.chat_template = plantilla::CHAT_SOLO_MENSAJE.to_string();
+        }
+        Ok(ajustes)
     }
 }
 
@@ -703,10 +783,31 @@ impl TtsManager {
         // regalo y follow ya vienen compuestos por `wants`. Se clona porque el
         // texto de origen sigue haciendo falta para elegir la voz.
         let line = if source == TtsSource::Chat {
-            chat_line(&nickname, &accepted, self.say_author())
+            plantilla::componer(
+                &self.chat_template(),
+                &plantilla::Variables {
+                    usuario: nickname.trim(),
+                    mensaje: &accepted,
+                    ..plantilla::Variables::default()
+                },
+            )
         } else {
             accepted.clone()
         };
+
+        // Se limpia **la linea entera**, ya compuesta, y no solo el mensaje del
+        // chat: el apodo del autor y el nombre del regalo tambien traen emojis, y
+        // los avisos no pasan por el pipeline de contenido —el filtro de chat los
+        // descartaria por cortos o por repetidos—, asi que por ahi entraban
+        // directos a la voz. Limpiando aqui se cubren los tres caminos de una vez.
+        //
+        // Y si al limpiar no queda nada —un apodo hecho de emojis y un mensaje de
+        // un caracter—, no hay nada que leer: se cuenta y no se encola.
+        let line = limpiar(&line);
+        if line.is_empty() {
+            self.count_rejection(RejectReason::Empty.as_str());
+            return;
+        }
         let (voice_es, voice_en) = self.voices();
         let item = TtsItem {
             id: 0,
@@ -742,9 +843,13 @@ impl TtsManager {
     ///
     /// Es el **unico** punto donde se decide que se lee. Anadir un evento nuevo
     /// (una suscripcion, un share, un aviso de OBS) es anadir un brazo aqui y su
-    /// plantilla en `tts::mod`: nada mas del gestor cambia.
+    /// plantilla por defecto en `tts::plantilla`: nada mas del gestor cambia.
+    ///
+    /// El chat **no** se compone aqui: su texto tiene que pasar antes por los
+    /// filtros de contenido, y la plantilla se aplica despues, ya limpio. Los
+    /// avisos de regalo y follow si se componen aqui porque no pasan por ellos.
     pub fn wants(&self, kind: &EventKind) -> Option<(String, i32, TtsSource)> {
-        let (read_gifts, read_follows) = self.announcements();
+        let ajustes = self.settings.read().unwrap_or_else(|e| e.into_inner());
         match kind {
             EventKind::ChatMessage { content, .. } => {
                 Some((content.clone(), priority::CHAT, TtsSource::Chat))
@@ -752,24 +857,33 @@ impl TtsManager {
             // Solo se lee el evento que **cierra** la racha: los intermedios son
             // acumulativos y anunciarlos todos convertiria una racha de 50 en 50
             // frases (misma regla que la contabilidad de `feed.rs`).
-            EventKind::GiftReceived { user, gift } if read_gifts && gift.commits() => Some((
-                super::gift_line(&user.nickname, gift),
-                priority::for_gift(gift.diamonds()),
-                TtsSource::Gift,
-            )),
-            EventKind::FollowReceived { user } if read_follows => Some((
-                super::follow_line(&user.nickname),
+            EventKind::GiftReceived { user, gift } if ajustes.read_gifts && gift.commits() => {
+                let regalo = plantilla::RegaloResuelto::nuevo(&user.nickname, gift);
+                Some((
+                    // Ya limpia: los avisos **no** pasan por los filtros, que es
+                    // donde se limpia el chat, y sin esto una plantilla con la
+                    // cantidad vacia dejaria el hueco («envió  Rose») en la cola.
+                    limpiar(&plantilla::componer(
+                        &ajustes.gift_template,
+                        &regalo.variables(),
+                    )),
+                    priority::for_gift(gift.diamonds()),
+                    TtsSource::Gift,
+                ))
+            }
+            EventKind::FollowReceived { user } if ajustes.read_follows => Some((
+                limpiar(&plantilla::componer(
+                    &ajustes.follow_template,
+                    &plantilla::Variables {
+                        usuario: user.nickname.trim(),
+                        ..plantilla::Variables::default()
+                    },
+                )),
                 priority::FOLLOWER,
                 TtsSource::Follow,
             )),
             _ => None,
         }
-    }
-
-    /// Interruptores de los avisos que no son chat.
-    fn announcements(&self) -> (bool, bool) {
-        let settings = self.settings.read().unwrap_or_else(|e| e.into_inner());
-        (settings.read_gifts, settings.read_follows)
     }
 
     // -----------------------------------------------------------------------
@@ -854,6 +968,36 @@ impl TtsManager {
         self.write_settings().fish.reference_id = voice.trim().to_string();
     }
 
+    /// Las voces guardadas con su nombre.
+    ///
+    /// Se guarda la lista **entera** y en el orden que manda la interfaz, que es
+    /// quien decide cual acaba de anadir. Aqui se limpia y se quitan los repetidos
+    /// por referencia: la misma voz dos veces no aporta nada y confunde al elegir.
+    /// Del nombre solo se recorta el aire; vacio se acepta, porque una voz sin
+    /// nombre sigue siendo utilizable por su referencia.
+    pub fn set_fish_voces(&self, voces: &[VozGuardada]) {
+        let mut vistas = std::collections::HashSet::new();
+        let limpias: Vec<VozGuardada> = voces
+            .iter()
+            .map(|voz| VozGuardada {
+                nombre: voz.nombre.trim().to_string(),
+                referencia: voz.referencia.trim().to_string(),
+                proveedor: voz.proveedor.trim().to_string(),
+                idioma: voz.idioma.trim().to_string(),
+                descripcion: voz.descripcion.trim().to_string(),
+            })
+            // Una voz sin referencia no se puede usar, y la misma referencia dos
+            // veces solo hace dudar de cual esta puesta. La clave del conjunto
+            // lleva el proveedor delante: dos motores distintos pueden usar el
+            // mismo identificador sin ser la misma voz.
+            .filter(|voz| {
+                !voz.referencia.is_empty()
+                    && vistas.insert(format!("{}\u{0}{}", voz.proveedor, voz.referencia))
+            })
+            .collect();
+        self.write_settings().fish.voces = limpias;
+    }
+
     /// Modelo de Fish. El proveedor lo recibe ya aplicado: el gestor es el dueno
     /// del dato y el proveedor solo lo usa.
     pub fn set_fish_model(&self, model: &str) {
@@ -861,8 +1005,21 @@ impl TtsManager {
         self.aplicar_ajustes_al_proveedor();
     }
 
-    pub fn set_say_author(&self, value: bool) {
-        self.write_settings().say_author = value;
+    /// La plantilla del chat: lo que se lee por cada mensaje.
+    ///
+    /// Se guarda tal cual, **sin validar**: una plantilla con una variable mal
+    /// escrita se deja visible en la frase —para que el streamer vea el error— y
+    /// rechazarla aqui le impediria guardar mientras la arregla.
+    pub fn set_chat_template(&self, plantilla: &str) {
+        self.write_settings().chat_template = plantilla.to_string();
+    }
+
+    pub fn set_gift_template(&self, plantilla: &str) {
+        self.write_settings().gift_template = plantilla.to_string();
+    }
+
+    pub fn set_follow_template(&self, plantilla: &str) {
+        self.write_settings().follow_template = plantilla.to_string();
     }
 
     /// Abre primero el nuevo dispositivo y solo entonces corta y sustituye el
@@ -1408,11 +1565,16 @@ impl TtsManager {
         self.sink.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn say_author(&self) -> bool {
+    /// La plantilla del chat, ya resuelta.
+    ///
+    /// Es la unica que se lee fuera de `wants`: el texto del chat no se compone
+    /// hasta despues de los filtros de contenido, y alli hace falta.
+    fn chat_template(&self) -> String {
         self.settings
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .say_author
+            .chat_template
+            .clone()
     }
 
     fn voices(&self) -> (String, String) {
@@ -2218,7 +2380,7 @@ mod tests {
         h.manager.set_rate("+20%");
         h.manager.set_voice(Language::En, "en-GB-SoniaNeural");
         h.manager.set_voice(Language::Es, "es-MX-DaliaNeural");
-        h.manager.set_say_author(false);
+        h.manager.set_chat_template("{usuario} comenta: {mensaje}");
 
         let status = h.manager.status();
         let settings = h.manager.settings();
@@ -2227,12 +2389,12 @@ mod tests {
         assert_eq!(settings.rate, "+20%");
         assert_eq!(settings.voice_en, "en-GB-SoniaNeural");
         assert_eq!(settings.voice_es, "es-MX-DaliaNeural");
-        assert!(!settings.say_author);
+        assert_eq!(settings.chat_template, "{usuario} comenta: {mensaje}");
         // El volumen se aplica al dispositivo, no solo al ajuste.
         assert_eq!(h.sink.inner.volume(), 0.35);
 
         // Y se sigue leyendo con los ajustes nuevos.
-        h.manager.set_say_author(true);
+        h.manager.set_chat_template(plantilla::CHAT_POR_DEFECTO);
         h.manager
             .handle_event(&chat(1, "1", "hello everyone, this is english"));
         assert!(wait_for(|| h.sink.inner.played_len() >= 1).await);
@@ -2349,7 +2511,7 @@ mod tests {
             .manager
             .wants(&gift(2, "2", 100).kind)
             .expect("un regalo que cierra racha se lee");
-        assert_eq!(text, "Nick 2 envio Rose");
+        assert_eq!(text, "Nick 2 envió Rose");
         assert_eq!(priority, priority::PREMIUM_GIFT);
         assert_eq!(source, TtsSource::Gift);
 
@@ -2630,6 +2792,11 @@ mod tests {
             fish: FishSettings {
                 reference_id: "00a1b221-6137".into(),
                 model: "s2.1-pro".into(),
+                voces: vec![VozGuardada {
+                    nombre: "mi voz".into(),
+                    referencia: "00a1b221-6137".into(),
+                    ..VozGuardada::default()
+                }],
             },
             ..TtsSettings::default()
         };
@@ -2707,7 +2874,7 @@ mod tests {
         // El que cierra la racha si, y con la cantidad acumulada.
         h.manager.handle_event(&racha(3, 5, true));
         assert!(wait_for(|| !h.provider.synthesised().is_empty()).await);
-        assert_eq!(h.provider.synthesised()[0], "Nick 9 envio 5 x Rose");
+        assert_eq!(h.provider.synthesised()[0], "Nick 9 envió 5 Rose");
     }
 
     #[tokio::test]
@@ -2751,7 +2918,7 @@ mod tests {
         assert!(wait_for(|| h.provider.synthesised().len() >= 2).await);
         let leidas = h.provider.synthesised();
         assert!(
-            leidas.iter().any(|line| line.contains("envio")),
+            leidas.iter().any(|line| line.contains("envió")),
             "el regalo se lee: {leidas:?}"
         );
         assert!(

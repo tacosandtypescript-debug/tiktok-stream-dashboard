@@ -199,9 +199,11 @@ impl AppState {
         // La configuracion se lee antes de construir `TtsManager`: el primer
         // evento que llegue al bus debe usar el perfil real, no un instante de
         // valores de fabrica. `#[serde(default)]` permite que el perfil v4
-        // inicial `{}` evolucione sin romper instalaciones existentes.
+        // inicial `{}` evolucione sin romper instalaciones existentes, y
+        // `desde_json` es quien pone al dia lo que cambio de forma entre versiones
+        // (el interruptor del nombre, hoy una plantilla).
         let tts_settings = match database.default_tts_profile()? {
-            Some(json) => match serde_json::from_str::<TtsSettings>(&json) {
+            Some(json) => match TtsSettings::desde_json(&json) {
                 Ok(settings) => settings,
                 Err(error) => {
                     tracing::warn!(%error, "perfil TTS invalido; se usan valores predeterminados");

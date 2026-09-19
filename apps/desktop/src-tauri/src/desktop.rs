@@ -243,7 +243,12 @@ struct TtsPatch {
     volume: Option<f32>,
     rate: Option<String>,
     pitch: Option<String>,
-    say_author: Option<bool>,
+    /// Plantilla de lo que se lee para un mensaje de chat.
+    chat_template: Option<String>,
+    /// Plantilla de lo que se lee para un regalo.
+    gift_template: Option<String>,
+    /// Plantilla de lo que se lee para un seguidor nuevo.
+    follow_template: Option<String>,
     voice_es: Option<String>,
     voice_en: Option<String>,
     read_gifts: Option<bool>,
@@ -254,6 +259,10 @@ struct TtsPatch {
     fish_reference_id: Option<String>,
     /// Modelo de Fish.
     fish_model: Option<String>,
+    /// Las voces de Fish guardadas con su nombre, **la lista entera**: la
+    /// interfaz manda el resultado despues de anadir o quitar, que es quien sabe
+    /// cual acaba de tocar el streamer.
+    fish_voces: Option<Vec<crate::tts::manager::VozGuardada>>,
 }
 
 #[tauri::command]
@@ -288,8 +297,14 @@ fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), St
     if let Some(value) = patch.read_follows {
         state.tts.set_read_follows(value);
     }
-    if let Some(say_author) = patch.say_author {
-        state.tts.set_say_author(say_author);
+    if let Some(plantilla) = patch.chat_template {
+        state.tts.set_chat_template(&plantilla);
+    }
+    if let Some(plantilla) = patch.gift_template {
+        state.tts.set_gift_template(&plantilla);
+    }
+    if let Some(plantilla) = patch.follow_template {
+        state.tts.set_follow_template(&plantilla);
     }
     if let Some(voice) = patch.voice_es {
         state.tts.set_voice(Language::Es, &voice);
@@ -302,6 +317,9 @@ fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), St
     }
     if let Some(model) = patch.fish_model {
         state.tts.set_fish_model(&model);
+    }
+    if let Some(voces) = patch.fish_voces {
+        state.tts.set_fish_voces(&voces);
     }
     state
         .persist_tts_settings()

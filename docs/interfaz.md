@@ -120,7 +120,40 @@ Hoy: ocho tarjetas, y la mitad son diagnostico.
   Hecho: los **descartados por los filtros** y los **contadores** del lector viven ya
   en Desarrollador, y el interruptor del **historico de aportaciones** se mudo a la
   tarjeta «Histórico» de Aportaciones —es el ajuste que llena esa tabla, y alli se
-  cambia viendo lo que cambia—. Voz se queda con nueve tarjetas.
+  cambia viendo lo que cambia—.
+
+### Voz son dos vistas, no una pagina
+
+La pagina llego a tener **diez paneles**: 1.831 px de contenido para 674 de alto. No
+se pueden mover a otra pestaña porque **las otras cinco estan exactamente llenas**
+(medido: 674/674 en las cinco), asi que el problema no se traslada, se resuelve donde
+esta. Se parte en dos vistas dentro de la misma pestaña:
+
+| vista | que lleva | para que |
+|---|---|---|
+| **Lo que suena** | la cola, el motor, que se lee, la voz, las plantillas y la salida | lo que se mira o se toca mientras se emite |
+| **Voces y claves** | las voces guardadas, las claves de la API, los ajustes de Fish y el consumo | lo que se configura una vez y se viene a buscar |
+
+Cada tarjeta va en su **propia celda** con la vista a la que pertenece, y la rejilla
+las reparte en tres columnas: cambiar una tarjeta de vista es cambiarle la clase, no
+moverla de sitio en el marcado. **El orden del marcado importa** —la rejilla coloca
+por filas, y una fila mide lo que su tarjeta mas alta—, asi que las tarjetas altas
+estan puestas para caer en filas distintas.
+
+### Las voces guardadas y las plantillas de lectura
+
+- **Voces guardadas**: cada voz que se usa se guarda con su **nombre, su
+  identificador, su proveedor, su idioma y una descripcion**, para no volver a
+  buscarla en la API. Se guarda la **referencia, nunca el audio**: lo que se reutiliza
+  es la configuracion de la voz, no lo que dijo. La lista mezcla los dos motores y
+  cada una vuelve al suyo al elegirla. El boton es **texto** («Guardar voz»), no un
+  simbolo, y va junto al selector.
+- **Plantillas de lectura**: lo que se dice por cada cosa que pasa es configurable,
+  con las variables `{usuario}`, `{mensaje}`, `{regalo}`, `{cantidad}` y `{diamantes}`.
+  El motor de plantillas vive en `tts/plantilla.rs`, **aparte del chat y de la API de
+  voz**: añadir un proveedor nuevo no lo toca, y cambiar una frase no toca ni el bus
+  ni la red. Una variable mal escrita **se deja visible** en la frase, para que el
+  error se vea en vez de oirse a medias.
 
 ## El tamaño es fijo: todo cabe
 
@@ -135,7 +168,7 @@ página**:
 | Aportaciones | cuatro columnas por dos filas: las cuatro tablas de personas arriba, el resumen por tipo y el flujo de regalos abajo |
 | Alertas | lista, editor y medios en tres columnas; la salida de audio y la dirección de OBS debajo |
 | Overlays | direcciones y diseños a la izquierda; la previa con su columna entera a la derecha |
-| Voz | la cabecera a todo el ancho y tres columnas de ajustes |
+| Voz | la cabecera a todo el ancho, **dos vistas** y tres columnas de paneles en cada una |
 | Desarrollador | las métricas en tres columnas, y dos filas de cuatro y de dos paneles |
 
 Dos listas **sí** se desplazan por dentro, y es a propósito: el **chat** de Inicio y el

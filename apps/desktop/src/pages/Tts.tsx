@@ -16,13 +16,22 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type TtsProvider, type TtsStatus, type TtsVoice } from "../api";
+import { api, type TtsProvider, type TtsStatus, type TtsVoice, type TtsVozGuardada } from "../api";
 import { Card, Empty, formatNumber } from "../components";
 import { t } from "../i18n/es";
 
 /** Ritmos que entiende edge-tts. */
 const RATES = ["-50%", "-25%", "+0%", "+25%", "+50%", "+100%"];
 const PITCHES = ["-12Hz", "-8Hz", "-4Hz", "+0Hz", "+4Hz", "+8Hz", "+12Hz"];
+
+/**
+ * Las variables que entiende una plantilla.
+ *
+ * Espeja `tts::plantilla::VARIABLES`, que es quien las rellena: aquí solo se
+ * enseñan, para que el streamer sepa qué puede escribir. Si algún día se añade una
+ * allí, se añade aquí y el texto de ayuda la enseña sola.
+ */
+const VARIABLES = ["usuario", "mensaje", "regalo", "cantidad", "diamantes"];
 
 /** Tope de claves, el mismo que impone el motor. */
 const TOPE_CLAVES = 10;
@@ -40,6 +49,9 @@ export function Tts({ initial }: Props) {
   const [claveNombre, setClaveNombre] = useState("");
   const [claveValor, setClaveValor] = useState("");
   const [errorClave, setErrorClave] = useState<string | null>(null);
+  /** Nombre y código de la voz que se está dando de alta. */
+  const [vozNombre, setVozNombre] = useState("");
+  const [vozCodigo, setVozCodigo] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -157,8 +169,142 @@ export function Tts({ initial }: Props) {
   const descripcionDeMotor = (cual: TtsProvider) =>
     cual === "fish" ? t.tts.engineFishHint : t.tts.engineEdgeHint;
 
+  /** Las voces guardadas con su nombre, tal como las manda el motor. */
+  const guardadas = status.settings.fish.voces;
+
+  /**
+   * Las tres plantillas se editan **en local** y se guardan al salir del campo.
+   *
+   * El estado de la voz llega cada segundo; si el campo se pintara desde ahi, el
+   * cursor saltaria al final mientras se escribe. Es el mismo trato que el texto
+   * de los avisos de OBS. Se siembra una sola vez, cuando llega el primer estado.
+   */
+  const [plantillas, setPlantillas] = useState<{
+    chat: string;
+    regalo: string;
+    follow: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!status || plantillas) return;
+    setPlantillas({
+      chat: status.settings.chat_template,
+      regalo: status.settings.gift_template,
+      follow: status.settings.follow_template,
+    });
+  }, [status, plantillas]);
+
+  const guardarPlantilla = (cual: "chat" | "regalo" | "follow") => {
+    if (!plantillas) return;
+    if (cual === "chat") update({ chat_template: plantillas.chat });
+    else if (cual === "regalo") update({ gift_template: plantillas.regalo });
+    else update({ follow_template: plantillas.follow });
+  };
+
+  /**
+   * Guarda en la lista una voz del catálogo de Edge, con lo que ya se sabe de
+   * ella: su idioma y su rótulo. Es lo que evita volver a buscarla en el
+   * desplegable cada vez.
+   */
+  const guardarVozEdge = (referencia: string, idioma: string) => {
+    const delCatalogo = voices.find((voz) => voz.id === referencia);
+    const nueva = {
+      nombre: delCatalogo?.label ?? referencia,
+      referencia,
+      proveedor: "edge",
+      idioma,
+      descripcion: delCatalogo?.label ?? "",
+    };
+    update({
+      fish_voces: [
+        nueva,
+        ...guardadas.filter(
+          (otra) => !(otra.proveedor === "edge" && otra.referencia === referencia),
+        ),
+      ],
+    });
+  };
+
+  /**
+   * Pone en uso una voz guardada.
+   *
+   * Una de Edge vuelve a su motor y a su desplegable —el que toque según su
+   * idioma—; una de Fish pone su código. Es el ahorro de verdad: el streamer no
+   * tiene que acordarse de que «mi voz de mujer» era de Fish, ni de cuál era su
+   * código.
+   *
+   * El motor **solo se manda si cambia**: cambiarlo vacía la cola, y elegir otra
+   * voz del mismo motor no tiene por qué cortar lo que está leyendo.
+   */
+  const usarVoz = (voz: TtsVozGuardada) => {
+    const esFish = voz.proveedor === "fish";
+    const motor: TtsProvider = esFish ? "fish" : "edge";
+    const cambio = motor === status.voz.proveedor ? {} : { provider: motor };
+    if (esFish) {
+      update({ ...cambio, fish_reference_id: voz.referencia });
+    } else if (voz.idioma === "en") {
+      update({ ...cambio, voice_en: voz.referencia });
+    } else {
+      update({ ...cambio, voice_es: voz.referencia });
+    }
+  };
+
+  /**
+   * Si una voz guardada es la que está sonando.
+   *
+   * Depende del motor, y mirar solo la referencia mentiría: una de Fish lo está si
+   * su código es el puesto **y** el motor es Fish; una de Edge, si es la elegida
+   * del idioma que le toca y el motor es Edge. Sin la primera condición, una voz
+   * de Fish aparecería «En uso» con Edge puesto solo porque su código sigue
+   * guardado en los ajustes.
+   */
+  const enUso = (voz: TtsVozGuardada): boolean => {
+    if (voz.proveedor === "fish") {
+      return status.voz.proveedor === "fish" && voz.referencia === status.voz.reference_id;
+    }
+    if (status.voz.proveedor !== "edge") return false;
+    const elegida = voz.idioma === "en" ? status.settings.voice_en : status.settings.voice_es;
+    return voz.referencia === elegida;
+  };
+
+  /** Qué mitad de la página se está mirando. */
+  const [vista, setVista] = useState<"sonando" | "voces">("sonando");
+
+  /**
+   * Guarda una voz con su nombre y la deja en uso.
+   *
+   * Se manda la lista **entera** y no una orden de alta: el motor guarda lo que
+   * recibe, así que añadir, renombrar y quitar son la misma operación y el orden
+   * lo decide quien acaba de tocar la pantalla. Si el código ya estaba en la
+   * lista, se le cambia el nombre en vez de repetirlo: dos filas con la misma voz
+   * solo hacen dudar de cuál está puesta.
+   */
+  const anadirVoz = () => {
+    const referencia = vozCodigo.trim();
+    if (!referencia) return;
+    const sinLaRepetida = guardadas.filter(
+      (voz) => !(voz.proveedor === "fish" && voz.referencia === referencia),
+    );
+    update({
+      fish_voces: [
+        {
+          nombre: vozNombre.trim(),
+          referencia,
+          proveedor: "fish",
+          // De una voz de Fish no se sabe el idioma ni hay descripción: su API no
+          // los da con el identificador. Se dejan vacíos en vez de inventarlos.
+          idioma: "",
+          descripcion: "",
+        },
+        ...sinLaRepetida,
+      ],
+      fish_reference_id: referencia,
+    });
+    setVozNombre("");
+    setVozCodigo("");
+  };
+
   return (
-    <div className="grid-panel">
+    <div className="grid-panel voz" data-vista={vista}>
       {error ? <div className="error">{error}</div> : null}
       {status.degraded ? (
         <div className="error">
@@ -229,11 +375,37 @@ export function Tts({ initial }: Props) {
         </div>
       </Card>
 
+      {/* Dos vistas en la misma pestaña: **lo que suena** mientras emites y **lo
+          que tienes guardado**. Los diez paneles suman 1.831 px para 674 de alto y
+          sacarlos a otra pestaña no vale —las otras cinco estan exactamente
+          llenas—, asi que se reparten aqui. Se ve todo sin desplazar la pagina. */}
+      <div className="vista-switch" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vista === "sonando"}
+          className={vista === "sonando" ? "active" : "ghost"}
+          onClick={() => setVista("sonando")}
+        >
+          {t.tts.vistaSonando}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vista === "voces"}
+          className={vista === "voces" ? "active" : "ghost"}
+          onClick={() => setVista("voces")}
+        >
+          {t.tts.vistaVoces}
+        </button>
+      </div>
+
       <div className="grid-columns">
-        {/* Columna izquierda: las dos listas. La de la cola es lo que va a sonar
-            y la de claves es lo que hay guardado; las dos son «lo que hay», y por
-            eso van juntas. Los ajustes del motor, en la otra. */}
-        <div className="stack">
+        {/* Cada tarjeta en su propia celda y con la vista a la que pertenece. La
+            rejilla las reparte sola en tres columnas, y esconder las de la otra
+            vista deja que las demas se recoloquen: mover una tarjeta de vista es
+            cambiarle la clase, no moverla de sitio en el marcado. */}
+        <div className="stack vista-sonando">
           <Card title={t.tts.queue}>
             {status.queued.length === 0 ? (
               <Empty>{t.tts.queueEmpty}</Empty>
@@ -255,10 +427,79 @@ export function Tts({ initial }: Props) {
               </ul>
             )}
           </Card>
+        </div>
 
-          {/* Las claves de Fish solo se enseñan cuando Fish es el motor: con la
-              voz de siempre no se usan para nada. */}
-          {status.voz.proveedor === "fish" ? (
+        {/* La lista de voces guardadas, **la primera** de su vista: es a lo que se
+            viene aquí. Va fuera del panel de Fish a propósito —una voz de Edge
+            tiene que poder elegirse con el motor de Edge puesto, y ese panel solo
+            se enseña cuando el motor es Fish—. */}
+        <div className="stack vista-voces">
+          <Card
+            title={t.tts.voicesSaved}
+            actions={
+              guardadas.length > 0 ? (
+                <span className="hint">{t.tts.voicesSavedHint}</span>
+              ) : null
+            }
+          >
+            {guardadas.length === 0 ? (
+              <p className="hint">{t.tts.voicesEmpty}</p>
+            ) : (
+              <ul className="voces">
+                {guardadas.map((voz) => {
+                  const activa = enUso(voz);
+                  const clave = `${voz.proveedor}:${voz.referencia}`;
+                  return (
+                    <li key={clave} className={activa ? "voz activa" : "voz"}>
+                      {/* El identificador va en el `title`: son 32 caracteres y no
+                          caben junto al nombre y los botones en 400 px. */}
+                      <span className="voz-nombre" title={voz.referencia}>
+                        {voz.nombre || voz.referencia}
+                      </span>
+                      <span className="etiqueta">
+                        {t.tts.voiceProvider[voz.proveedor] ?? voz.proveedor}
+                      </span>
+                      {activa ? (
+                        <span className="etiqueta">{t.tts.voiceInUse}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ghost tiny"
+                          onClick={() => usarVoz(voz)}
+                        >
+                          {t.tts.voiceUse}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        title={t.tts.voiceRemoveHint}
+                        onClick={() =>
+                          update({
+                            fish_voces: guardadas.filter(
+                              (otra) =>
+                                !(
+                                  otra.proveedor === voz.proveedor &&
+                                  otra.referencia === voz.referencia
+                                ),
+                            ),
+                          })
+                        }
+                      >
+                        ×
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        {/* Las claves de Fish solo se enseñan cuando Fish es el motor: con la
+            voz de siempre no se usan para nada. */}
+        {status.voz.proveedor === "fish" ? (
+          <div className="stack vista-voces">
             <Card title={t.tts.keys}>
               <p className="hint">{t.tts.keysHint}</p>
               {errorClave ? <p className="voz-aviso">{errorClave}</p> : null}
@@ -310,7 +551,7 @@ export function Tts({ initial }: Props) {
               {status.consumo.claves.length >= TOPE_CLAVES ? (
                 <p className="voz-aviso">{t.tts.keyFull}</p>
               ) : (
-                <div className="clave-alta">
+                <div className="alta-linea">
                   <div className="campo">
                     <label htmlFor="clave-nombre">{t.tts.keyName}</label>
                     <input
@@ -341,10 +582,10 @@ export function Tts({ initial }: Props) {
                 </div>
               )}
             </Card>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
-        <div className="stack">
+        <div className="stack vista-sonando">
           {/* Motor de voz: es lo primero que se elige porque decide todo lo demas
               de esta página (qué voces hay, qué claves hacen falta y a qué precio
               se cuenta). */}
@@ -395,27 +636,48 @@ export function Tts({ initial }: Props) {
               <p className="voz-aviso">{t.tts.engineReady[status.voz.listo]}</p>
             )}
           </Card>
+        </div>
 
-          {/* Los ajustes de Fish solo se enseñan cuando Fish es el motor: con la
-              voz de siempre no se usan para nada. */}
-          {status.voz.proveedor === "fish" ? (
-            <>
+        {/* Los ajustes de Fish solo se enseñan cuando Fish es el motor: con la
+            voz de siempre no se usan para nada. */}
+        {status.voz.proveedor === "fish" ? (
+          <>
+            <div className="stack vista-voces">
               <Card title={t.tts.fish}>
                 <p className="hint">{t.tts.fishHint}</p>
-                <div className="campo">
-                  <label htmlFor="voz-fish">{t.tts.fishVoice}</label>
-                  <input
-                    id="voz-fish"
-                    type="text"
-                    defaultValue={status.voz.reference_id}
-                    placeholder={t.tts.fishVoicePlaceholder}
-                    spellCheck={false}
-                    /* Se guarda al salir del campo y no en cada tecla: guardar
-                       por tecla reescribiria el perfil entero decenas de veces. */
-                    onBlur={(event) => update({ fish_reference_id: event.target.value })}
-                  />
-                  <span className="hint">{t.tts.fishVoiceHint}</span>
+
+                {/* El alta, en una linea: nombre, codigo y guardar. Al guardar
+                    queda **en uso**, que es lo que se quiere al pegar una voz
+                    nueva. La lista de las guardadas vive en su propia tarjeta,
+                    porque tambien enseña las de Edge y esa tiene que verse con
+                    cualquiera de los dos motores puesto. */}
+                <div className="alta-linea">
+                  <div className="campo">
+                    <label htmlFor="voz-nombre">{t.tts.voiceName}</label>
+                    <input
+                      id="voz-nombre"
+                      value={vozNombre}
+                      placeholder={t.tts.voiceNamePlaceholder}
+                      spellCheck={false}
+                      maxLength={40}
+                      onChange={(event) => setVozNombre(event.target.value)}
+                    />
+                  </div>
+                  <div className="campo">
+                    <label htmlFor="voz-codigo">{t.tts.voiceCode}</label>
+                    <input
+                      id="voz-codigo"
+                      value={vozCodigo}
+                      placeholder={t.tts.voiceCodePlaceholder}
+                      spellCheck={false}
+                      onChange={(event) => setVozCodigo(event.target.value)}
+                    />
+                  </div>
+                  <button type="button" disabled={!vozCodigo.trim()} onClick={anadirVoz}>
+                    {t.tts.voiceAdd}
+                  </button>
                 </div>
+
                 <div className="campo">
                   <label htmlFor="voz-modelo">{t.tts.fishModel}</label>
                   <select
@@ -431,8 +693,9 @@ export function Tts({ initial }: Props) {
                   </select>
                 </div>
               </Card>
+            </div>
 
-
+            <div className="stack vista-voces">
               <Card title={t.tts.usage}>
                 <p className="hint">{t.tts.usageHint}</p>
                 <p className="hint">
@@ -464,15 +727,17 @@ export function Tts({ initial }: Props) {
 
                 {status.consumo.claves.length === 0 ? <Empty>{t.tts.usageEmpty}</Empty> : null}
               </Card>
-            </>
-          ) : null}
-        </div>
+            </div>
+          </>
+        ) : null}
 
-        {/* Tercera columna. Antes eran dos columnas de seis tarjetas y la de la
-            derecha medía 1.230 px con la ventana en 900: había que desplazar la
-            página entera para llegar al volumen. Con las tres columnas que caben en
-            1.240 px, la más cargada baja a ~530 y la página entra entera. */}
-        <div className="stack">
+        {/* La lista de voces guardadas se ha movido arriba del todo de esta vista:
+            es a lo que se viene aquí, y en el marcado tiene que ir antes que las
+            claves y los ajustes de Fish —la rejilla coloca por orden, y con
+            `order` la vista quedaría al revés de como la lee un lector de
+            pantalla—. */}
+
+        <div className="stack vista-sonando">
           <Card title={t.tts.sources}>
             <p className="hint">{t.tts.sourcesHint}</p>
             <label className="switch">
@@ -492,18 +757,16 @@ export function Tts({ initial }: Props) {
               <span>{t.tts.readFollows}</span>
             </label>
           </Card>
+        </div>
 
-          <Card title={t.tts.volume}>
-            <div className="control">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(status.settings.volume * 100)}
-                onChange={(event) => update({ volume: Number(event.target.value) / 100 })}
-              />
-              <span className="rank-value">{Math.round(status.settings.volume * 100)} %</span>
-            </div>
+        <div className="stack vista-sonando">
+          {/* El panel se llamaba «Volumen» y aqui dentro estaban **las voces**:
+              «Voz en español» y «Voz en inglés». El streamer las busco y no las
+              encontro —tuvo que preguntarlo— porque nadie mira debajo de un
+              rotulo que dice Volumen para cambiar de voz. Ahora el panel se llama
+              por lo que es y el deslizador se fue con la salida de audio, que es
+              donde tiene sentido: por donde sale y a que volumen. */}
+          <Card title={t.tts.voice}>
             <div className="control">
               <label>
                 {t.tts.rate}
@@ -548,6 +811,17 @@ export function Tts({ initial }: Props) {
                   ))}
                 </select>
               </label>
+              {/* Guardar la que esta puesta, **al lado del selector**: es lo que
+                  evita volver a buscarla en el desplegable cada vez. Texto y no un
+                  simbolo: un icono hay que adivinarlo. */}
+              <button
+                type="button"
+                className="ghost tiny"
+                title={t.tts.voiceSaveHint}
+                onClick={() => guardarVozEdge(status.settings.voice_es, "es")}
+              >
+                {t.tts.voiceSave}
+              </button>
             </div>
             <div className="control">
               <label>
@@ -563,23 +837,96 @@ export function Tts({ initial }: Props) {
                   ))}
                 </select>
               </label>
+              <button
+                type="button"
+                className="ghost tiny"
+                title={t.tts.voiceSaveHint}
+                onClick={() => guardarVozEdge(status.settings.voice_en, "en")}
+              >
+                {t.tts.voiceSave}
+              </button>
             </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={status.settings.say_author}
-                onChange={(event) => update({ say_author: event.target.checked })}
-              />
-              <span>{t.tts.sayAuthor}</span>
-            </label>
           </Card>
+        </div>
 
-          <Card title={t.tts.device}>
+        <div className="stack vista-sonando">
+          {/* Las plantillas: lo que se dice por cada cosa que pasa. El
+              interruptor de «decir quien lo escribio» desaparecio —su trabajo lo
+              hace la plantilla del chat, que ademas deja cambiar el verbo—, asi
+              que aqui esta lo que antes era un si o un no. */}
+          <Card title={t.tts.plantillas}>
+            <p className="hint">{t.tts.plantillasHint}</p>
+            {plantillas ? (
+              <>
+                <div className="campo">
+                  <label htmlFor="plantilla-chat">{t.tts.chatTemplate}</label>
+                  <input
+                    id="plantilla-chat"
+                    value={plantillas.chat}
+                    spellCheck={false}
+                    maxLength={160}
+                    onChange={(event) =>
+                      setPlantillas({ ...plantillas, chat: event.target.value })
+                    }
+                    onBlur={() => guardarPlantilla("chat")}
+                  />
+                </div>
+                <div className="campo">
+                  <label htmlFor="plantilla-regalo">{t.tts.giftTemplate}</label>
+                  <input
+                    id="plantilla-regalo"
+                    value={plantillas.regalo}
+                    spellCheck={false}
+                    maxLength={160}
+                    onChange={(event) =>
+                      setPlantillas({ ...plantillas, regalo: event.target.value })
+                    }
+                    onBlur={() => guardarPlantilla("regalo")}
+                  />
+                </div>
+                <div className="campo">
+                  <label htmlFor="plantilla-follow">{t.tts.followTemplate}</label>
+                  <input
+                    id="plantilla-follow"
+                    value={plantillas.follow}
+                    spellCheck={false}
+                    maxLength={160}
+                    onChange={(event) =>
+                      setPlantillas({ ...plantillas, follow: event.target.value })
+                    }
+                    onBlur={() => guardarPlantilla("follow")}
+                  />
+                </div>
+                <p className="hint">
+                  {t.tts.plantillasVariables}: {VARIABLES.map((v) => `{${v}}`).join(" ")}
+                </p>
+              </>
+            ) : null}
+          </Card>
+        </div>
+
+        <div className="stack vista-sonando">
+          <Card title={t.tts.output}>
             <p className="hint">
               {status.audio_device
                 ? t.tts.deviceActive(status.audio_device)
                 : t.tts.deviceUnavailable}
             </p>
+            {/* El volumen, con la salida: es la misma pregunta —por donde suena y
+                con que fuerza— y antes vivia en un panel que se llamaba Volumen y
+                no tenia el volumen solo. */}
+            <div className="control">
+              <label htmlFor="voz-volumen">{t.tts.volume}</label>
+              <input
+                id="voz-volumen"
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(status.settings.volume * 100)}
+                onChange={(event) => update({ volume: Number(event.target.value) / 100 })}
+              />
+              <span className="rank-value">{Math.round(status.settings.volume * 100)} %</span>
+            </div>
             <div className="control">
               <label>
                 {t.tts.device}

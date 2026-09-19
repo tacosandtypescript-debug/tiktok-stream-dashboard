@@ -8,6 +8,7 @@ pub mod consumo;
 pub mod filters;
 pub mod fish;
 pub mod manager;
+pub mod plantilla;
 pub mod player;
 pub mod provider;
 pub mod queue;
@@ -37,6 +38,15 @@ pub const SIDECAR_NAME: &str = "tiktok-tts-provider";
 pub const SIDECAR_SCRIPT: &str = "services/tts-provider/src/main.py";
 /// Interprete de desarrollo (gestionado por `uv` dentro del propio proyecto).
 pub const DEV_PYTHON: &str = ".tooling/venv/Scripts/python.exe";
+
+/// Lo que se le dice al streamer cuando no aparece el motor de voz.
+///
+/// El detalle tecnico —que si el script, que si PyInstaller— se queda en el
+/// registro: en pantalla solo cabe **lo que se puede hacer**. Y lo que se puede
+/// hacer incluye volver a abrir la aplicacion, que es lo que faltaba decir: la
+/// ruta del motor se resuelve **una vez, al arrancar**, asi que copiar el fichero
+/// con la aplicacion abierta no arregla nada hasta reiniciarla.
+pub const SIN_MOTOR: &str = "falta el motor de voz. Descarga tiktok-tts-provider-x86_64-pc-windows-msvc.exe, ponlo en la misma carpeta que la aplicacion y vuelve a abrirla";
 
 /// Sufijo que Tauri exige en `src-tauri/binaries/` para el binario de cada
 /// arquitectura. El proyecto publica Windows x64 por ahora; si se habilita
@@ -165,49 +175,6 @@ pub fn voice_for(text: &str, spanish: &str, english: &str) -> String {
     }
 }
 
-/// Texto que se lee para un mensaje de chat: "Nick dice: mensaje".
-pub fn chat_line(nickname: &str, content: &str, say_author: bool) -> String {
-    let nickname = nickname.trim();
-    if !say_author || nickname.is_empty() {
-        return content.trim().to_string();
-    }
-    format!("{nickname} dice: {}", content.trim())
-}
-
-/// Texto que se lee para un regalo: "Nick envio 5 x Rosa".
-///
-/// Aqui el autor **siempre** se dice: un regalo sin nombre no informa de nada.
-/// La cantidad es la del evento que cierra la racha, que es el unico que se lee
-/// (ver `TtsManager::wants`).
-pub fn gift_line(nickname: &str, gift: &crate::core::event::GiftInfo) -> String {
-    let nombre = gift.name.trim();
-    let nombre = if nombre.is_empty() {
-        "un regalo"
-    } else {
-        nombre
-    };
-    let nucleo = match gift.units() {
-        0 | 1 => nombre.to_string(),
-        unidades => format!("{unidades} x {nombre}"),
-    };
-    let nickname = nickname.trim();
-    if nickname.is_empty() {
-        format!("regalo: {nucleo}")
-    } else {
-        format!("{nickname} envio {nucleo}")
-    }
-}
-
-/// Texto que se lee para un follow: "Nick te sigue".
-pub fn follow_line(nickname: &str) -> String {
-    let nickname = nickname.trim();
-    if nickname.is_empty() {
-        "nuevo seguidor".to_string()
-    } else {
-        format!("{nickname} te sigue")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,37 +191,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compone_la_linea_que_se_lee() {
-        assert_eq!(
-            chat_line("Carlos", "hola a todos", true),
-            "Carlos dice: hola a todos"
-        );
-        assert_eq!(chat_line("Carlos", "hola a todos", false), "hola a todos");
-        // Sin apodo no se inventa un prefijo raro.
-        assert_eq!(chat_line("   ", "hola", true), "hola");
-    }
-
-    #[test]
-    fn compone_los_avisos_de_regalo_y_de_follow() {
-        use crate::core::event::GiftInfo;
-
-        // Una racha de 5 rosas: el evento que la cierra vale 5 unidades.
-        let racha = GiftInfo::new("5655", "Rose", 1, true, 5, true, "g1");
-        assert_eq!(gift_line("Carlos", &racha), "Carlos envio 5 x Rose");
-
-        // Un regalo suelto no lleva cantidad.
-        let suelto = GiftInfo::new("5655", "Rose", 1, false, 1, false, "0");
-        assert_eq!(gift_line("Carlos", &suelto), "Carlos envio Rose");
-
-        // Sin nombre de regalo no se dice "envio " y ya esta.
-        let raro = GiftInfo::new("1", "  ", 1, false, 1, false, "0");
-        assert_eq!(gift_line("Carlos", &raro), "Carlos envio un regalo");
-        assert_eq!(gift_line("  ", &suelto), "regalo: Rose");
-
-        assert_eq!(follow_line("Carlos"), "Carlos te sigue");
-        assert_eq!(follow_line("  "), "nuevo seguidor");
-    }
+    // La composicion de la frase que se lee ya no vive aqui: se mudo a
+    // `tts::plantilla`, con sus variables y sus pruebas. Estas dos se han ido con
+    // ella en vez de quedarse duplicadas.
 
     #[test]
     fn la_configuracion_apunta_a_un_script_existente_en_este_repositorio() {
