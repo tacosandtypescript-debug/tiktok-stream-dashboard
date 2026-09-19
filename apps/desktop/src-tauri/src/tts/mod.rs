@@ -4,7 +4,9 @@
 //! lee, **cuando** y **con que prioridad**; Python solo convierte texto en
 //! audio. Asi el motor de voz es sustituible sin tocar la cola ni los filtros.
 
+pub mod consumo;
 pub mod filters;
+pub mod fish;
 pub mod manager;
 pub mod player;
 pub mod provider;
@@ -13,12 +15,18 @@ pub mod voices;
 
 use std::path::{Path, PathBuf};
 
+pub use consumo::{ClaveVoz, Consumo, ConsumoStatus, UsoProveedor};
 pub use filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
-pub use manager::{TtsManager, TtsNowPlaying, TtsSettings, TtsStatus};
+pub use fish::{
+    modelos, ClaveGuardada, ClienteTts, FishAudio, FishConfig, ModeloFish, RespuestaHttp,
+    MODELO_POR_DEFECTO, TOPE_CLAVES,
+};
+pub use manager::{TtsManager, TtsNowPlaying, TtsSettings, TtsStatus, VoiceProvider};
 pub use player::{AudioSink, FallbackSink, NullSink, RodioSink};
 pub use provider::{
-    cache_key, prune_cache, EdgeTtsSidecar, SharedTtsProvider, TtsAudio, TtsCancellation,
-    TtsConfig, TtsProvider, TtsRequest,
+    cache_key, prune_cache, ClaveStatus, EdgeTtsSidecar, ErrorVoz, EstadoClave, MotivoFallo,
+    ProviderSettings, Readiness, SharedTtsProvider, TtsAudio, TtsCancellation, TtsConfig,
+    TtsProvider, TtsRequest,
 };
 pub use queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
 pub use voices::{catalog, detect_language, Language, Voice, DEFAULT_VOICE};

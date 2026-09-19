@@ -39,9 +39,14 @@ use tokio::sync::watch;
 use crate::core::event::{Event, EventKind};
 use crate::core::EventBus;
 
+use super::consumo::ConsumoStatus;
 use super::filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
+use super::fish;
 use super::player::AudioSink;
-use super::provider::{SharedTtsProvider, TtsCancellation, TtsRequest};
+use super::provider::{
+    ErrorVoz, MotivoFallo, ProviderSettings, Readiness, SharedTtsProvider, TtsCancellation,
+    TtsRequest,
+};
 use super::queue::{priority, PushOutcome, TtsItem, TtsPreview, TtsQueue, TtsSource};
 use super::voices::{self, Language};
 use super::{chat_line, voice_for};
@@ -87,6 +92,54 @@ const IDLE_TICK: Duration = Duration::from_millis(250);
 /// repartido.
 const CACHE_PRUNE_EVERY: u64 = 100;
 
+/// Cual de los dos motores de voz lee el chat.
+///
+/// Se elige en la pagina de Voz. Los dos producen un **fichero** de audio y nada
+/// mas: la cola, el volumen, la salida configurable y el reproductor no saben cual
+/// esta puesto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceProvider {
+    /// La voz de siempre: el sidecar de `edge-tts`, gratis y sin clave.
+    Edge,
+    /// Fish Audio por HTTPS: el streamer pone sus claves y su codigo de voz.
+    Fish,
+}
+
+impl VoiceProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VoiceProvider::Edge => "edge",
+            VoiceProvider::Fish => "fish",
+        }
+    }
+}
+
+/// Ajustes de Fish Audio que **no son secretos**.
+///
+/// La clave no esta aqui y no puede estarlo: estos ajustes viajan a la interfaz
+/// dentro de `TtsStatus.settings`. Las claves viven en su propia tabla de la base
+/// de datos y en el proveedor, y lo unico que sale hacia la interfaz es su pista
+/// enmascarada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FishSettings {
+    /// Codigo de voz (`reference_id`).
+    pub reference_id: String,
+    /// Modelo. El **gratuito** por defecto: el de pago cuesta 15 $ por millon de
+    /// bytes de texto y tiene que ser una eleccion consciente.
+    pub model: String,
+}
+
+impl Default for FishSettings {
+    fn default() -> Self {
+        Self {
+            reference_id: String::new(),
+            model: fish::MODELO_POR_DEFECTO.to_string(),
+        }
+    }
+}
+
 /// Configuracion del TTS tal como la ve la interfaz. Es el contrato que
 /// persistira SQLite por perfil (docs/milestone-2.md §4).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +160,10 @@ pub struct TtsSettings {
     /// Leer los follows. Apagado por defecto: una sala media genera decenas por
     /// hora y taparian el chat.
     pub read_follows: bool,
+    /// Motor de voz elegido.
+    pub provider: VoiceProvider,
+    /// Ajustes de Fish Audio (sin la clave).
+    pub fish: FishSettings,
     pub filters: FilterConfig,
     pub queue_capacity: usize,
 }
@@ -124,6 +181,8 @@ impl Default for TtsSettings {
             audio_device: None,
             read_gifts: true,
             read_follows: false,
+            provider: VoiceProvider::Edge,
+            fish: FishSettings::default(),
             filters: FilterConfig::default(),
             queue_capacity: 32,
         }
@@ -137,6 +196,28 @@ pub struct TtsNowPlaying {
     pub user: String,
     pub text: String,
     pub priority: i32,
+}
+
+/// Estado del motor de voz para la pagina de Voz.
+#[derive(Debug, Clone, Serialize)]
+pub struct VozStatus {
+    /// Motor elegido.
+    pub proveedor: VoiceProvider,
+    /// Que le falta al motor para poder leer, si le falta algo. Es un
+    /// identificador, no una frase: el texto lo pone `i18n`.
+    pub listo: Readiness,
+    /// Codigo de voz de Fish (vacio si no se ha puesto).
+    pub reference_id: String,
+    /// Modelo de Fish en vigor.
+    pub modelo: String,
+    /// Los modelos que se pueden elegir, con su tarifa.
+    pub modelos: Vec<fish::ModeloFish>,
+    /// Cuantas claves hay guardadas y cuantas siguen sirviendo.
+    pub claves_total: usize,
+    pub claves_vivas: usize,
+    /// Nombre de la clave que se esta usando, si hay alguna.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clave_en_uso: Option<String>,
 }
 
 /// Estado del TTS para la pagina del interfaz. Los contadores viven aqui y no
@@ -159,7 +240,9 @@ pub struct TtsStatus {
     pub synth_failures: u64,
     pub muted_users: usize,
     /// Descartes por motivo, de mayor a menor. El streamer tiene que poder ver
-    /// por que no se lee el chat (docs/plan-review.md §P1-7).
+    /// por que no se lee el chat (docs/plan-review.md §P1-7). Incluye los fallos
+    /// del proveedor con su motivo: una clave rechazada o un servicio caido son
+    /// "por que no se lee esto" tanto como un filtro.
     pub rejections: Vec<(&'static str, u64)>,
     /// Motivo por el que el TTS esta degradado (sin audio o sin sidecar), si lo
     /// esta. Se muestra de forma visible: el streamer debe saberlo antes que el
@@ -178,6 +261,10 @@ pub struct TtsStatus {
     pub audio_degraded: Option<String>,
     /// Nombre real del dispositivo activo; `None` indica el sink de reserva.
     pub audio_device: Option<String>,
+    /// Estado del motor de voz elegido (proveedor, claves, modelo).
+    pub voz: VozStatus,
+    /// Consumo medido localmente, con el coste ya calculado en Rust.
+    pub consumo: ConsumoStatus,
 }
 
 /// Contadores propios del gestor.
@@ -291,7 +378,16 @@ pub struct TtsManager {
     seen: Mutex<Seen>,
     muted: Mutex<HashSet<String>>,
     paused: Mutex<bool>,
-    provider: SharedTtsProvider,
+    /// Motor de sintesis activo. Va en un cerrojo porque el streamer puede
+    /// cambiarlo en caliente (edge-tts o Fish Audio) sin reiniciar nada.
+    provider: RwLock<SharedTtsProvider>,
+    /// Proveedor que **mide el gasto** (Fish), aunque el motor activo sea otro.
+    ///
+    /// Va aparte del motor a proposito. El consumo y las claves son datos
+    /// **acumulados**: no pueden desaparecer porque el streamer vuelva un rato a
+    /// la voz de siempre. Si desaparecieran, la lista de claves se veria vacia
+    /// justo despues de guardar una, que es la peor forma de fallar (en silencio).
+    medidor: RwLock<Option<SharedTtsProvider>>,
     /// Se clona en `consumer_future`; el propio gestor publica avisos de
     /// diagnostico en el.
     bus: Arc<EventBus>,
@@ -339,7 +435,8 @@ impl TtsManager {
             seen: Mutex::new(Seen::default()),
             muted: Mutex::new(HashSet::new()),
             paused: Mutex::new(false),
-            provider,
+            provider: RwLock::new(provider),
+            medidor: RwLock::new(None),
             bus,
             sink: RwLock::new(sink),
             audio_device: RwLock::new(audio_device),
@@ -354,7 +451,109 @@ impl TtsManager {
         // El volumen del dispositivo no es un detalle de cada frase: se aplica
         // una vez y sobrevive a todas las reproducciones.
         manager.sink().set_volume(volume);
+        // El proveedor recibe ya sus ajustes (el modelo, por ejemplo): el primer
+        // evento del bus no puede salir con los de fabrica.
+        manager.aplicar_ajustes_al_proveedor();
         manager
+    }
+
+    /// El motor de sintesis en vigor.
+    pub fn provider(&self) -> SharedTtsProvider {
+        self.provider
+            .read()
+            .unwrap_or_else(|envenenado| envenenado.into_inner())
+            .clone()
+    }
+
+    /// El proveedor que mide el gasto, si alguno lo hace.
+    pub fn medidor(&self) -> Option<SharedTtsProvider> {
+        self.medidor
+            .read()
+            .unwrap_or_else(|envenenado| envenenado.into_inner())
+            .clone()
+    }
+
+    /// Declara quien mide el gasto (Fish). Lo llama el motor al montar el estado:
+    /// el gestor no construye proveedores, solo los usa.
+    pub fn set_medidor(&self, medidor: Option<SharedTtsProvider>) {
+        *self
+            .medidor
+            .write()
+            .unwrap_or_else(|envenenado| envenenado.into_inner()) = medidor;
+    }
+
+    /// Pasa al proveedor los ajustes que solo entiende el.
+    fn aplicar_ajustes_al_proveedor(&self) {
+        let ajustes = ProviderSettings {
+            model: self
+                .settings
+                .read()
+                .unwrap_or_else(|envenenado| envenenado.into_inner())
+                .fish
+                .model
+                .clone(),
+        };
+        self.provider().apply(&ajustes);
+    }
+
+    /// Cambia el motor de voz sin reiniciar nada.
+    ///
+    /// **Que pasa con lo que estaba en cola:** se descarta, y se cuenta. La voz
+    /// de cada frase ya encolada la eligio el motor anterior (para Fish el codigo
+    /// de voz, para edge-tts el idioma del mensaje), asi que leerla con el nuevo
+    /// sonaria con una voz que nadie pidio; para Fish, ademas, un nombre de voz de
+    /// edge-tts no es un `reference_id` valido y serian errores en cadena. Se
+    /// cuenta como descarte con su motivo para que el streamer lo vea en la lista
+    /// de descartes en vez de notar que faltan frases.
+    ///
+    /// Lo que **ya esta sonando** no se corta: para eso esta "saltar". La
+    /// sintesis en vuelo tampoco se cancela, porque cambiar de motor no es una
+    /// orden de silencio.
+    pub fn set_provider(&self, provider: SharedTtsProvider, kind: VoiceProvider) {
+        let ya_es = self
+            .settings
+            .read()
+            .unwrap_or_else(|envenenado| envenenado.into_inner())
+            .provider;
+        {
+            let mut settings = self.write_settings();
+            settings.provider = kind;
+        }
+        if ya_es == kind {
+            // Mismo motor: solo se refresca la instancia (por ejemplo al arrancar).
+            *self
+                .provider
+                .write()
+                .unwrap_or_else(|envenenado| envenenado.into_inner()) = provider;
+        } else {
+            let descartadas = self.lock_queue().clear();
+            if descartadas > 0 {
+                let mut counters = self.lock_counters();
+                *counters.rejections.entry("cambio de motor").or_insert(0) += descartadas as u64;
+                drop(counters);
+                tracing::info!(
+                    descartadas,
+                    motor = kind.as_str(),
+                    "cola descartada al cambiar de motor de voz"
+                );
+            }
+            *self
+                .provider
+                .write()
+                .unwrap_or_else(|envenenado| envenenado.into_inner()) = provider;
+            // Un fallo del motor anterior no puede quedarse pegado al nuevo.
+            *self
+                .provider_degraded
+                .lock()
+                .unwrap_or_else(|envenenado| envenenado.into_inner()) = None;
+        }
+        self.aplicar_ajustes_al_proveedor();
+        self.wake();
+    }
+
+    /// Empieza un directo: el contador de consumo de la sesion vuelve a cero.
+    pub fn begin_stream(&self) {
+        self.provider().begin_stream();
     }
 
     /// Capacidad del bus que se usa si no se pasa uno.
@@ -513,7 +712,7 @@ impl TtsManager {
             id: 0,
             user_id,
             text: line,
-            voice: voice_for(&accepted, &voice_es, &voice_en),
+            voice: self.voice_for_text(&accepted, &voice_es, &voice_en),
             priority,
             source,
             queued_at: Instant::now(),
@@ -625,6 +824,41 @@ impl TtsManager {
             Language::Es => settings.voice_es = voice.to_string(),
             Language::En => settings.voice_en = voice.to_string(),
         }
+    }
+
+    /// La voz con la que se leera este texto, segun el motor elegido.
+    ///
+    ///   * edge-tts: la voz del idioma que se detecte en el mensaje.
+    ///   * Fish Audio: el codigo de voz del streamer, que es **uno solo** —
+    ///     `reference_id` elige la voz clonada, no el idioma—, asi que el idioma
+    ///     del mensaje no cambia nada.
+    ///
+    /// El dato sale del gestor y viaja en la peticion: el proveedor no tiene que
+    /// saber de ajustes ni de idiomas.
+    fn voice_for_text(&self, texto: &str, voice_es: &str, voice_en: &str) -> String {
+        let (provider, reference_id) = {
+            let settings = self
+                .settings
+                .read()
+                .unwrap_or_else(|envenenado| envenenado.into_inner());
+            (settings.provider, settings.fish.reference_id.clone())
+        };
+        match provider {
+            VoiceProvider::Edge => voice_for(texto, voice_es, voice_en),
+            VoiceProvider::Fish => reference_id,
+        }
+    }
+
+    /// Codigo de voz de Fish (`reference_id`).
+    pub fn set_fish_voice(&self, voice: &str) {
+        self.write_settings().fish.reference_id = voice.trim().to_string();
+    }
+
+    /// Modelo de Fish. El proveedor lo recibe ya aplicado: el gestor es el dueno
+    /// del dato y el proveedor solo lo usa.
+    pub fn set_fish_model(&self, model: &str) {
+        self.write_settings().fish.model = model.trim().to_string();
+        self.aplicar_ajustes_al_proveedor();
     }
 
     pub fn set_say_author(&self, value: bool) {
@@ -792,6 +1026,39 @@ impl TtsManager {
             (None, None) => (None, None),
         };
 
+        // El consumo y el estado de las claves salen del **medidor** (Fish), que es
+        // el unico que sabe a que clave se le sumo cada frase. El proveedor de
+        // siempre no cobra por bytes, asi que devuelve `None` y se muestra a cero.
+        //
+        // Se pregunta al medidor y no al motor activo a proposito: el gasto es
+        // acumulado y no puede vaciarse por volver un rato a la voz de siempre.
+        let consumo = match self.medidor().as_ref().and_then(|medidor| medidor.usage()) {
+            Some(uso) => ConsumoStatus::nuevo(uso),
+            None => ConsumoStatus::vacio(&settings.fish.model, Vec::new()),
+        };
+        let voz = VozStatus {
+            proveedor: settings.provider,
+            listo: self.provider().readiness(),
+            reference_id: settings.fish.reference_id.clone(),
+            modelo: consumo.modelo.clone(),
+            modelos: fish::modelos(),
+            claves_total: consumo.claves.len(),
+            claves_vivas: consumo.claves_vivas,
+            // El nombre y no la pista: el streamer reconoce "la de marzo" mejor
+            // que ocho puntos. La pista sigue en el desglose, por si hay dudas.
+            clave_en_uso: consumo
+                .claves
+                .iter()
+                .find(|clave| clave.en_uso)
+                .map(|clave| {
+                    if clave.nombre.trim().is_empty() {
+                        clave.pista.clone()
+                    } else {
+                        clave.nombre.clone()
+                    }
+                }),
+        };
+
         TtsStatus {
             enabled: settings.enabled,
             paused,
@@ -815,6 +1082,8 @@ impl TtsManager {
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone(),
+            voz,
+            consumo,
         }
     }
 
@@ -937,7 +1206,7 @@ impl TtsManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(cancel.clone());
         let audio = self
-            .provider
+            .provider()
             .synthesize_with_cancel(&request, cancel.clone())
             .await;
         self.clear_current_synthesis(&cancel);
@@ -948,10 +1217,19 @@ impl TtsManager {
                 if cancel.is_cancelled() {
                     return Dispatch::Skipped;
                 }
-                // Sin sidecar no se cae nada: se cuenta y se sigue. Es el modo
-                // degradado que exige docs/decisions.md D3.
+                // Sin proveedor no se cae nada: se cuenta **con su motivo** y se
+                // sigue. Es el modo degradado que exige docs/decisions.md D3, y el
+                // motivo tiene que llegar a la lista de descartes para que el
+                // streamer sepa si es una clave, el saldo o la red.
                 tracing::warn!(%error, id = item.id, "sintesis fallida");
-                self.lock_counters().synth_failures += 1;
+                let motivo = ErrorVoz::motivo_de(&error)
+                    .map(MotivoFallo::as_str)
+                    .unwrap_or("fallo de sintesis");
+                {
+                    let mut counters = self.lock_counters();
+                    counters.synth_failures += 1;
+                    *counters.rejections.entry(motivo).or_insert(0) += 1;
+                }
                 *self
                     .provider_degraded
                     .lock()
@@ -1055,7 +1333,7 @@ impl TtsManager {
     /// Es E/S sobre cientos de ficheros, asi que no puede correr en el worker del
     /// runtime: el mismo motivo que la espera de `dispatch`, en pequeno.
     async fn prune_cache(&self) {
-        let provider = self.provider.clone();
+        let provider = self.provider();
         match tokio::task::spawn_blocking(move || provider.prune_cache()).await {
             Ok(0) => {}
             Ok(removed) => tracing::info!(removed, "cache de TTS podada"),
@@ -1194,7 +1472,7 @@ impl TtsManager {
             // resultado es correcto: una tarea abortada acaba en `Err`.
             let _ = task.await;
         }
-        self.provider.shutdown().await;
+        self.provider().shutdown().await;
         tracing::info!(from_cache = self.lock_counters().from_cache, "TTS detenido");
     }
 }
@@ -2217,6 +2495,161 @@ mod tests {
         assert_eq!(degraded.audio_degraded, None);
         // El gestor sigue vivo y acepta mas eventos.
         manager.handle_event(&chat(9, "9", "otra frase"));
+    }
+
+    /// Cambiar de motor con la cola llena: se descarta lo encolado y **se cuenta**.
+    ///
+    /// La voz de cada frase ya encolada la eligio el motor anterior, asi que
+    /// leerla con el nuevo sonaria con una voz que nadie pidio. Lo que no se puede
+    /// es hacerlo en silencio: el streamer tiene que ver en los descartes que esas
+    /// frases se cayeron por el cambio.
+    #[tokio::test]
+    async fn cambiar_de_motor_descarta_la_cola_y_lo_cuenta() {
+        let h = harness(settings());
+        // Sin arrancar el bucle: lo encolado se queda quieto y se puede medir.
+        for indice in 1..=3u64 {
+            h.manager.enqueue_for_test(TtsItem {
+                id: 0,
+                user_id: format!("u{indice}"),
+                text: format!("frase {indice}"),
+                voice: "es-ES-ElviraNeural".into(),
+                priority: priority::CHAT,
+                source: TtsSource::Chat,
+                queued_at: Instant::now(),
+            });
+        }
+        assert_eq!(h.manager.status().queued_len, 3);
+
+        // Se cambia a Fish con otro proveedor cualquiera.
+        let otro = FakeProvider::new();
+        h.manager
+            .set_provider(otro as SharedTtsProvider, VoiceProvider::Fish);
+
+        let status = h.manager.status();
+        assert_eq!(status.queued_len, 0, "la cola se descarta");
+        assert_eq!(status.settings.provider, VoiceProvider::Fish);
+        assert!(
+            status
+                .rejections
+                .iter()
+                .any(|(motivo, cuenta)| *motivo == "cambio de motor" && *cuenta == 3),
+            "los descartes tienen que verse con su motivo: {:?}",
+            status.rejections
+        );
+
+        // Y con el nuevo motor, la voz que se encola es la suya (el codigo de voz
+        // de Fish), no el nombre de una voz de edge-tts.
+        h.manager.set_fish_voice("voz-de-fish");
+        h.manager.handle_event(&chat(1, "1", "una frase"));
+        assert_eq!(h.manager.status().queued_len, 1, "el chat se sigue leyendo");
+        assert!(
+            h.manager.status().queued[0].text.contains("una frase"),
+            "el texto es el mismo de siempre"
+        );
+        // El mismo cambio repetido no vuelve a contar nada (no habia cola).
+        let antes = h.manager.status().rejections;
+        h.manager.set_provider(
+            FakeProvider::new() as SharedTtsProvider,
+            VoiceProvider::Fish,
+        );
+        assert_eq!(h.manager.status().rejections, antes);
+    }
+
+    /// El relevo de claves de Fish llega al gestor **con su motivo**: la lista de
+    /// descartes es donde el streamer ve por que no se lee.
+    #[tokio::test]
+    async fn un_fallo_del_proveedor_se_cuenta_con_su_motivo() {
+        /// Proveedor que falla como falla Fish cuando no queda ninguna clave.
+        struct SinClaves;
+
+        impl TtsProvider for SinClaves {
+            fn name(&self) -> &'static str {
+                "sin-claves"
+            }
+
+            fn synthesize<'a>(&'a self, _: &'a TtsRequest) -> BoxFuture<'a, Result<TtsAudio>> {
+                Box::pin(async move {
+                    Err(ErrorVoz::anyhow(
+                        MotivoFallo::SinClaves,
+                        "Fish Audio: ninguna clave se puede usar",
+                    ))
+                })
+            }
+
+            fn health<'a>(&'a self) -> BoxFuture<'a, bool> {
+                Box::pin(async move { false })
+            }
+
+            fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>> {
+                Box::pin(async move { Ok(Vec::new()) })
+            }
+
+            fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
+                Box::pin(async move {})
+            }
+        }
+
+        let bus = Arc::new(EventBus::new(16, Arc::new(Metrics::default())));
+        let sink = Arc::new(InstantSink::new());
+        let manager = Arc::new(TtsManager::new(
+            settings(),
+            Arc::new(SinClaves) as SharedTtsProvider,
+            bus,
+            sink as Arc<dyn AudioSink>,
+        ));
+        manager.start();
+        manager.handle_event(&chat(1, "1", "una frase cualquiera"));
+
+        assert!(wait_for(|| manager.status().synth_failures >= 1).await);
+        let status = manager.status();
+        assert!(
+            status
+                .rejections
+                .iter()
+                .any(|(motivo, cuenta)| *motivo == MotivoFallo::SinClaves.as_str() && *cuenta == 1),
+            "el motivo del proveedor tiene que verse: {:?}",
+            status.rejections
+        );
+        // Y el detalle sigue diciendo que pasa, sin cabeceras ni claves.
+        assert!(status
+            .provider_degraded
+            .as_deref()
+            .is_some_and(|detalle| detalle.contains("ninguna clave")));
+        assert!(!status
+            .provider_degraded
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("bearer"));
+    }
+
+    /// Los ajustes de voz van y vuelven por JSON sin llevarse la clave dentro.
+    #[test]
+    fn los_ajustes_de_voz_van_y_vuelven_sin_la_clave() {
+        let settings = TtsSettings {
+            provider: VoiceProvider::Fish,
+            fish: FishSettings {
+                reference_id: "00a1b221-6137".into(),
+                model: "s2.1-pro".into(),
+            },
+            ..TtsSettings::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serializa");
+        assert!(!json.contains("clave"), "el JSON de ajustes: {json}");
+        assert!(!json.to_lowercase().contains("secret"));
+        assert!(!json.to_lowercase().contains("api_key"));
+
+        let vuelta: TtsSettings = serde_json::from_str(&json).expect("deserializa");
+        assert_eq!(vuelta.provider, VoiceProvider::Fish);
+        assert_eq!(vuelta.fish.reference_id, "00a1b221-6137");
+        assert_eq!(vuelta.fish.model, "s2.1-pro");
+        assert_eq!(vuelta.voice_es, settings.voice_es);
+
+        // Un perfil de una version anterior (v7, sin los campos nuevos) sigue
+        // cargando con los valores de fabrica: el gratuito y el motor de siempre.
+        let viejo: TtsSettings = serde_json::from_str("{}").expect("perfil vacio");
+        assert_eq!(viejo.provider, VoiceProvider::Edge);
+        assert_eq!(viejo.fish.model, fish::MODELO_POR_DEFECTO);
+        assert!(viejo.fish.reference_id.is_empty());
     }
 
     /// Regresion: la velocidad y el tono se quedaban en los ajustes del gestor y

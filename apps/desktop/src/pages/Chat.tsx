@@ -14,12 +14,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ChatEntry, FeedItem, RankingEntry } from "../api";
 import {
+  Avatar,
   Card,
   Empty,
   FeedList,
   RankingTable,
+  buildFeedView,
   chatText,
-  formatClock,
   nickname,
 } from "../components";
 import { t } from "../i18n/es";
@@ -37,8 +38,6 @@ interface Props {
   followRanking: RankingEntry[];
   /** Abre el perfil de TikTok de una persona. Lo resuelve `App`. */
   onOpenProfile: (uniqueId: string, nickname: string) => void;
-  /** Reloj de la interfaz, para el «hace 3 s» de la actividad. */
-  now: number;
   /**
    * `source_id` de los comentarios borrados en TikTok. Se reciben aparte (y no
    * dentro de la entrada) porque el chat se fusiona con las fotos del motor:
@@ -63,7 +62,6 @@ export function Chat({
   feed,
   followRanking,
   onOpenProfile,
-  now,
   deleted,
   muted,
   onToggleMute,
@@ -88,17 +86,31 @@ export function Chat({
     return filtered.slice(-VISIBLE);
   }, [chat, search]);
 
-  // El feed llega de lo mas reciente a lo mas antiguo y se parte por el tipo. La
-  // actividad filtra **por exclusion** (`!== "follow"`) a proposito: si Rust
-  // anade un suceso nuevo, cae aqui solo en vez de desaparecer en silencio por no
-  // estar en una lista de inclusiones que nadie se acordaria de tocar.
+  // El feed llega de lo mas reciente a lo mas antiguo y se parte **por tipo, sin
+  // repetir nada**: los follows tienen su panel, los regalos el suyo y el resto
+  // —compartidos, suscripciones y rafagas de likes— el de actividad.
+  //
+  // Antes eran dos paneles que enseñaban lo mismo: «Actividad» (todo menos los
+  // follows) y «Actividad reciente» (los seis ultimos regalos, en fila compacta).
+  // Medido en el banco, los seis del resumen eran **exactamente los mismos seis
+  // de arriba**, con la misma frase y la misma cifra: el resumen solo ganaba que
+  // no repetia el rotulo ni la hora. Repetir seis filas cuesta la mitad de un
+  // panel, y el espacio es lo que falta. Ahora cada suceso vive en un solo sitio.
+  const feedAgrupado = useMemo(() => buildFeedView(feed), [feed]);
   const follows = useMemo(
-    () => feed.filter((item) => item.kind === "follow").slice(0, SUCESOS),
-    [feed],
+    () => feedAgrupado.filter((item) => item.kind === "follow").slice(0, SUCESOS),
+    [feedAgrupado],
+  );
+  const regalos = useMemo(
+    () => feedAgrupado.filter((item) => item.kind === "gift").slice(0, SUCESOS),
+    [feedAgrupado],
   );
   const actividad = useMemo(
-    () => feed.filter((item) => item.kind !== "follow").slice(0, SUCESOS),
-    [feed],
+    () =>
+      feedAgrupado
+        .filter((item) => item.kind !== "follow" && item.kind !== "gift")
+        .slice(0, SUCESOS),
+    [feedAgrupado],
   );
 
   // Autoscroll solo si el usuario ya estaba abajo: si está leyendo hacia
@@ -164,7 +176,10 @@ export function Chat({
                 const silenciado = muted.has(entry.user.id);
                 return (
                   <li key={entry.seq} className={silenciado ? "muted" : undefined}>
-                    <span className="time">{formatClock(entry.timestamp_ms)}</span>
+                    {/* La foto va con el nombre y comparte su `title`: es la
+                        misma identidad, y separarlas obligaria a inventar dos
+                        formas de decir quien habla. */}
+                    <Avatar user={entry.user} size="chico" />
                     <span className="user" title={`@${entry.user.unique_id}`}>
                       {nickname(entry.user.nickname, entry.user.unique_id)}
                     </span>
@@ -190,13 +205,23 @@ export function Chat({
           <p className="hint">{t.chat.showing(visible.length, chat.length)}</p>
         </Card>
 
-        {/* Los tres paneles de la derecha. Van dentro de un contenedor propio
-            porque su reparto de alto (1 / 1.2 / 1.4) no tiene nada que ver con el
-            de la columna del chat; en ventanas apretadas ese contenedor
-            desaparece (`display: contents`) y los cuatro se apilan. */}
+        {/* Los regalos, junto al chat y **arriba**: quien regalo, que regalo y lo
+            que vale el combo, que es lo que se mira de reojo mientras se emite.
+            Las rachas ya vienen agrupadas desde `buildFeedView`, asi que aqui no
+            se cuenta nada: se pinta el valor del motor. */}
+        <Card grow title={t.feed.gifts}>
+          <FeedList items={regalos} empty={t.feed.giftsEmpty} />
+        </Card>
+
+        {/* Las dos secciones de abajo. Van dentro de un contenedor propio porque
+            su reparto —dos columnas para Follow y Seguidores, y el resto de la
+            actividad a todo el ancho— no tiene nada que ver con el de la fila de
+            arriba; en ventanas apretadas ese contenedor pasa a `subgrid` sobre la
+            rejilla, para que sus tres tarjetas se repartan el alto sin un nivel de
+            mas que estorbe. */}
         <div className="inicio-columna">
           <Card grow title={t.chat.followTitle}>
-            <FeedList items={follows} now={now} empty={t.chat.followEmpty} />
+            <FeedList items={follows} empty={t.chat.followEmpty} />
           </Card>
 
           <Card grow title={t.aportaciones.follows}>
@@ -209,16 +234,18 @@ export function Chat({
             />
           </Card>
 
+          {/* El resto de la actividad. Los follows no caen aqui —tienen su panel—
+              y los regalos tampoco: cada suceso se enseña en un solo sitio. */}
           <Card
             grow
-            title={t.feed.title}
+            title={t.feed.other}
             actions={
               <button type="button" className="ghost" onClick={onClearFeed}>
                 {t.feed.clear}
               </button>
             }
           >
-            <FeedList items={actividad} now={now} />
+            <FeedList items={actividad} empty={t.feed.otherEmpty} />
           </Card>
         </div>
       </div>

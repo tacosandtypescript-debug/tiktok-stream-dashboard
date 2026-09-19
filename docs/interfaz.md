@@ -50,10 +50,17 @@ hecho por dentro:
 
 Esto es lo que hoy lo hace parecer la NASA, y es lo que se quita:
 
-- **Fuera las tarjetas con borde.** Las secciones se separan con **aire** y un rotulo
-  pequeno en mayusculas. Un borde por seccion convierte la pantalla en un rack.
-- **Fuera el azul-negro.** El fondo pasa a un negro **calido** (marron). El frio es la
-  mitad del aire de laboratorio.
+- **Las tarjetas con borde: fuera, y luego dentro otra vez.** Se quitaron —las secciones
+  pasaron a separarse con **aire** y un rotulo pequeno en mayusculas, porque un borde por
+  seccion convierte la pantalla en un rack— y se han vuelto a poner, **en las seis
+  pantallas y con el mismo marco**. El motivo de quitarlas ya no se sostiene: desde que
+  cada seccion lleva su propia lista y **su propio desplazamiento**, sin un borde que diga
+  donde acaba una y empieza la siguiente el ojo no sabe a cual pertenece lo que lee. El
+  aire separaba secciones de una lectura continua; no separa dos listas que se mueven por
+  su cuenta. El marco vive **una sola vez**, en la regla base de `.card`
+  (`styles.css`): radio `12px` por token, borde de 1 px, fondo de panel y 10 px de
+  relleno. Las seis pantallas no lo repiten.
+- **Fuera el azul-negro.** El fondo es un negro neutro, no azulado.
 - **Fuera todo al mismo peso.** Un numero, un rotulo y un boton no pueden gritar igual.
 
 ## La paleta y la letra
@@ -76,11 +83,12 @@ fuentes. Se usan las que trae Windows, eligiendo por caracter y no por costumbre
 
 ## Por pantalla
 
-### Chat — la que se usa mas
-Dos columnas: el chat y la actividad. Se queda como esta de estructura; cambia el
-aspecto (sin bordes, fondo calido, la cabecera y el marcador nuevos). La frase de
-arriba tiene que decir que **hay que escribir el usuario y pulsar Conectar**, que hoy
-se dice pero enterrado.
+### Inicio — la que se usa mas
+Cinco paneles: el **chat** en la columna de la izquierda de arriba abajo, y **Regalos**,
+**Follow**, **Seguidores** y **Actividad** en los cuatro cuadrantes de la derecha, los
+cuatro del mismo tamaño (ver `styles.css`, `.inicio-paneles`). La frase de arriba tiene
+que decir que **hay que escribir el usuario y pulsar Conectar**, que se dice pero
+enterrado.
 
 ### Aportaciones — cuatro tablas son la misma pregunta con otro reloj
 Hoy: cuatro tablas con las mismas columnas, y la misma persona en las cuatro, asi que
@@ -109,6 +117,36 @@ Hoy: ocho tarjetas, y la mitad son diagnostico.
 - **Arriba los ajustes**: encender, voz, volumen, dispositivo, que se lee.
 - **En medio, sonando ahora y la cola** — eso si sirve en directo.
 - **El historico y los descartados, a Desarrollador.** Son para cuando algo va mal.
+  Hecho: los **descartados por los filtros** y los **contadores** del lector viven ya
+  en Desarrollador, y el interruptor del **historico de aportaciones** se mudo a la
+  tarjeta «Histórico» de Aportaciones —es el ajuste que llena esa tabla, y alli se
+  cambia viendo lo que cambia—. Voz se queda con nueve tarjetas.
+
+## El tamaño es fijo: todo cabe
+
+La ventana mide **1440x900 y no se redimensiona** (`tauri.conf.json`), así que el
+reparto de cada pantalla se diseña para ese alto y no para «lo que salga». Lo que deja
+el marco son **674 px** de contenido, y las seis pantallas caben ahí **sin desplazar la
+página**:
+
+| pantalla | reparto |
+|---|---|
+| Inicio | el chat a dos filas de alto y cuatro cuadrantes iguales a su derecha |
+| Aportaciones | cuatro columnas por dos filas: las cuatro tablas de personas arriba, el resumen por tipo y el flujo de regalos abajo |
+| Alertas | lista, editor y medios en tres columnas; la salida de audio y la dirección de OBS debajo |
+| Overlays | direcciones y diseños a la izquierda; la previa con su columna entera a la derecha |
+| Voz | la cabecera a todo el ancho y tres columnas de ajustes |
+| Desarrollador | las métricas en tres columnas, y dos filas de cuatro y de dos paneles |
+
+Dos listas **sí** se desplazan por dentro, y es a propósito: el **chat** de Inicio y el
+**flujo de últimos regalos**. Son registros que crecen sin tope; un panel de 300 px no
+puede enseñar cien regalos, y recortarlos sin más sería mentir. Lo que no se desplaza
+nunca es la página.
+
+Cuando un panel no cabe, el que cede es su contenido y **nunca** el marco: `.card` lleva
+`overflow: hidden` para que las esquinas redondeadas no las pise una fila con fondo, y
+eso mismo recortaría en silencio lo que sobresalga. Por eso cada tarjeta que puede
+crecer lleva `min-height: 0` y su lista se desplaza por dentro.
 
 ### Overlays — es un menu de once filas, no un panel
 Hoy: tres pestanas y once filas con once botones que dicen lo mismo.
@@ -118,6 +156,10 @@ Hoy: tres pestanas y once filas con once botones que dicen lo mismo.
   que falta cuando la fuente se desborda.
 - **Elegir diseno con miniaturas en fila**, no once filas con once botones.
 - **Los minijuegos solo donde valen** (tap tap), que hoy salen en las tres vistas.
+- **La previa va en su propia columna y se escala por las dos dimensiones.** Un
+  marcador mide 420x524 y un diseño de pantalla completa 1080x1920: con el tope de
+  ancho solo, esos dos casos medían 550 y 818 px de alto y empujaban la página fuera de
+  la ventana. Limitando también el alto, la previa cabe siempre.
 
 ## Orden de trabajo
 

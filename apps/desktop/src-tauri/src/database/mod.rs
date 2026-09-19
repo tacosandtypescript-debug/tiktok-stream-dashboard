@@ -231,13 +231,65 @@ const MIGRATIONS: &[(u32, &str)] = &[
     );
     "#,
     ),
+    (
+        8,
+        r#"
+    -- v8: las claves de la API de voz y el consumo medido localmente.
+    --
+    -- **Las claves van en su propia tabla y no en `tts_profiles.settings_json`.**
+    -- Ese JSON viaja entero a la interfaz dentro de `TtsStatus.settings`, asi que
+    -- una clave guardada ahi acabaria en una captura de pantalla o en el log de
+    -- cualquiera que imprima los ajustes. Aqui vive en la base del usuario
+    -- (`%LOCALAPPDATA%`) y lo unico que sale hacia fuera es su pista enmascarada.
+    --
+    -- `posicion` es el identificador que ve la interfaz y el **orden de intento**:
+    -- de la 0 a la n. `estado` distingue una clave viva de una que el servicio
+    -- rechazo (401) o de una sin saldo (402); el relevo automatico se apoya en el.
+    -- `bytes`, `llamadas` y `micro` son el uso **de esa clave**: se cobra por bytes
+    -- UTF-8 del texto, asi que se cuenta sin preguntar a la API. `micro` va en
+    -- micro-dolares enteros: sumar `f64` miles de veces deriva.
+    --
+    -- El tope de diez claves lo impone el motor, no un `CHECK`: es una regla de
+    -- producto y puede cambiar sin migracion.
+    CREATE TABLE IF NOT EXISTS tts_keys (
+        provider   TEXT NOT NULL,
+        posicion   INTEGER NOT NULL,
+        nombre     TEXT NOT NULL DEFAULT '',
+        secreto    TEXT NOT NULL,
+        estado     TEXT NOT NULL DEFAULT 'viva',
+        bytes      INTEGER NOT NULL DEFAULT 0,
+        llamadas   INTEGER NOT NULL DEFAULT 0,
+        micro      INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (provider, posicion)
+    );
+
+    -- El consumo total (y el del directo en curso) en una fila unica, con el
+    -- mismo criterio que `alert_settings`: son los numeros de **esta**
+    -- instalacion. El desglose por clave ya vive en `tts_keys`, asi que aqui solo
+    -- esta lo que suman todas juntas; `stream_id` recuerda a que directo
+    -- pertenece el parcial, para no mezclar dos sesiones tras un reinicio.
+    CREATE TABLE IF NOT EXISTS tts_usage (
+        id              INTEGER PRIMARY KEY CHECK (id = 1),
+        stream_id       TEXT NOT NULL DEFAULT '',
+        sesion_bytes    INTEGER NOT NULL DEFAULT 0,
+        sesion_llamadas INTEGER NOT NULL DEFAULT 0,
+        sesion_micro    INTEGER NOT NULL DEFAULT 0,
+        total_bytes     INTEGER NOT NULL DEFAULT 0,
+        total_llamadas  INTEGER NOT NULL DEFAULT 0,
+        total_micro     INTEGER NOT NULL DEFAULT 0,
+        updated_at      INTEGER NOT NULL
+    );
+    "#,
+    ),
 ];
 
 /// Version del esquema que espera este binario.
 ///
 /// Se sube al anadir una migracion. La v6 anade los ajustes de las alertas de
-/// OBS y la v7 los ultimos usuarios con los que se conecto.
-pub const SCHEMA_VERSION: u32 = 7;
+/// OBS, la v7 los ultimos usuarios con los que se conecto y la v8 las claves de
+/// la API de voz con su consumo.
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Directorio de datos de la aplicacion.
 ///
@@ -333,6 +385,28 @@ pub enum WriteJob {
     /// siguiente conexion).
     RecentHandles {
         handles_json: String,
+    },
+    /// Claves de la API de voz de un proveedor. **Reemplaza la lista entera**.
+    ///
+    /// Se manda la lista completa y no un alta o una baja porque son como mucho
+    /// diez filas y cambian de golpe (el streamer anade, quita o reordena): una
+    /// sentencia por cambio es mas facil de razonar que un `INSERT`/`DELETE`
+    /// distinto por cada boton de la interfaz.
+    ///
+    /// Lleva secretos, asi que `ClaveGuardada` tiene el `Debug` redactado: un
+    /// `tracing` que imprima el lote no puede filtrarlos.
+    TtsKeys {
+        provider: String,
+        claves: Vec<crate::tts::ClaveGuardada>,
+    },
+    /// Consumo medido localmente: lo del directo, lo acumulado y el reparto por
+    /// clave. No lleva secretos.
+    TtsUso {
+        provider: String,
+        stream_id: String,
+        consumo: crate::tts::Consumo,
+        /// `(posicion, bytes, llamadas, micro)` por clave.
+        por_clave: Vec<(u64, u64, u64, i64)>,
     },
     StreamStarted {
         stream_id: String,
@@ -640,6 +714,37 @@ impl Database {
                    handles_json = excluded.handles_json,
                    updated_at   = excluded.updated_at",
             )?;
+            // Las claves de voz: se borra la lista del proveedor y se vuelve a
+            // escribir. Es un cambio raro (lo pulsa el streamer), asi que no
+            // importa rehacer las diez filas.
+            let mut keys_clear = tx.prepare_cached("DELETE FROM tts_keys WHERE provider = ?1")?;
+            let mut keys_insert = tx.prepare_cached(
+                "INSERT INTO tts_keys
+                   (provider, posicion, nombre, secreto, estado, bytes, llamadas, micro, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )?;
+            // El uso por clave llega a cada volcado: `UPDATE` y no `INSERT`,
+            // porque la clave la creo el guardado de la lista.
+            let mut key_usage = tx.prepare_cached(
+                "UPDATE tts_keys
+                    SET bytes = ?3, llamadas = ?4, micro = ?5, updated_at = ?6
+                  WHERE provider = ?1 AND posicion = ?2",
+            )?;
+            let mut usage = tx.prepare_cached(
+                "INSERT INTO tts_usage
+                   (id, stream_id, sesion_bytes, sesion_llamadas, sesion_micro,
+                    total_bytes, total_llamadas, total_micro, updated_at)
+                 VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET
+                   stream_id       = excluded.stream_id,
+                   sesion_bytes    = excluded.sesion_bytes,
+                   sesion_llamadas = excluded.sesion_llamadas,
+                   sesion_micro    = excluded.sesion_micro,
+                   total_bytes     = excluded.total_bytes,
+                   total_llamadas  = excluded.total_llamadas,
+                   total_micro     = excluded.total_micro,
+                   updated_at      = excluded.updated_at",
+            )?;
 
             for job in jobs {
                 match job {
@@ -708,6 +813,53 @@ impl Database {
                     }
                     WriteJob::RecentHandles { handles_json } => {
                         written += recent_handles.execute(params![handles_json, now_ms()])?;
+                    }
+                    WriteJob::TtsKeys { provider, claves } => {
+                        keys_clear.execute(params![provider])?;
+                        for clave in claves {
+                            written += keys_insert.execute(params![
+                                provider,
+                                clave.posicion as i64,
+                                clave.nombre,
+                                // El unico sitio por el que el valor llega al
+                                // disco. La clave no se registra en ningun log:
+                                // `Secreto` no tiene `Display` y su `Debug`
+                                // redacta.
+                                clave.secreto.exponer(),
+                                clave.estado.as_str(),
+                                clave.bytes as i64,
+                                clave.llamadas as i64,
+                                clave.micro,
+                                now_ms()
+                            ])?;
+                        }
+                    }
+                    WriteJob::TtsUso {
+                        provider,
+                        stream_id,
+                        consumo,
+                        por_clave,
+                    } => {
+                        written += usage.execute(params![
+                            stream_id,
+                            consumo.sesion_bytes as i64,
+                            consumo.sesion_llamadas as i64,
+                            consumo.sesion_micro,
+                            consumo.total_bytes as i64,
+                            consumo.total_llamadas as i64,
+                            consumo.total_micro,
+                            now_ms()
+                        ])?;
+                        for (posicion, bytes, llamadas, micro) in por_clave {
+                            written += key_usage.execute(params![
+                                provider,
+                                *posicion as i64,
+                                *bytes as i64,
+                                *llamadas as i64,
+                                *micro,
+                                now_ms()
+                            ])?;
+                        }
                     }
                     WriteJob::StreamStarted {
                         stream_id,
@@ -960,6 +1112,62 @@ impl Database {
     /// (que es distinto de tenerla vacia a proposito).
     pub fn recent_handles(&self) -> Result<Option<String>> {
         self.query_string("SELECT handles_json FROM recent_handles WHERE id = 1", 0)
+    }
+
+    /// Las claves de la API de voz de un proveedor, en orden de intento.
+    ///
+    /// Devuelve los secretos **en claro**: es la lectura que hace el motor al
+    /// arrancar y su destino es la cabecera de la peticion, nunca un log ni la
+    /// interfaz (ver `secreto::Secreto`).
+    pub fn tts_keys(&self, provider: &str) -> Result<Vec<crate::tts::ClaveGuardada>> {
+        let mut statement = self.conn.prepare(
+            "SELECT posicion, nombre, secreto, estado, bytes, llamadas, micro
+               FROM tts_keys
+              WHERE provider = ?1
+              ORDER BY posicion ASC",
+        )?;
+        let filas = statement.query_map(params![provider], |row| {
+            Ok(crate::tts::ClaveGuardada {
+                posicion: row.get::<_, i64>(0)? as u64,
+                nombre: row.get(1)?,
+                secreto: crate::secreto::Secreto::new(row.get::<_, String>(2)?),
+                estado: crate::tts::EstadoClave::desde_str(&row.get::<_, String>(3)?),
+                bytes: row.get::<_, i64>(4)?.max(0) as u64,
+                llamadas: row.get::<_, i64>(5)?.max(0) as u64,
+                micro: row.get(6)?,
+            })
+        })?;
+        let mut claves = Vec::new();
+        for fila in filas {
+            claves.push(fila?);
+        }
+        Ok(claves)
+    }
+
+    /// El consumo guardado: a que directo pertenece el parcial y los contadores.
+    ///
+    /// `None` si nunca se leyo nada con un proveedor que cobre por bytes.
+    pub fn tts_usage(&self) -> Result<Option<(String, crate::tts::Consumo)>> {
+        let mut statement = self.conn.prepare(
+            "SELECT stream_id, sesion_bytes, sesion_llamadas, sesion_micro,
+                    total_bytes, total_llamadas, total_micro
+               FROM tts_usage WHERE id = 1",
+        )?;
+        let mut filas = statement.query([])?;
+        let Some(fila) = filas.next()? else {
+            return Ok(None);
+        };
+        Ok(Some((
+            fila.get(0)?,
+            crate::tts::Consumo {
+                sesion_bytes: fila.get::<_, i64>(1)?.max(0) as u64,
+                sesion_llamadas: fila.get::<_, i64>(2)?.max(0) as u64,
+                sesion_micro: fila.get(3)?,
+                total_bytes: fila.get::<_, i64>(4)?.max(0) as u64,
+                total_llamadas: fila.get::<_, i64>(5)?.max(0) as u64,
+                total_micro: fila.get(6)?,
+            },
+        )))
     }
 
     /// Cierra las sesiones que quedaron abiertas por un cierre inesperado.
@@ -1250,6 +1458,110 @@ mod tests {
         assert_eq!(database.schema_version(), SCHEMA_VERSION);
         // Aplicarlas otra vez no debe fallar ni duplicar nada.
         assert_eq!(database.migrate().expect("segunda pasada"), SCHEMA_VERSION);
+    }
+
+    /// Las claves de la API y el consumo van a la base y vuelven enteros.
+    ///
+    /// Es el viaje que tiene que sobrevivir a cerrar la aplicacion: sin el, el
+    /// streamer tendria que volver a pegar sus claves cada dia y el contador de
+    /// gasto empezaria de cero.
+    #[test]
+    fn las_claves_de_voz_y_el_consumo_van_y_vuelven() {
+        use crate::secreto::Secreto;
+        use crate::tts::{ClaveGuardada, Consumo, EstadoClave};
+
+        let mut database = open();
+        assert!(database.tts_keys("fish-audio").unwrap().is_empty());
+
+        let claves = vec![
+            ClaveGuardada {
+                posicion: 0,
+                nombre: "la de marzo".into(),
+                secreto: Secreto::new("clave-de-mentira-AAA"),
+                estado: EstadoClave::Agotada,
+                bytes: 1200,
+                llamadas: 7,
+                micro: 18000,
+            },
+            ClaveGuardada::nueva(
+                1,
+                "la del canal nuevo",
+                Secreto::new("clave-de-mentira-BBB"),
+            ),
+        ];
+        database
+            .write_batch(&[WriteJob::TtsKeys {
+                provider: "fish-audio".into(),
+                claves: claves.clone(),
+            }])
+            .expect("claves");
+
+        let leidas = database.tts_keys("fish-audio").expect("lectura");
+        assert_eq!(leidas.len(), 2);
+        assert_eq!(leidas[0].nombre, "la de marzo");
+        assert_eq!(leidas[0].secreto.exponer(), "clave-de-mentira-AAA");
+        assert_eq!(leidas[0].estado, EstadoClave::Agotada);
+        assert_eq!(leidas[0].bytes, 1200);
+        assert_eq!(leidas[0].llamadas, 7);
+        assert_eq!(leidas[0].micro, 18000);
+        assert_eq!(leidas[1].estado, EstadoClave::Viva, "viva es el de fabrica");
+        assert_eq!(leidas[1].posicion, 1);
+        // Otro proveedor no ve estas claves.
+        assert!(database.tts_keys("otro").unwrap().is_empty());
+
+        // El consumo: la sesion, el acumulado y el reparto por clave.
+        let consumo = Consumo {
+            sesion_bytes: 400,
+            sesion_llamadas: 2,
+            sesion_micro: 6000,
+            total_bytes: 1200,
+            total_llamadas: 7,
+            total_micro: 18000,
+        };
+        database
+            .write_batch(&[WriteJob::TtsUso {
+                provider: "fish-audio".into(),
+                stream_id: "sala-1".into(),
+                consumo,
+                por_clave: vec![(0, 1200, 7, 18000)],
+            }])
+            .expect("consumo");
+
+        let (stream_id, leido) = database.tts_usage().expect("lectura").expect("hay fila");
+        assert_eq!(stream_id, "sala-1");
+        assert_eq!(leido, consumo);
+
+        // Volver a guardar reemplaza la lista: no se acumulan filas viejas.
+        database
+            .write_batch(&[WriteJob::TtsKeys {
+                provider: "fish-audio".into(),
+                claves: vec![claves[0].clone()],
+            }])
+            .expect("reemplazo");
+        assert_eq!(database.tts_keys("fish-audio").unwrap().len(), 1);
+        assert_eq!(database.count("tts_keys").unwrap(), 1);
+    }
+
+    /// Un `Debug` del lote de claves no puede imprimir el valor.
+    ///
+    /// Es el accidente mas facil de todos: un `tracing::debug!(?job)` para mirar
+    /// por que falla una escritura dejaria la clave en el log del usuario.
+    #[test]
+    fn el_lote_de_claves_no_imprime_el_secreto() {
+        use crate::secreto::Secreto;
+        use crate::tts::ClaveGuardada;
+
+        let job = WriteJob::TtsKeys {
+            provider: "fish-audio".into(),
+            claves: vec![ClaveGuardada::nueva(
+                0,
+                "la de marzo",
+                Secreto::new("sk_no-puede-salir-123456"),
+            )],
+        };
+        let texto = format!("{job:?}");
+        assert!(!texto.contains("sk_no-puede-salir-123456"), "{texto}");
+        assert!(texto.contains("la de marzo"), "el nombre si se puede ver");
     }
 
     #[test]

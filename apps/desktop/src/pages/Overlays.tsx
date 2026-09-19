@@ -83,53 +83,52 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
   const actual = deLaVista.find((diseno) => diseno.id === elegido) ?? deLaVista[0];
 
   return (
-    <div className="grid-panel">
+    <div className="grid-panel overlays">
       <p className="hint">{t.overlay.hint}</p>
 
-      {/* Las tres direcciones, siempre a la vista: se pegan en OBS una sola vez
-          y conviene tenerlas todas juntas cuando se monta la escena. */}
-      <Card title={t.overlay.address}>
-        <ul className="direcciones">
-          {VISTAS.map((cual) => (
-            <li key={cual}>
-              <span className="direccion-vista">{t.overlay.views[cual].title}</span>
-              <Copiar texto={urls[cual]} />
-            </li>
-          ))}
-        </ul>
-        <p className="hint">{t.overlay.size}</p>
-      </Card>
+      {/* Dos columnas: a la izquierda lo que se configura —las direcciones y la
+          lista de diseños— y a la derecha **la previa, con la columna entera para
+          ella**.
+          Antes la previa iba dentro de la tarjeta de diseños, al lado de la lista, y
+          las dos se estorbaban: la previa de un marcador mide 420x524, así que
+          empujaba la tarjeta a 706 px de alto y la página entera a 950 para 674 de
+          alto. Con su propia columna entra **a tamaño natural**. */}
+      <div className="overlays-columnas">
+        <div className="stack">
+          {/* Las tres direcciones, siempre a la vista: se pegan en OBS una sola vez
+              y conviene tenerlas todas juntas cuando se monta la escena. */}
+          <Card title={t.overlay.address}>
+            <ul className="direcciones">
+              {VISTAS.map((cual) => (
+                <li key={cual}>
+                  <span className="direccion-vista">{t.overlay.views[cual].title}</span>
+                  <Copiar texto={urls[cual]} />
+                </li>
+              ))}
+            </ul>
+            <p className="hint">{t.overlay.size}</p>
+          </Card>
 
-      <Card title={t.overlay.designs}>
-        <div className="vista-switch" role="tablist">
-          {VISTAS.map((cual) => (
-            <button
-              key={cual}
-              type="button"
-              role="tab"
-              aria-selected={cual === vista}
-              className={cual === vista ? "active" : "ghost"}
-              onClick={() => setVista(cual)}
-            >
-              {t.overlay.views[cual].title}
-              <span className="switch-diseno">{rotuloDe(seleccion[cual]).nombre}</span>
-            </button>
-          ))}
-        </div>
+          <Card title={t.overlay.designs}>
+            <div className="vista-switch" role="tablist">
+              {VISTAS.map((cual) => (
+                <button
+                  key={cual}
+                  type="button"
+                  role="tab"
+                  aria-selected={cual === vista}
+                  className={cual === vista ? "active" : "ghost"}
+                  onClick={() => setVista(cual)}
+                >
+                  {t.overlay.views[cual].title}
+                  <span className="switch-diseno">{rotuloDe(seleccion[cual]).nombre}</span>
+                </button>
+              ))}
+            </div>
 
-        <p className="hint">{t.overlay.views[vista].hint}</p>
+            <p className="hint">{t.overlay.views[vista].hint}</p>
 
-        {actual ? (
-          /* La previa y la lista van en dos columnas: el marcador mide 420 px de
-             ancho y dejarlo solo en una tarjeta de pantalla completa llenaba de
-             vacio los otros mil. */
-          <div className="diseno-panel">
-            <VistaPrevia
-              url={urlDePrevia(base, vista, actual.id)}
-              previa={actual.previa}
-              diseno={actual.id}
-            />
-            <div className="diseno-columna">
+            {actual ? (
               <ul className="disenos">
                 {deLaVista.map((diseno) => {
                   const rotulo = rotuloDe(diseno.id);
@@ -158,24 +157,47 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
                   );
                 })}
               </ul>
-              <p className="hint">{t.overlay.previewHint}</p>
-            </div>
-          </div>
-        ) : (
-          <p className="empty">{t.overlay.empty}</p>
-        )}
-      </Card>
+            ) : (
+              <p className="empty">{t.overlay.empty}</p>
+            )}
+          </Card>
+        </div>
+
+        {actual ? (
+          /* Sin rótulo de sección a propósito: la barra de la propia previa ya dice
+             que es la vista previa y qué diseño está enseñando, y un rótulo encima
+             sería la misma palabra dos veces. */
+          <Card>
+            <VistaPrevia
+              url={urlDePrevia(base, vista, actual.id)}
+              previa={actual.previa}
+              diseno={actual.id}
+            />
+            <p className="hint">{t.overlay.previewHint}</p>
+          </Card>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 /**
- * El marco de la vista previa, escalado al ancho que haya.
+ * El marco de la vista previa, escalado a lo que quepa en su hueco.
  *
- * El diseño se dibuja en su lienzo real (420 px de ancho, o 1080×1920 en los de
- * pantalla completa) y se escala entero. Se mide con `ResizeObserver` en vez de
- * con un ancho fijo porque la ventana se redimensiona: con un tamaño fijo, la
- * previa se salía de la tarjeta o dejaba franjas.
+ * El diseño se dibuja en su lienzo real —420 px de ancho, o 1080×1920 en los de
+ * pantalla completa— y se escala entero. Se mide con `ResizeObserver` en vez de con
+ * un ancho fijo porque la ventana se redimensiona: con un tamaño fijo, la previa se
+ * salía de la tarjeta o dejaba franjas.
+ *
+ * La escala se limita por **las dos** dimensiones, y esa es la diferencia con lo que
+ * había: solo se miraba el ancho. Medido, el marcador de tap tap mide 420×524 —la
+ * tarjeta de diseños se iba a 706 px de alto por su culpa— y un diseño de pantalla
+ * completa (1080×1920) a 460 px de ancho pide **818** de alto. Con el tope de ancho
+ * solo, esos dos casos empujaban la página fuera de la ventana. Ahora la previa cabe
+ * siempre en su columna, sea cual sea el diseño elegido.
+ *
+ * El hueco se mide **descontando la barra** (que va dentro y no se encoge) y los dos
+ * píxeles del borde: `box-sizing: border-box` los mete dentro del alto.
  */
 function VistaPrevia({
   url,
@@ -186,58 +208,65 @@ function VistaPrevia({
   previa: { ancho: number; alto: number };
   diseno: string;
 }) {
-  const caja = useRef<HTMLDivElement>(null);
+  const hueco = useRef<HTMLDivElement>(null);
   const [escala, setEscala] = useState(1);
 
   useLayoutEffect(() => {
-    const nodo = caja.current;
+    const nodo = hueco.current;
     if (!nodo) return;
     const medir = () => {
       const ancho = nodo.clientWidth;
-      if (ancho > 0) setEscala(Math.min(1, ancho / previa.ancho));
+      const barra = nodo.querySelector(".previa-barra");
+      const alto = nodo.clientHeight - (barra?.getBoundingClientRect().height ?? 0) - 2;
+      if (ancho > 0 && alto > 0) {
+        setEscala(Math.min(1, ancho / previa.ancho, alto / previa.alto));
+      }
     };
     medir();
     const observador = new ResizeObserver(medir);
     observador.observe(nodo);
     return () => observador.disconnect();
-  }, [previa.ancho]);
+  }, [previa.ancho, previa.alto]);
 
   return (
-    /*
-     * El tope de ancho es `min(100%, lienzo)` y **no** `previa.ancho` a secas.
-     *
-     * Con el numero suelto, el marco crecia hasta los 1080 del iframe: se salia de
-     * su columna de 460 y se pintaba encima de la lista de diseños. Y era un bucle,
-     * porque la escala se calcula midiendo ese mismo marco — medía 1080, sacaba
-     * escala 1, y el iframe volvia a medir 1080. Con el `min(100%, …)` el marco no
-     * puede pasar de su columna, la medida sale 460, la escala sale 0,42 y todo
-     * encaja.
-     */
-    <div className="previa-marco" style={{ maxWidth: `min(100%, ${previa.ancho}px)` }}>
-      <div className="previa-barra">
-        <span className="etiqueta">{t.overlay.preview}</span>
-        <span className="previa-aviso">
-          {t.overlay.simulator} · {diseno}
-        </span>
-      </div>
-      <div
-        className="previa-caja"
-        ref={caja}
-        style={{ height: Math.round(previa.alto * escala) }}
-      >
-        {/* La `key` recarga el marco al cambiar de diseño: sin ella, React
-            reutilizaría el mismo `iframe` y el documento viejo seguiría pintado. */}
-        <iframe
-          key={url}
-          className="previa"
-          src={url}
-          title={`${t.overlay.preview} · ${diseno}`}
+    <div className="previa-hueco" ref={hueco}>
+      {/*
+       * El tope de ancho es `min(100%, lienzo)` y **no** `previa.ancho` a secas.
+       *
+       * Con el numero suelto, el marco crecia hasta los 1080 del iframe: se salia de
+       * su columna y se pintaba encima de la lista de diseños. Y era un bucle,
+       * porque la escala se calcula midiendo ese mismo marco — medía 1080, sacaba
+       * escala 1, y el iframe volvia a medir 1080. Con el `min(100%, …)` el marco no
+       * puede pasar de su columna.
+       */}
+      <div className="previa-marco" style={{ maxWidth: `min(100%, ${previa.ancho}px)` }}>
+        <div className="previa-barra">
+          <span className="etiqueta">{t.overlay.preview}</span>
+          <span className="previa-aviso">
+            {t.overlay.simulator} · {diseno}
+          </span>
+        </div>
+        <div
+          className="previa-caja"
           style={{
-            width: previa.ancho,
-            height: previa.alto,
-            transform: `scale(${escala})`,
+            width: Math.round(previa.ancho * escala),
+            height: Math.round(previa.alto * escala),
           }}
-        />
+        >
+          {/* La `key` recarga el marco al cambiar de diseño: sin ella, React
+              reutilizaría el mismo `iframe` y el documento viejo seguiría pintado. */}
+          <iframe
+            key={url}
+            className="previa"
+            src={url}
+            title={`${t.overlay.preview} · ${diseno}`}
+            style={{
+              width: previa.ancho,
+              height: previa.alto,
+              transform: `scale(${escala})`,
+            }}
+          />
+        </div>
       </div>
     </div>
   );

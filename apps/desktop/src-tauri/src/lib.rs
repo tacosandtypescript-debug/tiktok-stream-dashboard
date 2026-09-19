@@ -24,6 +24,7 @@ pub mod database;
 pub mod feed;
 pub mod overlay;
 pub mod providers;
+pub mod secreto;
 pub mod telemetry;
 pub mod tts;
 

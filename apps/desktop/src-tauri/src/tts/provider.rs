@@ -143,6 +143,178 @@ pub struct TtsAudio {
     pub cached: bool,
 }
 
+/// Que le falta al proveedor para poder sintetizar.
+///
+/// Es un **identificador**, no una frase: los textos que lee el streamer viven
+/// solo en el `i18n` de la interfaz (docs/decisions.md D4). Es lo que permite que
+/// la pagina de Voz diga por que no va en vez de quedarse muda, la misma regla
+/// que ya cumple el audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Readiness {
+    Ready,
+    /// No hay ninguna clave guardada.
+    MissingSecret,
+    /// Hay clave pero falta el codigo de voz.
+    MissingVoice,
+    /// Hay claves guardadas, pero ninguna se puede usar (todas invalidas o
+    /// agotadas). Es distinto de "no hay ninguna": el streamer tiene que saber
+    /// que el problema es de sus claves, no de que falten.
+    NoUsableKey,
+}
+
+/// Estado de una clave de API guardada.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstadoClave {
+    /// Se puede usar.
+    #[default]
+    Viva,
+    /// El servicio la rechazo (401): no se vuelve a intentar, no se arregla sola.
+    Invalida,
+    /// Se quedo sin saldo o sin cuota (402): hay que pasar a la siguiente.
+    Agotada,
+}
+
+impl EstadoClave {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EstadoClave::Viva => "viva",
+            EstadoClave::Invalida => "invalida",
+            EstadoClave::Agotada => "agotada",
+        }
+    }
+
+    /// Inversa de `as_str`, para leerlo de la base sin `unwrap`.
+    pub fn desde_str(texto: &str) -> Self {
+        match texto {
+            "invalida" => EstadoClave::Invalida,
+            "agotada" => EstadoClave::Agotada,
+            _ => EstadoClave::Viva,
+        }
+    }
+}
+
+/// Por que fallo una sintesis, como **clase** y no como frase.
+///
+/// Existe para que el gestor pueda contarlo en la lista de descartes que ya
+/// existe **con su motivo**, sin leer el texto del error: la redaccion final vive
+/// en el `i18n` de la interfaz (docs/decisions.md D4) y aqui solo hay clases
+/// estables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotivoFallo {
+    /// Falta la clave de API.
+    SinClave,
+    /// Falta el codigo de voz.
+    SinVoz,
+    /// Ninguna de las claves guardadas se puede usar.
+    SinClaves,
+    /// El texto venia vacio.
+    TextoVacio,
+    /// El texto pasa del tope por peticion.
+    TextoLargo,
+    /// El servicio rechazo la clave (401): esa clave queda inservible.
+    ClaveRechazada,
+    /// La clave se quedo sin saldo (402): se pasa a la siguiente.
+    SinSaldo,
+    /// Demasiadas peticiones seguidas (429). **No** es agotamiento: se espera y
+    /// se reintenta la **misma** clave.
+    Ritmo,
+    /// El servicio no responde (5xx, sin red, respuesta que no es audio).
+    Servicio,
+    /// La peticion no es valida (400): reintentarla no arregla nada.
+    Peticion,
+    /// El usuario corto la sintesis.
+    Cancelada,
+}
+
+impl MotivoFallo {
+    /// Identificador estable para los contadores de descartes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MotivoFallo::SinClave => "sin clave",
+            MotivoFallo::SinVoz => "sin codigo de voz",
+            MotivoFallo::SinClaves => "sin claves utilizables",
+            MotivoFallo::TextoVacio => "texto vacio",
+            MotivoFallo::TextoLargo => "texto demasiado largo",
+            MotivoFallo::ClaveRechazada => "clave rechazada",
+            MotivoFallo::SinSaldo => "clave sin saldo",
+            MotivoFallo::Ritmo => "demasiadas peticiones",
+            MotivoFallo::Servicio => "servicio sin respuesta",
+            MotivoFallo::Peticion => "peticion rechazada",
+            MotivoFallo::Cancelada => "sintesis cancelada",
+        }
+    }
+}
+
+/// Error de sintesis con su clase, para no tener que leer el texto.
+///
+/// El mensaje **no lleva la cabecera** con la que se hizo la peticion: se compone
+/// a mano en el proveedor. Es la regla del secreto aplicada al camino de error.
+#[derive(Debug, thiserror::Error)]
+#[error("{mensaje}")]
+pub struct ErrorVoz {
+    pub motivo: MotivoFallo,
+    pub mensaje: String,
+}
+
+impl ErrorVoz {
+    pub fn nuevo(motivo: MotivoFallo, mensaje: impl Into<String>) -> Self {
+        Self {
+            motivo,
+            mensaje: mensaje.into(),
+        }
+    }
+
+    /// Envuelve la clase en un `anyhow` para devolverlo desde el proveedor.
+    pub fn anyhow(motivo: MotivoFallo, mensaje: impl Into<String>) -> anyhow::Error {
+        anyhow::Error::new(Self::nuevo(motivo, mensaje))
+    }
+
+    /// La clase de fallo de un error cualquiera, si la trae.
+    ///
+    /// Un proveedor sin clases (el sidecar de edge-tts) devuelve `None` y el
+    /// gestor lo cuenta como fallo generico.
+    pub fn motivo_de(error: &anyhow::Error) -> Option<MotivoFallo> {
+        error.downcast_ref::<Self>().map(|voz| voz.motivo)
+    }
+}
+
+/// Una clave de API tal como la ve la interfaz: **enmascarada**, con su estado y
+/// su uso. El valor no esta aqui y no puede estarlo: `Secreto` no se serializa.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClaveStatus {
+    /// Posicion en la lista (0 = la primera que se intenta).
+    pub id: u64,
+    pub nombre: String,
+    /// Pista enmascarada (`••••••••abcd`).
+    pub pista: String,
+    pub estado: EstadoClave,
+    /// `true` en la que se esta usando ahora mismo.
+    pub en_uso: bool,
+    pub bytes: u64,
+    pub llamadas: u64,
+    /// Coste acumulado en micro-dolares. Entero exacto: no hay deriva de `f64`
+    /// sumando frase a frase, y el precio que se aplico es el del modelo que
+    /// estaba en vigor cuando se mando cada frase.
+    pub micro: i64,
+}
+
+/// Ajustes que solo entiende un proveedor concreto.
+///
+/// El **modelo** es del proveedor y no de la peticion: cambia cuando el streamer
+/// lo elige, y lo necesitan dos sitios (la cabecera de la peticion y el calculo
+/// del coste, que vive en `tts::consumo`). Para que no haya dos duenos del mismo
+/// dato, el gestor es el unico que lo escribe y el proveedor solo lo aplica; si
+/// el modelo viviera tambien dentro del gestor y del proveedor a la vez, un
+/// cambio de ajuste y el calculo del precio podrian discrepar (docs/decisions.md
+/// D12).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProviderSettings {
+    /// Modelo del proveedor (para Fish, `s2.1-pro-free`, `s2.1-pro`...).
+    pub model: String,
+}
+
 pub trait TtsProvider: Send + Sync {
     fn name(&self) -> &'static str;
     fn synthesize<'a>(&'a self, request: &'a TtsRequest) -> BoxFuture<'a, Result<TtsAudio>>;
@@ -163,9 +335,36 @@ pub trait TtsProvider: Send + Sync {
             }
         })
     }
+    /// Aplica los ajustes propios del proveedor. Por defecto no hace nada: un
+    /// proveedor que no los usa no cambia porque exista este contrato.
+    fn apply(&self, _ajustes: &ProviderSettings) {}
     fn health<'a>(&'a self) -> BoxFuture<'a, bool>;
     fn available_voices<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>>>;
     fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()>;
+    /// Empieza un directo: el contador de la sesion vuelve a cero y el acumulado
+    /// no se toca. Por defecto no hace nada (un proveedor que no cobra no cuenta).
+    fn begin_stream(&self) {}
+    /// Consumo medido localmente y estado de los secretos, si el proveedor cobra
+    /// por bytes. `None` para el que no cobra.
+    fn usage(&self) -> Option<crate::tts::consumo::UsoProveedor> {
+        None
+    }
+    /// `true` si el proveedor tiene ya algun secreto (clave de API) guardado.
+    ///
+    /// Es un booleano y no el valor a proposito: la interfaz puede saber **si**
+    /// hay claves, nunca cuales son.
+    fn has_secret(&self) -> bool {
+        false
+    }
+    /// Version **enmascarada** de la clave en uso, para que el streamer
+    /// reconozca cual tiene puesta. Nunca el valor.
+    fn secret_hint(&self) -> Option<String> {
+        None
+    }
+    /// Que le falta para poder sintetizar, si le falta algo.
+    fn readiness(&self) -> Readiness {
+        Readiness::Ready
+    }
     /// Poda la cache en disco del proveedor. Devuelve cuantos ficheros borro.
     ///
     /// Quien decide **cuando** podar es el gestor (es el unico que sabe cuantas
@@ -274,9 +473,80 @@ impl Drop for TempOutput {
     }
 }
 
-fn valid_audio_file(path: &Path) -> Option<u64> {
+/// `true` si el fichero existe y tiene audio.
+pub(crate) fn valid_audio_file(path: &Path) -> Option<u64> {
     let metadata = std::fs::metadata(path).ok()?;
     (metadata.is_file() && metadata.len() > 0).then_some(metadata.len())
+}
+
+/// Un acierto de cache, en la forma que espera el gestor (no se sintetizo nada).
+pub(crate) fn apply_cached(path: PathBuf, bytes: u64) -> TtsAudio {
+    TtsAudio {
+        path,
+        bytes,
+        ms: 0,
+        cached: true,
+    }
+}
+
+/// Publica unos bytes de audio en la cache de forma **atomica**.
+///
+/// Es el mismo ritual que usa el sidecar: se escribe un temporal y se renombra.
+/// En Windows `rename` no reemplaza un destino existente, de modo que si otro
+/// proceso dejo un fichero valido se reutiliza; un fichero final invalido se
+/// borra antes de publicar el temporal ya validado. Lo que nunca puede pasar es
+/// que un lector abra un MP3 a medias.
+pub(crate) fn sink_atomically(
+    path: &Path,
+    audio: &[u8],
+    request_id: u64,
+    ms: u64,
+) -> Result<TtsAudio> {
+    if audio.is_empty() {
+        bail!("no se puede publicar un audio vacio en la cache");
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("creando {}", parent.display()))?;
+    }
+
+    let temporary = TempOutput::new(path, request_id);
+    // Un intento cancelado anterior puede haber dejado un `.tmp` con el mismo id
+    // tras un reinicio del gestor; nunca se valida como salida de esta peticion.
+    let _ = std::fs::remove_file(&temporary.path);
+    std::fs::write(&temporary.path, audio)
+        .with_context(|| format!("escribiendo el audio temporal {}", temporary.path.display()))?;
+
+    let bytes = valid_audio_file(&temporary.path)
+        .ok_or_else(|| anyhow!("el audio temporal quedo vacio o ausente"))?;
+
+    match std::fs::rename(&temporary.path, path) {
+        Ok(()) => temporary.keep(),
+        // Otro proceso gano la carrera y dejo un fichero valido: se reutiliza el
+        // suyo, que es el mismo audio.
+        Err(error) if valid_audio_file(path).is_some() => {
+            tracing::debug!(%error, file = %path.display(), "otra sintesis publico la misma cache");
+            return Ok(apply_cached(path.to_path_buf(), bytes));
+        }
+        Err(error) => {
+            if valid_audio_file(path).is_none() {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary.path, path).with_context(|| {
+                    format!("publicando la cache atomica en {}", path.display())
+                })?;
+                temporary.keep();
+            } else {
+                return Err(error)
+                    .with_context(|| format!("publicando la cache atomica en {}", path.display()));
+            }
+        }
+    }
+
+    Ok(TtsAudio {
+        path: path.to_path_buf(),
+        bytes,
+        ms,
+        cached: false,
+    })
 }
 
 fn validate_output(response: &SidecarResponse, expected: &Path) -> Result<()> {
@@ -729,6 +999,22 @@ impl TtsProvider for EdgeTtsSidecar {
 /// porque su salida no esta garantizada entre versiones: con FNV-1a la cache
 /// sigue siendo valida tras actualizar el compilador.
 pub fn cache_key(voice: &str, rate: &str, pitch: &str, text: &str) -> String {
+    fnv1a_hex(&[voice, rate, pitch, text])
+}
+
+/// Clave de cache de Fish Audio: el **proveedor** entra en la clave.
+///
+/// Fish comparte carpeta de cache con la voz de siempre (a proposito: asi lo que
+/// viene despues del proveedor no cambia), y por eso el nombre del proveedor tiene
+/// que formar parte de la clave. Si no, un `reference_id` que coincida con un
+/// nombre de voz de edge-tts reutilizaria el MP3 del otro motor. El modelo entra
+/// tambien: cambiar de modelo cambia la locucion y el precio.
+pub fn fish_cache_key(reference_id: &str, model: &str, text: &str) -> String {
+    fnv1a_hex(&["fish-audio", reference_id, model, text])
+}
+
+/// FNV-1a de una lista de campos, separados para que no se confundan entre si.
+fn fnv1a_hex(campos: &[&str]) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -739,13 +1025,12 @@ pub fn cache_key(voice: &str, rate: &str, pitch: &str, text: &str) -> String {
             hash = hash.wrapping_mul(PRIME);
         }
     };
-    feed(voice.as_bytes());
-    feed(b"\x1f");
-    feed(rate.as_bytes());
-    feed(b"\x1f");
-    feed(pitch.as_bytes());
-    feed(b"\x1f");
-    feed(text.as_bytes());
+    for (indice, campo) in campos.iter().enumerate() {
+        if indice > 0 {
+            feed(b"\x1f");
+        }
+        feed(campo.as_bytes());
+    }
     format!("{hash:016x}")
 }
 

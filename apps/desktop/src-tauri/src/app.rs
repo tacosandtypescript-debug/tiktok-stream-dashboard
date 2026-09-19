@@ -21,10 +21,11 @@ use crate::feed::{
     RankingBoard, RankingEntry, FEED_CAPACITY,
 };
 use crate::providers::{NativeProvider, ProviderConfig, SimulatedProvider, TikTokProvider};
+use crate::secreto::Secreto;
 use crate::telemetry;
-use crate::tts::manager::{TtsManager, TtsSettings, TtsStatus};
+use crate::tts::manager::{TtsManager, TtsSettings, TtsStatus, VoiceProvider};
 use crate::tts::player::{AudioSink, FallbackSink};
-use crate::tts::{EdgeTtsSidecar, SharedTtsProvider};
+use crate::tts::{EdgeTtsSidecar, FishAudio, SharedTtsProvider};
 
 /// Capacidad del bus. Acotada a proposito: un suscriptor lento pierde eventos
 /// antiguos en lugar de consumir memoria sin limite.
@@ -138,15 +139,21 @@ pub struct AppState {
     /// Lectura del chat en voz alta. Vive en su propio modulo y solo depende del
     /// bus: no conoce nada de TikTok ni de Tauri.
     pub(crate) tts: Arc<TtsManager>,
-    /// Proveedor de sintesis (sidecar edge-tts), compartido con el manager.
+    /// La voz de siempre: el sidecar de `edge-tts`. Vive aqui y no solo dentro del
+    /// gestor porque el motor se cambia en caliente y hay que poder volver a el.
+    pub(crate) edge: Arc<EdgeTtsSidecar>,
+    /// Fish Audio: HTTPS con las claves del streamer.
     ///
-    /// El gestor guarda su propio clon y hoy nadie mas lo lee, pero se conserva
-    /// como unico punto de construccion del sidecar para lo que no pasa por el
-    /// gestor (por ejemplo un comando de voces o de salud, que son metodos del
-    /// trait `TtsProvider`). De ahi el `allow`: el campo sigue aqui a proposito,
-    /// no es codigo muerto olvidado.
-    #[allow(dead_code)]
-    pub(crate) tts_provider: SharedTtsProvider,
+    /// Se guarda **con su tipo** y no como `SharedTtsProvider` porque la interfaz
+    /// tiene que poder anadir, quitar y reactivar claves, y eso es API propia de
+    /// este proveedor (el trait solo expone lo comun a todos).
+    pub(crate) fish: Arc<FishAudio>,
+    /// Ultimo consumo que se ha mandado a la base.
+    ///
+    /// Sirve para no escribir una fila por evento: el consumo se vuelca cuando
+    /// **cambia**, y como cada frase cambia el total, el volcado ocurre solo
+    /// cuando hay algo nuevo que guardar.
+    pub(crate) ultimo_consumo: Mutex<Option<(crate::tts::Consumo, usize)>>,
     pub(crate) db_path: PathBuf,
     pub(crate) schema_version: u32,
     /// Configuracion del servidor de overlays (token, puerto y diseno), si esta
@@ -235,6 +242,26 @@ impl AppState {
             None => Vec::new(),
         };
         let handle_inicial = ultimos_usuarios.first().cloned().unwrap_or_default();
+        // Las claves de la API de voz y el consumo, **antes** de que se construya
+        // el gestor: el primer evento del directo tiene que salir ya con las claves
+        // de verdad y el contador donde estaba. Un fallo de lectura no impide
+        // arrancar: se avisa y se sigue sin claves (que es un estado que la
+        // interfaz sabe enseñar).
+        let claves_guardadas = match database.tts_keys(crate::tts::fish::PROVIDER_ID) {
+            Ok(claves) => claves,
+            Err(error) => {
+                tracing::warn!(%error, "no se pudieron leer las claves de voz; se arranca sin ellas");
+                Vec::new()
+            }
+        };
+        let consumo_guardado = match database.tts_usage() {
+            Ok(Some((_, consumo))) => consumo,
+            Ok(None) => crate::tts::Consumo::default(),
+            Err(error) => {
+                tracing::warn!(%error, "no se pudo leer el consumo de voz; se empieza de cero");
+                crate::tts::Consumo::default()
+            }
+        };
         let writer = DbWriter::start(database, DB_QUEUE);
         let native = Arc::new(NativeProvider::new(
             ProviderConfig::default(),
@@ -243,20 +270,27 @@ impl AppState {
         )?);
         let simulated = Arc::new(SimulatedProvider::new(bus.clone(), metrics.clone()));
 
-        // TTS: sintesis por sidecar y reproduccion por el sink de reserva, que
-        // degrada a silencio si no hay tarjeta de sonido en lugar de impedir
-        // arrancar la aplicacion.
-        let tts_provider: SharedTtsProvider =
-            Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
+        // TTS: dos motores posibles (el sidecar de edge-tts y Fish Audio) y
+        // reproduccion por el sink de reserva, que degrada a silencio si no hay
+        // tarjeta de sonido en lugar de impedir arrancar la aplicacion.
+        let edge = Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
+        let fish = Arc::new(FishAudio::new(crate::tts::FishConfig::default()));
+        fish.cargar(claves_guardadas, consumo_guardado);
+        // El gestor nace ya con el motor que dicen los ajustes: si el streamer
+        // dejo Fish puesto, el primer mensaje del chat no puede salir por el
+        // sidecar.
+        let activo: SharedTtsProvider = match tts_settings.provider {
+            VoiceProvider::Fish => fish.clone(),
+            VoiceProvider::Edge => edge.clone(),
+        };
         let sink: Arc<dyn AudioSink> = Arc::new(FallbackSink::with_device(
             tts_settings.audio_device.as_deref(),
         ));
-        let tts = Arc::new(TtsManager::new(
-            tts_settings,
-            tts_provider.clone(),
-            bus.clone(),
-            sink,
-        ));
+        let tts = Arc::new(TtsManager::new(tts_settings, activo, bus.clone(), sink));
+        // Quien mide el gasto es Fish, este o no puesto como motor: el consumo y
+        // las claves son acumulados y no pueden desaparecer por volver un rato a
+        // la voz de siempre.
+        tts.set_medidor(Some(fish.clone()));
 
         Ok(Self {
             bus,
@@ -286,7 +320,9 @@ impl AppState {
             ui_chat: Mutex::new(UiChatTrace::default()),
             ultimos_usuarios: RwLock::new(ultimos_usuarios),
             tts,
-            tts_provider,
+            edge,
+            fish,
+            ultimo_consumo: Mutex::new(None),
             db_path,
             schema_version,
             overlay: Arc::new(RwLock::new(None)),
@@ -469,6 +505,10 @@ impl AppState {
         // (una sola vez por persona). Se hace aqui, en un solo sitio, para que
         // valga para todos los tipos de evento en vez de repetirlo en cada rama.
         self.remember_from_event(event);
+        // Y el consumo de voz, si alguna frase nueva lo ha movido. Es una
+        // comparacion de dos numeros por evento: asi el gasto del directo queda a
+        // salvo sin escribir nada cuando no hay nada nuevo.
+        self.flush_consumo();
 
         match &event.kind {
             EventKind::StreamConnected {
@@ -512,6 +552,12 @@ impl AppState {
                 if let Ok(mut progress) = self.progress.lock() {
                     *progress = SessionProgress::default();
                 }
+                // Y el consumo de voz: lo del directo empieza de cero (el
+                // acumulado de siempre no se toca). Se hace aqui, donde ya se
+                // reinicia todo lo que es "de la sesion", y el volcado de despues
+                // deja el parcial a cero guardado.
+                self.tts.begin_stream();
+                self.flush_consumo();
                 // El handle lo fija `AppState::connect`: es el unico sitio que
                 // sabe a que usuario se esta conectando el proveedor (el
                 // arranque automatico lo omitia y la sesion quedaba sin el).
@@ -553,6 +599,9 @@ impl AppState {
                 // Ultima ocasion de escribir el historico: despues de esto no
                 // habra mas eventos que lo acumulen, y lo pendiente se perderia.
                 self.flush_lifetime(true);
+                // Lo mismo con el consumo de voz: la ultima frase del directo
+                // tiene que quedar guardada.
+                self.flush_consumo();
                 if let Ok(mut guard) = self.started_at_ms.write() {
                     *guard = None;
                 }
@@ -1689,8 +1738,120 @@ impl AppState {
     }
 
     /// Estado del TTS para la interfaz.
+    ///
+    /// Aprovecha para volcar el consumo si cambio: la pagina de Voz pide el estado
+    /// cada segundo, asi que mientras el streamer la tiene abierta lo que lleva
+    /// gastado queda guardado casi al instante.
     pub fn tts_status(&self) -> TtsStatus {
+        self.flush_consumo();
         self.tts.status()
+    }
+
+    /// Cambia el motor de voz que lee el chat.
+    ///
+    /// Lo que estaba en cola se descarta y se cuenta (ver
+    /// `TtsManager::set_provider`): la voz la elegia el motor anterior.
+    pub fn set_voice_provider(&self, kind: VoiceProvider) {
+        let provider: SharedTtsProvider = match kind {
+            VoiceProvider::Fish => self.fish.clone(),
+            VoiceProvider::Edge => self.edge.clone(),
+        };
+        self.tts.set_provider(provider, kind);
+    }
+
+    /// Anade una clave de la API de voz y la guarda.
+    ///
+    /// La clave entra por aqui y **no sale**: ni al log, ni al `Snapshot`, ni al
+    /// estado que se manda a la interfaz. Lo unico que la interfaz vera es su
+    /// pista enmascarada dentro del estado nuevo.
+    pub fn tts_key_add(&self, nombre: &str, clave: &str) -> anyhow::Result<TtsStatus> {
+        self.fish.agregar(nombre, Secreto::new(clave))?;
+        self.persist_tts_keys()?;
+        Ok(self.tts_status())
+    }
+
+    pub fn tts_key_remove(&self, id: u64) -> anyhow::Result<TtsStatus> {
+        if !self.fish.quitar(id) {
+            anyhow::bail!("no existe esa clave");
+        }
+        self.persist_tts_keys()?;
+        Ok(self.tts_status())
+    }
+
+    /// Vuelve a dejar utilizable una clave marcada como invalida o agotada.
+    ///
+    /// Sin esto, una clave que se agoto porque el streamer recargo el saldo
+    /// seguiria muerta hasta reiniciar la aplicacion.
+    pub fn tts_key_reset(&self, id: u64) -> anyhow::Result<TtsStatus> {
+        if !self.fish.reactivar(id) {
+            anyhow::bail!("no existe esa clave");
+        }
+        self.persist_tts_keys()?;
+        Ok(self.tts_status())
+    }
+
+    /// Guarda la lista de claves **entera**.
+    ///
+    /// Es critico: perder la clave que el streamer acaba de pegar seria perder su
+    /// trabajo, y no lo puede recuperar de ningun sitio.
+    fn persist_tts_keys(&self) -> anyhow::Result<()> {
+        let claves = self.fish.claves_para_persistir();
+        if !self.persist(
+            WriteJob::TtsKeys {
+                provider: crate::tts::fish::PROVIDER_ID.to_string(),
+                claves,
+            },
+            true,
+        ) {
+            anyhow::bail!("no se pudieron guardar las claves de la API");
+        }
+        Ok(())
+    }
+
+    /// Vuelca el consumo a la base **si cambio**.
+    ///
+    /// Se llama en cada evento del bus y al pedir el estado. Comparar es barato
+    /// (dos numeros y el numero de claves) y evita una escritura por cada mensaje
+    /// del chat: solo se escribe cuando alguna frase nueva ha movido el contador.
+    fn flush_consumo(&self) {
+        // El medidor y no el motor activo: lo que se guarda es el gasto de Fish,
+        // que sigue contando aunque el streamer lea un rato con el sidecar.
+        let Some(medidor) = self.tts.medidor() else {
+            return;
+        };
+        let Some(uso) = medidor.usage() else {
+            return;
+        };
+        let firma = (uso.total, uso.claves.len());
+        {
+            let mut ultimo = self
+                .ultimo_consumo
+                .lock()
+                .unwrap_or_else(|envenenado| envenenado.into_inner());
+            if *ultimo == Some(firma) {
+                return;
+            }
+            *ultimo = Some(firma);
+        }
+        let stream_id = self
+            .stream_id
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+            .unwrap_or_default();
+        self.persist(
+            WriteJob::TtsUso {
+                provider: medidor.name().to_string(),
+                stream_id,
+                consumo: uso.total,
+                por_clave: uso
+                    .claves
+                    .iter()
+                    .map(|clave| (clave.id, clave.bytes, clave.llamadas, clave.micro))
+                    .collect(),
+            },
+            false,
+        );
     }
 
     /// Configuracion actual del TTS.
@@ -2215,7 +2376,73 @@ mod tests {
         assert_eq!(snapshot.status, "stopped");
         assert!(snapshot.chat.is_empty());
         assert_eq!(snapshot.schema_version, crate::database::SCHEMA_VERSION);
+        // Sin claves de voz: el estado lo dice en vez de callarse, y el motor de
+        // fabrica es el de siempre (la voz de edge-tts, que no necesita clave).
+        assert_eq!(snapshot.tts.voz.proveedor, VoiceProvider::Edge);
+        assert_eq!(snapshot.tts.voz.claves_total, 0);
+        assert_eq!(snapshot.tts.voz.listo, crate::tts::Readiness::Ready);
         state.shutdown();
+        cleanup(&path);
+    }
+
+    /// La regla que no se negocia: **la clave no vuelve a la interfaz**.
+    ///
+    /// Se comprueba sobre el `Snapshot` entero en JSON, que es lo que de verdad
+    /// viaja al WebView: si la clave estuviera en cualquier rincon (los ajustes,
+    /// los descartes, el estado del proveedor), apareceria aqui.
+    #[test]
+    fn el_snapshot_no_lleva_las_claves_y_si_su_pista() {
+        let path = temp_db_path("voz-claves");
+        let state = AppState::open(path.clone(), 0).expect("estado");
+        state
+            .tts_key_add("la de marzo", "sk-de-mentira-0001abcd")
+            .expect("primera clave");
+        state
+            .tts_key_add("la del canal nuevo", "sk-de-mentira-0002efgh")
+            .expect("segunda clave");
+
+        let json = serde_json::to_string(&state.snapshot()).expect("json");
+
+        assert!(
+            !json.contains("sk-de-mentira"),
+            "la clave salio en el Snapshot"
+        );
+        assert!(!json.to_lowercase().contains("bearer"));
+        // Lo que **si** viaja: cuantas hay, sus nombres y la pista enmascarada.
+        assert!(json.contains("la de marzo"), "el nombre si se ve");
+        assert!(json.contains("la del canal nuevo"));
+        assert!(json.contains("\u{2022}\u{2022}"), "la pista enmascarada");
+
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.tts.voz.claves_total, 2);
+        assert_eq!(snapshot.tts.voz.claves_vivas, 2);
+        assert_eq!(
+            snapshot.tts.voz.clave_en_uso.as_deref(),
+            Some("la de marzo"),
+            "la primera es la que se usa"
+        );
+        assert_eq!(snapshot.tts.consumo.claves.len(), 2);
+        for clave in &snapshot.tts.consumo.claves {
+            assert!(clave.pista.ends_with("abcd") || clave.pista.ends_with("efgh"));
+            assert!(!clave.pista.contains("sk-de-mentira"));
+        }
+
+        // Y las claves quedan guardadas: reabrir el estado las vuelve a cargar.
+        state.shutdown();
+        let reabierto = AppState::open(path.clone(), 0).expect("segundo arranque");
+        let claves = reabierto.snapshot().tts.voz;
+        assert_eq!(claves.claves_total, 2, "las claves sobreviven al cierre");
+        drop(reabierto);
+
+        // El fichero de la base si las tiene: es su unico sitio.
+        let database = Database::open(&path).expect("base");
+        let guardadas = database
+            .tts_keys(crate::tts::fish::PROVIDER_ID)
+            .expect("claves");
+        assert_eq!(guardadas.len(), 2);
+        assert_eq!(guardadas[0].secreto.exponer(), "sk-de-mentira-0001abcd");
+        drop(database);
+
         cleanup(&path);
     }
 

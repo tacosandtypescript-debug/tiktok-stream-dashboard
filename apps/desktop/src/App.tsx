@@ -950,7 +950,6 @@ export function App() {
               feed={feed}
               followRanking={followRanking}
               onOpenProfile={openProfile}
-              now={now}
               deleted={deleted}
               muted={muted}
               /* `sinSesion` mira la **sesion de verdad**, no el campo de texto.
@@ -980,6 +979,8 @@ export function App() {
               follows={followRanking}
               lifetime={lifetimeRanking}
               lifetimeEnabled={lifetimeEnabled}
+              lifetimeBusy={lifetimeBusy}
+              onLifetimeChange={changeLifetime}
               recientes={gifts}
               porTipo={giftsByType}
               totalGifts={totals.gifts}
@@ -1016,14 +1017,7 @@ export function App() {
             />
           ) : null}
 
-          {tab === "tts" ? (
-            <Tts
-              initial={snapshot?.tts ?? null}
-              lifetimeEnabled={lifetimeEnabled}
-              lifetimeBusy={lifetimeBusy}
-              onLifetimeChange={changeLifetime}
-            />
-          ) : null}
+          {tab === "tts" ? <Tts initial={snapshot?.tts ?? null} /> : null}
 
           {tab === "developer" ? (
             <Developer

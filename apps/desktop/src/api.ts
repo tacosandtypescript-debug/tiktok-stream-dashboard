@@ -443,8 +443,99 @@ export interface TtsSettings {
   read_gifts: boolean;
   /** Leer los follows (apagado por defecto: son muchos). */
   read_follows: boolean;
+  /** Motor de voz: el sidecar de siempre o Fish Audio. */
+  provider: TtsProvider;
+  /** Ajustes de Fish Audio. **Sin la clave**: los secretos no viajan aqui. */
+  fish: TtsFishSettings;
   filters: TtsFilters;
   queue_capacity: number;
+}
+
+/** Motor de voz del lector de chat. */
+export type TtsProvider = "edge" | "fish";
+
+/**
+ * Lo que se configura de Fish Audio.
+ *
+ * No hay campo para la clave **a proposito**: la interfaz escribe claves nuevas,
+ * pero no puede leer las que hay (ver `TtsClave`).
+ */
+export interface TtsFishSettings {
+  /** Codigo de voz (`reference_id`). */
+  reference_id: string;
+  /** Modelo. El gratuito por defecto. */
+  model: string;
+}
+
+/** Un modelo de Fish, con su tarifa en dolares por millon de bytes de texto. */
+export interface TtsModelo {
+  id: string;
+  precio_por_millon: number;
+}
+
+/**
+ * Que le falta al motor de voz para poder leer.
+ *
+ * Es un identificador y no una frase: el texto que se enseña vive en `i18n`,
+ * como el resto (docs/decisions.md D4).
+ */
+export type TtsReadiness = "ready" | "missing_secret" | "missing_voice" | "no_usable_key";
+
+/** En que estado esta una clave guardada. */
+export type TtsClaveEstado = "viva" | "invalida" | "agotada";
+
+/**
+ * Una clave de la API **enmascarada**.
+ *
+ * El valor no esta aqui y no puede estarlo: la interfaz escribe claves nuevas,
+ * pero no puede leer las que hay. Es la unica forma de que una clave no acabe en
+ * una captura de pantalla o en un log.
+ */
+export interface TtsClave {
+  /** Posicion en la lista (0 = la primera que se intenta). */
+  id: number;
+  nombre: string;
+  /** Pista enmascarada (`••••••••abcd`). */
+  pista: string;
+  estado: TtsClaveEstado;
+  /** `true` en la que se esta usando ahora mismo. */
+  en_uso: boolean;
+  bytes: number;
+  llamadas: number;
+  /** Coste acumulado de esta clave, ya calculado por Rust. */
+  usd: number;
+}
+
+/** Estado del motor de voz y de sus claves. */
+export interface TtsVoz {
+  proveedor: TtsProvider;
+  listo: TtsReadiness;
+  reference_id: string;
+  modelo: string;
+  modelos: TtsModelo[];
+  claves_total: number;
+  claves_vivas: number;
+  clave_en_uso: string | null;
+}
+
+/**
+ * Consumo medido localmente.
+ *
+ * Fish cobra por bytes UTF-8 del texto de **entrada**, asi que la aplicacion
+ * cuenta su gasto sin preguntar a la API. Los dolares vienen ya calculados en
+ * Rust: aqui no se multiplica nada.
+ */
+export interface TtsConsumo {
+  modelo: string;
+  precio_por_millon: number;
+  sesion_bytes: number;
+  sesion_llamadas: number;
+  sesion_usd: number;
+  total_bytes: number;
+  total_llamadas: number;
+  total_usd: number;
+  /** Desglose por clave, en el orden de la lista. */
+  claves: TtsClave[];
 }
 
 export interface TtsStatus {
@@ -467,6 +558,10 @@ export interface TtsStatus {
   provider_degraded: string | null;
   audio_degraded: string | null;
   audio_device: string | null;
+  /** El motor de voz elegido y el estado de sus claves. */
+  voz: TtsVoz;
+  /** Lo que se lleva gastado, contado en local. */
+  consumo: TtsConsumo;
 }
 
 export const api = {
@@ -507,6 +602,9 @@ export const api = {
     voice_en?: string;
     read_gifts?: boolean;
     read_follows?: boolean;
+    provider?: TtsProvider;
+    fish_reference_id?: string;
+    fish_model?: string;
   }) => invoke<void>("tts_update", { patch }),
   ttsAction: (action: string, value?: string) =>
     invoke<void>("tts_action", { action, value: value ?? null }),
@@ -514,6 +612,22 @@ export const api = {
   ttsDevices: () => invoke<string[]>("tts_devices"),
   ttsSelectDevice: (device: string | null) =>
     invoke<TtsStatus>("tts_select_device", { device }),
+
+  /**
+   * Guarda una clave de la API de voz.
+   *
+   * Es **escritura sola**: se manda una clave nueva y el motor contesta con el
+   * estado, que solo lleva su pista enmascarada. La interfaz no puede leer la
+   * clave que hay, ni siquiera la que acaba de mandar.
+   */
+  ttsKeyAdd: (nombre: string, clave: string) =>
+    invoke<TtsStatus>("tts_key_add", { nombre, clave }),
+
+  /** Quita una clave de la lista, por su posicion. */
+  ttsKeyRemove: (id: number) => invoke<TtsStatus>("tts_key_remove", { id }),
+
+  /** Vuelve a intentar una clave marcada como invalida o agotada. */
+  ttsKeyReset: (id: number) => invoke<TtsStatus>("tts_key_reset", { id }),
 
   /**
    * Activa o desactiva el histórico de aportaciones de por vida.

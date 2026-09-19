@@ -196,7 +196,7 @@ export function Alertas({
   );
 
   return (
-    <div className="grid-panel">
+    <div className="grid-panel alertas">
       <p className="hint">{t.alertas.hint}</p>
 
       {/* Primero lo que se configura —la lista y su editor— y despues el resto: los
@@ -278,64 +278,74 @@ export function Alertas({
           onCambiar={cambiar}
           onProbar={onProbar}
         />
+
+        {/* Los medios, en la misma fila que la lista y el editor: es la tercera
+            pieza del mismo trabajo —elegir el aviso, escribirlo y darle su medio—,
+            y con ellos en una fila propia la pagina medía 1.121 px para 674 de
+            alto. Aqui cabe. */}
+        <Card title={t.alertas.medios}>
+          <p className="hint">{t.alertas.mediosHint}</p>
+          <div
+            className={encima ? "soltar encima" : "soltar"}
+            onClick={() => selector.current?.click()}
+            onDragOver={(evento) => evento.preventDefault()}
+          >
+            <input
+              ref={selector}
+              type="file"
+              accept={ACEPTADOS}
+              hidden
+              onChange={(evento) => {
+                void elegir(evento.target.files?.[0]);
+                // Se limpia para poder volver a elegir el mismo fichero.
+                evento.target.value = "";
+              }}
+            />
+            <strong>{t.alertas.soltar}</strong>
+            <button
+              type="button"
+              className="ghost"
+              onClick={(evento) => {
+                evento.stopPropagation();
+                selector.current?.click();
+              }}
+            >
+              {t.alertas.elegir}
+            </button>
+            <p className="hint">{t.alertas.formatos}</p>
+          </div>
+          {avisoMedio ? <p className="empty">{avisoMedio}</p> : null}
+
+          {medios.length === 0 ? (
+            <Empty>{t.alertas.vacio}</Empty>
+          ) : (
+            <ul className="medios">
+              {medios.map((nombre) => (
+                <li key={nombre}>
+                  <span className="medio-nombre" title={nombre}>
+                    {nombre}
+                  </span>
+                  <button
+                    type="button"
+                    className="ghost"
+                    title={t.alertas.borrarHint}
+                    disabled={busy}
+                    onClick={() => onBorrarMedio(nombre)}
+                  >
+                    {t.alertas.borrar}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
 
-      <Card title={t.alertas.medios}>
-        <p className="hint">{t.alertas.mediosHint}</p>
-        <div
-          className={encima ? "soltar encima" : "soltar"}
-          onClick={() => selector.current?.click()}
-          onDragOver={(evento) => evento.preventDefault()}
-        >
-          <input
-            ref={selector}
-            type="file"
-            accept={ACEPTADOS}
-            hidden
-            onChange={(evento) => {
-              void elegir(evento.target.files?.[0]);
-              // Se limpia para poder volver a elegir el mismo fichero.
-              evento.target.value = "";
-            }}
-          />
-          <strong>{t.alertas.soltar}</strong>
-          <button
-            type="button"
-            className="ghost"
-            onClick={(evento) => {
-              evento.stopPropagation();
-              selector.current?.click();
-            }}
-          >
-            {t.alertas.elegir}
-          </button>
-          <p className="hint">{t.alertas.formatos}</p>
-        </div>
-        {avisoMedio ? <p className="empty">{avisoMedio}</p> : null}
-
-        {medios.length === 0 ? (
-          <Empty>{t.alertas.vacio}</Empty>
-        ) : (
-          <ul className="medios">
-            {medios.map((nombre) => (
-              <li key={nombre}>
-                <span className="medio-nombre" title={nombre}>
-                  {nombre}
-                </span>
-                <button
-                  type="button"
-                  className="ghost"
-                  title={t.alertas.borrarHint}
-                  disabled={busy}
-                  onClick={() => onBorrarMedio(nombre)}
-                >
-                  {t.alertas.borrar}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+      {/* La salida de audio y la direccion de OBS, en la fila de abajo. Son las dos
+          piezas que se tocan una vez —al montar la escena— y no se vuelven a mirar,
+          asi que van juntas y **sin envoltorio**: la propia rejilla de la pagina las
+          coloca en las dos columnas de su ultima fila (`styles.css`,
+          `.grid-panel.alertas`). Un `div` de mas solo añadiria un nivel. */}
 
       <Card title={t.alertas.salida}>
         <p className="hint">{t.alertas.salidaHint}</p>
@@ -504,7 +514,13 @@ function Aviso({
         </p>
       </div>
 
-      <div className="grid-columns">
+      {/* Dos pares de campos, cada uno en su fila y **siempre a dos columnas**.
+          No se usa `.grid-columns` porque esa rejilla es `auto-fit` y con el ancho
+          que tiene el editor por dentro (640 px) daba **una** sola columna: los
+          campos se apilaban, la tarjeta pasaba de 382 a 533 px de alto y su fila
+          solo le daba 379, así que el marco le recortaba 154. Un par de campos que
+          se leen juntos no debe replegarse. */}
+      <div className="campos-par">
         <div className="campo">
           <label htmlFor={`medio-${tipo}`}>{t.alertas.medio}</label>
           <select
@@ -544,7 +560,7 @@ function Aviso({
         </div>
       </div>
 
-      <div className="grid-columns">
+      <div className="campos-par">
         <div className="campo">
           <label htmlFor={`duracion-${tipo}`}>
             {t.alertas.duracion} · {(ajuste.duracion_ms / 1000).toFixed(1)} s

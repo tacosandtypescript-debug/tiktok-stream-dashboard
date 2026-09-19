@@ -7,8 +7,12 @@
 //! **una vez**, y con el componente que ya comparten el panel y el overlay
 //! (`RankingTable`), así que los tres no pueden divergir.
 //!
-//! Orden: primero las personas —que es lo que se enseña en pantalla— y debajo el
-//! detalle de los regalos, que es lo que se mira de reojo.
+//! Reparto: **cuatro columnas por dos filas**, que es lo que cabe con la ventana
+//! en 1440x900 sin desplazar la página. Arriba las **cuatro tablas de personas**
+//! —tap tap, regalos, seguidores y el histórico—, que son la misma pregunta con
+//! distinto reloj; abajo el resumen **por tipo de regalo** y el **flujo de los
+//! últimos regalos**, que es lo que se mira de reojo. Cada panel se desplaza por
+//! dentro, así que una noche con cien regalos no empuja la página: llena su panel.
 
 import type { GiftEventView, GiftTypeSummary, RankingEntry } from "../api";
 import { Card, Empty, GiftThumb, RankingTable, formatClock, formatNumber, nickname } from "../components";
@@ -27,6 +31,10 @@ interface Props {
   /** Totales históricos; vacío si el ajuste está apagado. */
   lifetime: RankingEntry[];
   lifetimeEnabled: boolean;
+  /** Mientras el motor confirma el cambio, el interruptor no acepta más pulsaciones. */
+  lifetimeBusy: boolean;
+  /** Cambia el ajuste; quien lo guarda y revierte si falla es `App`. */
+  onLifetimeChange: (enabled: boolean) => void;
   /** Los últimos regalos, del más reciente al más antiguo. */
   recientes: GiftEventView[];
   /** Resumen por tipo de regalo. */
@@ -43,6 +51,8 @@ export function Aportaciones({
   follows,
   lifetime,
   lifetimeEnabled,
+  lifetimeBusy,
+  onLifetimeChange,
   recientes,
   porTipo,
   totalGifts,
@@ -52,10 +62,15 @@ export function Aportaciones({
   const interactivo = onOpenProfile !== undefined;
 
   return (
-    <div className="grid-panel">
+    <div className="grid-panel aportaciones">
       <p className="hint">{t.aportaciones.hint}</p>
 
-      <div className="grid-columns">
+      {/* Las seis tarjetas, colocadas una a una en `styles.css`. El orden del
+          marcado tiene que ser este: Tap tap, Regalos, Seguidores, Histórico,
+          Por tipo y Últimos regalos. Es el mismo criterio que en Inicio, donde los
+          `grid-area` también van declarados para que el reparto no dependa de que
+          nadie reordene el JSX sin querer. */}
+      <div className="aportaciones-rejilla">
         <Card title={t.aportaciones.tap}>
           <RankingTable
             entries={tap}
@@ -88,12 +103,31 @@ export function Aportaciones({
           />
           <p className="hint">{t.aportaciones.followsHint}</p>
         </Card>
-      </div>
 
-      <div className="grid-columns">
-        {/* El histórico solo se enseña si está activado: una tabla vacía con un
-            aviso es más honesta que esconderla sin explicar por qué. */}
+        {/* El histórico con **su interruptor dentro**. El ajuste vivía en la página
+            de Voz —«es la página de ajustes operativos»— y el aviso de la tabla
+            mandaba al streamer a otra pestaña para encender lo que estaba mirando.
+            Ahora se cambia y se ve en el mismo sitio, que es la regla 3 del
+            contrato. Sigue guardándolo `App`: aquí solo se pinta el interruptor.
+
+            Dentro y no en la cabecera: probado en `actions`, a los 303 px que mide
+            esta columna el rótulo «Histórico» y el texto del interruptor no caben en
+            la misma línea, la cabecera se parte en dos y la tabla pierde 6 px más de
+            los que ya le faltaban. */}
         <Card title={t.aportaciones.lifetime}>
+          {/* La explicación larga va en el `title` y no en un párrafo debajo: el
+              panel mide 363 px y la tabla de ocho personas ya los llena, así que dos
+              líneas más de texto dejarían fuera la octava. Al pasar el ratón se lee
+              entera. */}
+          <label className="switch" title={t.aportaciones.toggleHint}>
+            <input
+              type="checkbox"
+              checked={lifetimeEnabled}
+              disabled={lifetimeBusy}
+              onChange={(event) => onLifetimeChange(event.target.checked)}
+            />
+            <span>{t.aportaciones.toggle}</span>
+          </label>
           {lifetimeEnabled ? (
             <>
               <RankingTable
@@ -127,40 +161,41 @@ export function Aportaciones({
             </ul>
           )}
         </Card>
-      </div>
 
-      {/* El detalle, a lo ancho: es una lista larga y en columna se quedaría en
-          un rincón con scroll propio. */}
-      <Card title={t.aportaciones.recientes}>
-        <p className="hint">{t.aportaciones.total(totalGifts, totalDiamonds)}</p>
-        {recientes.length === 0 ? (
-          <Empty>{t.aportaciones.none}</Empty>
-        ) : (
-          <ul className="feed gifts">
-            {recientes.slice(0, RECIENTES).map((gift) => (
-              <li key={gift.seq}>
-                <span className="time">{formatClock(gift.timestamp_ms)}</span>
-                <GiftThumb url={gift.image_url} name={gift.gift_name} />
-                <span className="user">
-                  {nickname(gift.user.nickname, gift.user.unique_id)}
-                </span>
-                <span className="feed-text">
-                  <strong>{gift.gift_name || `regalo ${gift.gift_id}`}</strong>
-                  {gift.repeat_count > 1 ? ` ×${gift.repeat_count}` : ""}
-                </span>
-                <span className="rank-value">
-                  {formatNumber(gift.diamond_count * Math.max(1, gift.repeat_count))} 💎
-                </span>
-                {gift.streakable ? (
-                  <span className={gift.is_final ? "tag tag-gift" : "tag tag-info"}>
-                    {gift.is_final ? t.aportaciones.streakFinal : t.aportaciones.streak}
+        {/* El flujo, ancho: es una lista de seis columnas por fila y en una sola
+            columna de 300 px se quedaría en un rincón ilegible. Por eso ocupa las
+            tres columnas que sobran de la fila de abajo. */}
+        <Card title={t.aportaciones.recientes}>
+          <p className="hint">{t.aportaciones.total(totalGifts, totalDiamonds)}</p>
+          {recientes.length === 0 ? (
+            <Empty>{t.aportaciones.none}</Empty>
+          ) : (
+            <ul className="feed gifts">
+              {recientes.slice(0, RECIENTES).map((gift) => (
+                <li key={gift.seq}>
+                  <span className="time">{formatClock(gift.timestamp_ms)}</span>
+                  <GiftThumb url={gift.image_url} name={gift.gift_name} />
+                  <span className="user">
+                    {nickname(gift.user.nickname, gift.user.unique_id)}
                   </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+                  <span className="feed-text">
+                    <strong>{gift.gift_name || `regalo ${gift.gift_id}`}</strong>
+                    {gift.repeat_count > 1 ? ` ×${gift.repeat_count}` : ""}
+                  </span>
+                  <span className="rank-value">
+                    {formatNumber(gift.diamond_count * Math.max(1, gift.repeat_count))} 💎
+                  </span>
+                  {gift.streakable ? (
+                    <span className={gift.is_final ? "tag tag-gift" : "tag tag-info"}>
+                      {gift.is_final ? t.aportaciones.streakFinal : t.aportaciones.streak}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

@@ -248,6 +248,12 @@ struct TtsPatch {
     voice_en: Option<String>,
     read_gifts: Option<bool>,
     read_follows: Option<bool>,
+    /// Motor de voz (edge-tts o Fish Audio).
+    provider: Option<crate::tts::VoiceProvider>,
+    /// Codigo de voz de Fish (`reference_id`).
+    fish_reference_id: Option<String>,
+    /// Modelo de Fish.
+    fish_model: Option<String>,
 }
 
 #[tauri::command]
@@ -259,6 +265,11 @@ fn tts_status(state: State<'_, Arc<AppState>>) -> crate::tts::manager::TtsStatus
 fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), String> {
     use crate::tts::voices::Language;
 
+    // El motor **primero**: la voz de las frases siguientes depende de cual este
+    // puesto, y cambiar el motor descarta lo que estaba en cola.
+    if let Some(provider) = patch.provider {
+        state.set_voice_provider(provider);
+    }
     if let Some(enabled) = patch.enabled {
         state.tts.set_enabled(enabled);
     }
@@ -286,9 +297,56 @@ fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), St
     if let Some(voice) = patch.voice_en {
         state.tts.set_voice(Language::En, &voice);
     }
+    if let Some(voice) = patch.fish_reference_id {
+        state.tts.set_fish_voice(&voice);
+    }
+    if let Some(model) = patch.fish_model {
+        state.tts.set_fish_model(&model);
+    }
     state
         .persist_tts_settings()
         .map_err(|error| format!("no se pudieron guardar los ajustes TTS: {error:#}"))
+}
+
+/// Guarda una clave de la API de voz.
+///
+/// Va en su propio comando, aparte de `tts_update`, porque es **escritura sola**:
+/// la interfaz manda una clave nueva y **no puede leer** la que hay. Ni el estado
+/// que devuelve ni el `Snapshot` llevan el valor, solo su pista enmascarada: es la
+/// unica forma de que una clave no acabe en una captura de pantalla o en un log.
+///
+/// Devuelve el estado nuevo para que la lista de claves se repinte al instante.
+#[tauri::command]
+fn tts_key_add(
+    state: State<'_, Arc<AppState>>,
+    nombre: String,
+    clave: String,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .tts_key_add(&nombre, &clave)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Quita una clave de la lista (por su posicion).
+#[tauri::command]
+fn tts_key_remove(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .tts_key_remove(id)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Vuelve a dejar utilizable una clave marcada como invalida o agotada.
+#[tauri::command]
+fn tts_key_reset(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .tts_key_reset(id)
+        .map_err(|error| format!("{error:#}"))
 }
 
 /// Acciones puntuales sobre la cola o los usuarios silenciados.
@@ -580,6 +638,9 @@ fn launch(instance_port: u16) {
             tts_voices,
             tts_devices,
             tts_select_device,
+            tts_key_add,
+            tts_key_remove,
+            tts_key_reset,
             connect,
             start_simulation,
             use_native_provider,

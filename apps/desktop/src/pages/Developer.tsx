@@ -2,10 +2,20 @@
 //!
 //! El simulador vive **aquí**, no en la barra principal: es una herramienta de
 //! desarrollo (y el proveedor que usan los tests), no parte del flujo normal.
+//!
+//! Aquí también está **todo lo que solo sirve cuando algo va mal**. La página de
+//! Voz tenía doce tarjetas y la mitad eran diagnóstico: los avisos descartados por
+//! los filtros y los contadores de síntesis no se miran mientras se emite, se miran
+//! cuando la voz no suena. Con ellos dentro, Voz medía 1.518 px de contenido para
+//! 674 de alto y había que desplazar la página entera. El contrato ya lo decía
+//! («el histórico y los descartados, a Desarrollador»); esto lo cumple.
 
 import type { Metrics, Snapshot } from "../api";
-import { Card, Rows, formatNumber } from "../components";
+import { Card, Empty, Rows, formatNumber } from "../components";
 import { t } from "../i18n/es";
+
+/** Las métricas del motor, en cuántas columnas se pintan. */
+const COLUMNAS_METRICAS = 3;
 
 interface Props {
   snapshot: Snapshot | null;
@@ -47,19 +57,36 @@ export function Developer({ snapshot, metrics, busy, onSimulate, onNative }: Pro
     ["db_critical_dropped", metrics.db_critical_dropped],
   ];
 
+  // Se parte en **trozos contiguos**, no alternos: son veintiún contadores y se
+  // leen en orden, asi que la primera columna va entera antes de saltar a la
+  // segunda. Repartidos de uno en uno (1, 4, 7…) el orden de lectura se pierde.
+  const porColumna = Math.ceil(tecnicas.length / COLUMNAS_METRICAS);
+  const columnas = Array.from({ length: COLUMNAS_METRICAS }, (_, i) =>
+    tecnicas.slice(i * porColumna, (i + 1) * porColumna),
+  ).filter((tramo) => tramo.length > 0);
+
   return (
-    <div className="grid-panel">
+    <div className="grid-panel developer">
       <Card title={t.developer.metrics}>
         <p className="hint">{t.developer.warned}</p>
-        <Rows
-          rows={tecnicas.map(([label, value]) => [
-            label,
-            typeof value === "number" ? formatNumber(value) : value,
-          ])}
-        />
+        {/* Una tabla por columna y no una tabla con `columns`: en CSS, una tabla no
+            se parte entre columnas, asi que saldria una sola tira larga. */}
+        <div className="metricas-columnas">
+          {columnas.map((tramo, indice) => (
+            <Rows
+              key={indice}
+              rows={tramo.map(([label, value]) => [
+                label,
+                typeof value === "number" ? formatNumber(value) : value,
+              ])}
+            />
+          ))}
+        </div>
       </Card>
 
-      <div className="grid-columns">
+      {/* El orden del marcado es el que colocan las reglas de `styles.css`:
+          rutas, traza del chat, eventos, herramientas, descartados y contadores. */}
+      <div className="developer-rejilla">
         <Card title={t.developer.paths}>
           <Rows
             rows={[
@@ -122,24 +149,52 @@ export function Developer({ snapshot, metrics, busy, onSimulate, onNative }: Pro
             </ul>
           )}
         </Card>
-      </div>
 
-      <Card title={t.developer.tools}>
-        <p className="hint">{t.developer.simulatorHint}</p>
-        <div className="tools">
-          <button type="button" disabled={busy} onClick={onSimulate}>
-            {t.developer.simulator}
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            disabled={busy || snapshot.provider !== "simulated"}
-            onClick={onNative}
-          >
-            {t.developer.backToNative}
-          </button>
-        </div>
-      </Card>
+        <Card title={t.developer.tools}>
+          <p className="hint">{t.developer.simulatorHint}</p>
+          <div className="tools">
+            <button type="button" disabled={busy} onClick={onSimulate}>
+              {t.developer.simulator}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy || snapshot.provider !== "simulated"}
+              onClick={onNative}
+            >
+              {t.developer.backToNative}
+            </button>
+          </div>
+        </Card>
+
+        {/* Venían de la página de Voz. Se leen cuando la voz no suena: los motivos
+            por los que el lector descartó un mensaje. */}
+        <Card title={t.tts.rejected}>
+          {snapshot.tts.rejections.length === 0 ? (
+            <Empty>{t.tts.rejectedEmpty}</Empty>
+          ) : (
+            <Rows
+              rows={snapshot.tts.rejections.map(([motivo, cuenta]) => [
+                motivo,
+                formatNumber(cuenta),
+              ])}
+            />
+          )}
+        </Card>
+
+        {/* Los contadores del lector. También de Voz: son totales de la sesión, no
+            algo que se mire mientras se emite. */}
+        <Card title={t.tts.counters}>
+          <Rows
+            rows={[
+              [t.tts.synthesized, formatNumber(snapshot.tts.synthesized)],
+              [t.tts.dropped, formatNumber(snapshot.tts.dropped)],
+              [t.tts.muted, formatNumber(snapshot.tts.muted_users)],
+            ]}
+          />
+          <p className="hint">{t.tts.hint}</p>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -4,9 +4,16 @@
 //! sin blur, sin sombras costosas. Todo es CSS plano y barato de pintar.
 
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ChatEntry, FeedItem, FeedKind, RankingEntry, UserRef } from "./api";
+import type {
+  ChatEntry,
+  FeedItem,
+  FeedKind,
+  GiftInfo,
+  RankingEntry,
+  UserRef,
+} from "./api";
 import { t } from "./i18n/es";
 
 /** Nombre visible de un usuario: el apodo o, si no lo tiene, su @usuario. */
@@ -72,6 +79,88 @@ export function feedText(item: FeedItem): string {
   }
 }
 
+/**
+ * Redacta un combo ya agrupado.
+ *
+ * Es `feedText` para una racha que crece: por eso el texto y el numero de
+ * unidades viven en nodos distintos (`GiftCard`), y asi el numero se puede
+ * resaltar sin partir la frase. Se decide por `is_final` del ultimo suceso
+ * agrupado y no por el valor de la racha: la racha la cierra el motor, no la
+ * interfaz.
+ */
+export function comboText(gift: GiftInfo, who: string): string {
+  const name = gift.name || t.feed.genericGift(gift.id);
+  const units = giftUnits(gift);
+  if (gift.streakable) {
+    return gift.is_final
+      ? t.feed.giftMany(who, name, units)
+      : t.feed.giftStreak(who, name, units);
+  }
+  return units > 1 ? t.feed.giftMany(who, name, units) : t.feed.giftOne(who, name);
+}
+
+/**
+ * Unidades que representa un suceso de regalo.
+ *
+ * `repeat_count` es un **incremento** y puede llegar a cero en un regalo no
+ * acumulable (docs/decisions.md D14): un cero pintado seria un regalo que no
+ * existe, asi que vale una unidad.
+ */
+export function giftUnits(gift: GiftInfo): number {
+  return gift.repeat_count > 0 ? gift.repeat_count : 1;
+}
+
+/**
+ * Diamantes que vale un combo ya agrupado.
+ *
+ * Es el valor unitario que manda el motor por las unidades de la racha. No se
+ * recalcula ningun valor de regalo: `diamond_count` es el del motor y las
+ * unidades son la suma de sus incrementos (docs/decisions.md D14).
+ */
+export function comboDiamonds(gift: GiftInfo): number {
+  return gift.diamond_count * giftUnits(gift);
+}
+
+/**
+ * Agrupa las rachas del feed y deja los demas sucesos como estaban.
+ *
+ * Los regalos **no acumulables** tambien se agrupan por `group_id`: TikTok manda
+ * ahi el identificador del mensaje, asi que cada uno es su propio grupo y no se
+ * pegan dos regalos distintos por compartir el `"0"` de los no acumulables.
+ */
+export function buildFeedView(items: FeedItem[]): FeedItem[] {
+  const vistos = new Map<string, FeedItem>();
+  const salida: FeedItem[] = [];
+  for (const item of items) {
+    const gift = item.gift;
+    if (item.kind !== "gift" || !gift) {
+      salida.push(item);
+      continue;
+    }
+    const id = gift.group_id;
+    if (id === undefined || id.length === 0) {
+      salida.push(item);
+      continue;
+    }
+    const acumulado = vistos.get(id);
+    if (!acumulado || !acumulado.gift) {
+      // El primer suceso de la racha marca el sitio: los siguientes crecen esa
+      // misma entrada en vez de apilar lineas nuevas.
+      const copia: FeedItem = { ...item, gift: { ...gift } };
+      vistos.set(id, copia);
+      salida.push(copia);
+      continue;
+    }
+    const previo = acumulado.gift;
+    acumulado.gift = {
+      ...previo,
+      repeat_count: previo.repeat_count + (gift.repeat_count > 0 ? gift.repeat_count : 1),
+      is_final: gift.is_final,
+    };
+  }
+  return salida;
+}
+
 /** Numero corto y legible: 9.999 / 12,4 K / 1,2 M. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return "—";
@@ -101,20 +190,19 @@ export function formatDuration(milliseconds: number): string {
   return `${seconds} s`;
 }
 
-/** "hace 3 s", "hace 2 m". */
-export function timeAgo(timestampMs: number, now: number): string {
-  const seconds = Math.max(0, Math.round((now - timestampMs) / 1000));
-  if (seconds < 60) return `hace ${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `hace ${minutes} m`;
-  const hours = Math.floor(minutes / 60);
-  return `hace ${hours} h`;
-}
-
+/**
+ * La hora, en **24 horas y sin el «p. m.»**.
+ *
+ * Ya no la usa la actividad —las horas se quitaron de Inicio— pero si el flujo de
+ * «Últimos regalos» de Aportaciones, que es un registro y ahí el instante sí es el
+ * dato. Se queda en 24 horas por lo mismo que entonces: `11:13 p. m.` son once
+ * caracteres y no caben en una columna estrecha, y `23:13` son cinco.
+ */
 export function formatClock(timestampMs: number): string {
   return new Date(timestampMs).toLocaleTimeString("es-CO", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -127,9 +215,21 @@ const FEED_LABEL: Record<FeedKind, string> = {
   info: "Info",
 };
 
-/** Miniatura del regalo. Se carga en diferido y sin bloquear el pintado. */
+/**
+ * Miniatura del regalo, en diferido y sin bloquear el pintado.
+ *
+ * Si el regalo viene **sin icono**, la celda desaparece con ella y la frase no
+ * arranca con un hueco: eso ya estaba decidido y se respeta.
+ *
+ * Lo que faltaba es el otro caso, el del icono que **falla**: cuando la direccion
+ * existe pero el CDN de TikTok no la sirve —o se cae la red—, el `<img>` se pintaba
+ * roto. No es un hueco: es el cuadro con el icono de imagen partida en mitad de la
+ * fila, que se lee como que la aplicacion esta mal. Ahora se recuerda el fallo por
+ * direccion, igual que en la foto de perfil, y la celda se va con el.
+ */
 export function GiftThumb({ url, name }: { url?: string; name: string }) {
-  if (!url) return null;
+  const [fallida, setFallida] = useState<string | undefined>(undefined);
+  if (!url || url === fallida) return null;
   return (
     <img
       className="gift-thumb"
@@ -138,12 +238,103 @@ export function GiftThumb({ url, name }: { url?: string; name: string }) {
       loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"
+      onError={() => setFallida(url)}
     />
   );
 }
 
 export function FeedTag({ kind }: { kind: FeedKind }) {
   return <span className={`tag tag-${kind}`}>{FEED_LABEL[kind]}</span>;
+}
+
+/** Cuanto dura el realce del combo grande. Es lo que dura su animacion. */
+const DESTACADO_MS = 1800;
+
+/**
+ * Si el combo que acaba de cambiar merece un realce momentaneo.
+ *
+ * El umbral no es decorativo: si se destacara una rosa suelta, el realce saldria
+ * cada pocos segundos y dejaria de significar nada. Se destacan las rachas largas
+ * y los regalos caros, que son las dos cosas que se miran de reojo.
+ *
+ * Los dos numeros son **politica de interfaz** y siguen la que ya usa el motor
+ * para lo notable: una rafaga de likes entra en el feed a partir de diez
+ * (`feed::like_is_notable`). Aqui no entra un combo de cuatro regalos, que es una
+ * traca cualquiera, y si uno de mil diamantes, que es dinero.
+ */
+const COMBO_UNIDADES_DESTACADAS = 10;
+const COMBO_DIAMANTES_DESTACADOS = 200;
+
+export function comboDestacado(gift: GiftInfo): boolean {
+  return (
+    giftUnits(gift) >= COMBO_UNIDADES_DESTACADAS ||
+    comboDiamonds(gift) >= COMBO_DIAMANTES_DESTACADOS
+  );
+}
+
+/**
+ * Enciende el realce al cambiar el suceso y lo apaga solo.
+ *
+ * El estado se apaga **al terminar la animacion**, no se deja puesto: una clase
+ * que se queda encendida deja la animacion corriendo para siempre en la lista,
+ * que es justo lo que prohibe el plan (docs/plan-review.md §38). Y si el suceso
+ * cambia mientras el realce esta puesto (la racha crece), el temporizador se
+ * reinicia: el realce acompana al ultimo incremento.
+ */
+function useDestacado(seq: number): boolean {
+  const [destacado, setDestacado] = useState(false);
+  const primero = useRef(true);
+  useEffect(() => {
+    // Al montar no se realza nada: si no, al abrir la pestana se encenderian de
+    // golpe todos los combos grandes de la lista.
+    if (primero.current) {
+      primero.current = false;
+      return;
+    }
+    setDestacado(true);
+    const timer = window.setTimeout(() => setDestacado(false), DESTACADO_MS);
+    return () => window.clearTimeout(timer);
+  }, [seq]);
+  return destacado;
+}
+
+/**
+ * Un regalo de la actividad: foto de quien lo manda, imagen del regalo, su
+ * nombre y la cantidad.
+ *
+ * Es la **tarjeta** del regalo y a la vez el combo: la racha entera vive en esta
+ * misma fila y crece en el sitio (cuando la entrada se agrupa en
+ * `buildFeedView`, React reusa el nodo y solo cambia el numero). No se apila una
+ * linea por incremento.
+ *
+ * Sin hora. La llevaba —`23:23`— y se ha quitado de toda la actividad: el panel
+ * enseña lo que acaba de pasar, y para eso el orden de la lista ya lo dice todo.
+ * Ocupaba una columna entera de la rejilla en cada fila y el dato no se usaba.
+ */
+function GiftCard({ item }: { item: FeedItem }) {
+  const gift = item.gift;
+  if (!gift) return null;
+  const destacado = useDestacado(item.seq) && comboDestacado(gift);
+  const diamonds = t.feed.comboValue(comboDiamonds(gift));
+  return (
+    <li className={destacado ? "destacado" : undefined}>
+      <FeedTag kind={item.kind} />
+      {/* La foto de quien lo manda y la imagen del regalo, en la **misma** celda:
+          separarlas anadia una columna y la fila pedia mas ancho del que hay. */}
+      <span className="feed-user">
+        <Avatar user={item.user} size="chico" />
+        <span className="feed-sello">
+          <GiftThumb url={gift.image_url} name={gift.name} />
+        </span>
+      </span>
+      <span className="feed-texto">
+        <span className="feed-text">{comboText(gift, userLabel(item.user))}</span>
+        <span className="feed-value" title={diamonds}>
+          {diamonds}
+        </span>
+      </span>
+    </li>
+  );
 }
 
 /**
@@ -153,14 +344,15 @@ export function FeedTag({ kind }: { kind: FeedKind }) {
  * Vive aquí y no dentro de una página porque la enseña el chat, a su lado, y
  * antes también el panel: dos copias del mismo `<li>` acaban pintando distinto en
  * cuanto alguien toca una.
+ *
+ * El feed que entra ya viene agrupado por rachas (`buildFeedView`): aqui se pinta
+ * lo que llega, no se agrupa nada.
  */
 export function FeedList({
   items,
-  now,
   empty = t.feed.empty,
 }: {
   items: FeedItem[];
-  now: number;
   /**
    * Que se dice cuando no hay nada. El estado vacio depende del panel —Inicio
    * parte el mismo feed en dos— y por eso se puede sustituir en vez de dejar el
@@ -171,16 +363,28 @@ export function FeedList({
   if (items.length === 0) return <Empty>{empty}</Empty>;
   return (
     <ul className="feed">
-      {items.map((item) => (
-        <li key={item.seq}>
-          <FeedTag kind={item.kind} />
-          <span className="feed-text">
-            <GiftThumb url={item.gift?.image_url} name={item.gift?.name ?? ""} />
-            {feedText(item)}
-          </span>
-          <span className="feed-time">{timeAgo(item.timestamp_ms, now)}</span>
-        </li>
-      ))}
+      {items.map((item) =>
+        item.kind === "gift" && item.gift ? (
+          <GiftCard key={item.seq} item={item} />
+        ) : (
+          <li key={item.seq}>
+            <FeedTag kind={item.kind} />
+            {/* Quien lo hizo, en celda propia **igual que en los regalos**: asi
+                todas las filas de la actividad tienen la misma forma —rotulo,
+                quien, que— y la rejilla es una sola en los cinco paneles. Antes la
+                foto iba dentro de la frase para no gastar una columna, pero esa
+                columna ya la ocupaba la hora, que es la que se ha ido. Un aviso
+                tecnico no trae usuario y la celda queda vacia, que es lo correcto:
+                no hay nadie a quien ponerle cara. */}
+            <span className="feed-user">
+              <Avatar user={item.user} size="chico" />
+            </span>
+            <span className="feed-texto">
+              <span className="feed-text">{feedText(item)}</span>
+            </span>
+          </li>
+        ),
+      )}
     </ul>
   );
 }
@@ -251,27 +455,52 @@ export function RankingTable({
 /**
  * Foto de perfil, con la inicial como sustituto.
  *
+ * Un solo componente para las tres fotos de la interfaz (tablas, actividad y
+ * chat): antes cada sitio la pintaba a su manera y solo uno de ellos tenia
+ * respaldo, asi que una foto que no cargaba dejaba un hueco roto en el chat y en
+ * la actividad.
+ *
  * `referrerPolicy` y `loading` son los mismos que usa la miniatura de regalo: la
  * imagen es de un CDN ajeno y no debe frenar el pintado de la lista.
+ *
+ * El fallo se recuerda **por direccion**, no con un simple «fallo»: si la persona
+ * cambia de foto, la direccion es otra y el error anterior no le corresponde.
  */
-export function RankAvatar({ user }: { user: UserRef }) {
-  if (!user.avatar_url) {
+export function Avatar({
+  user,
+  size = "normal",
+}: {
+  user: UserRef | undefined;
+  /** `chico` para el chat y la actividad, donde la fila mide 30 px. */
+  size?: "normal" | "chico";
+}) {
+  const [fallida, setFallida] = useState<string | undefined>(undefined);
+  const url = user?.avatar_url;
+  const inicial = (user?.nickname || user?.unique_id || "?").slice(0, 1).toUpperCase();
+  const clase = size === "chico" ? "avatar avatar-chico" : "avatar";
+  if (!url || url === fallida) {
     return (
-      <span className="avatar avatar-vacio" aria-hidden="true">
-        {(user.nickname || user.unique_id || "?").slice(0, 1).toUpperCase()}
+      <span className={`${clase} avatar-vacio`} aria-hidden="true">
+        {inicial}
       </span>
     );
   }
   return (
     <img
-      className="avatar"
-      src={user.avatar_url}
+      className={clase}
+      src={url}
       alt=""
       loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"
+      onError={() => setFallida(url)}
     />
   );
+}
+
+/** La foto de una fila de tabla, con su celda de ancho fijo. */
+export function RankAvatar({ user }: { user: UserRef }) {
+  return <Avatar user={user} />;
 }
 
 export function Card({

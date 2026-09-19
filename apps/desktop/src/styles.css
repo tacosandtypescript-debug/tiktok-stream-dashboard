@@ -54,6 +54,11 @@
 
   --radio: 6px;
   --radio-panel: 8px;
+  /* El redondeo de las tarjetas del panel. Tiene token propio porque es una
+     decision de aspecto y no un numero suelto: estaba escrito a mano en un bloque
+     que solo alcanzaba a Inicio, y con eso las otras cuatro pestanas no podian
+     coincidir mas que copiandolo. */
+  --radio-tarjeta: 12px;
 
   /* A partir de aqui la interfaz se aprieta: por debajo de este ancho, las dos
      columnas de tarjetas dejan de caber con dignidad. */
@@ -171,48 +176,99 @@ main {
   padding: var(--sp-4) var(--sp-4) var(--sp-3);
 }
 
-/* Los cuatro paneles de Inicio: el chat a la izquierda y, a la derecha, follow,
-   seguidores y actividad apilados.
-   El chat lleva la columna elastica porque es lo que se lee de verdad; los otros
-   tres van con ancho acotado porque son frases cortas y cifras.
-   Todos los hijos van con `grow`, asi que cada lista se desplaza sola y la pagina
-   no crece. */
+/* Los paneles de Inicio: el chat en la columna de la izquierda, de arriba abajo, y
+ * los otros cuatro en los cuadrantes de la derecha.
+ *
+ * EL REPARTO, y por que no es 65/35 —ni el 55/45 que hubo antes—.
+ *
+ * El chat es lo que se mira mientras se emite, asi que se lleva **el alto entero**
+ * —es el unico panel que crece hacia abajo— y la mitad del ancho util. Los otros
+ * cuatro van en cuadrantes **iguales**: cuatro paneles del mismo tamaño se leen de
+ * reojo mejor que cuatro de alturas distintas, porque el ojo aprende una sola
+ * posicion en vez de cuatro.
+ *
+ * Lo que pide el contenido, medido con el caso dificil (apodos de 30 caracteres
+ * con emoji, «Corona del rey», cifras de siete digitos):
+ *
+ *   * el chat necesita **~600 px** para que su cabecera —buscador y dos botones—
+ *     quepa en una linea. Por encima de 860 px solo se estira el hueco entre el
+ *     nombre y el comentario: no se aprovecha;
+ *   * una fila de la derecha necesita **~420 px** para que el rotulo, la hora, la
+ *     foto y la frase convivan. Con 211 px (medido) la fila de Follow se salia
+ *     40 px de su tarjeta y el texto se cortaba.
+ *
+ * Con la ventana en 1440x900 —fija, ver `tauri.conf.json`— el reparto deja **537x674**
+ * al chat y **342x332** a cada uno de los cuatro, medido en el banco con datos
+ * reales. Los cuatro bajan de los 420 px que pide una fila de la derecha y aun asi
+ * no se corta nada, porque el rotulo, la hora y la foto son columnas de ancho fijo y
+ * la frase es la unica elastica: es ella la que cede, y cede envolviendo a una
+ * segunda linea en vez de recortarse.
+ *
+ * `minmax(0, ...)` en las columnas: sin eso una fila larga empuja la rejilla y
+ * la columna se sale por el lateral.
+ *
+ * Los `grid-area` van declarados y no se dejan al orden del marcado: el chat es
+ * el primer hijo y los regalos el segundo, asi que el reparto no cambia si algun
+ * dia se reordena el JSX.
+ *
+ * No hay rama «apretada», y es una decision, no un olvido. La hubo a `max-width:
+ * 1339px` y repartia las cinco tarjetas en una rejilla de tres filas: el chat se
+ * quedaba con **una celda** de la esquina —medido, 677x355 px con cinco mensajes—
+ * y los paneles se iban a los lados, justo al reves de lo que se quiere. Ahora la
+ * ventana tiene **1440 de minimo**, asi que por debajo de eso no hay que diseñar
+ * nada: un solo reparto vale de 1440 para arriba, y el esfuerzo se va en que ese
+ * reparto sea bueno en vez de en mantener dos. */
 .inicio-paneles {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 44fr) minmax(0, 28fr) minmax(0, 28fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--sp-3);
   height: 100%;
-  min-height: 0;
-}
-
-/* La columna derecha, con su propio reparto de alto: la actividad es la fila mas
-   alta (1.4) porque es la que mas contenido mueve —regalos, compartidos,
-   suscripciones y rafagas de likes—, y follow la mas baja (1) porque son lineas
-   de una sola frase.
-   `minmax(0, ...)` en las tres filas: sin eso una lista larga empuja el panel y
-   la columna se sale por debajo. */
-.inicio-columna {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr);
-  gap: var(--sp-3);
   min-height: 0;
   min-width: 0;
 }
 
-/* En ventanas apretadas los cuatro se apilan en una columna y el chat se queda el
-   doble de alto que los demas: sigue siendo el panel que se usa. El contenedor de
-   la derecha se disuelve (`display: contents`) para que los tres pasen a ser filas
-   de la rejilla de arriba, sin un nivel de mas que estorbe al reparto de alto. */
-@media (max-width: 1080px) {
-  .inicio-paneles {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr);
-  }
+/* El chat: columna 1, las dos filas. */
+.inicio-paneles > .card:nth-child(1) {
+  grid-area: 1 / 1 / 3 / 2;
+}
 
-  .inicio-columna {
-    display: contents;
-  }
+/* Los regalos: arriba, en la columna del medio. */
+.inicio-paneles > .card:nth-child(2) {
+  grid-area: 1 / 2 / 2 / 3;
+}
+
+/* El contenedor de las tres tarjetas de abajo **se disuelve** en la rejilla con
+ * `display: contents`: sus tres tarjetas pasan a ser hijas directas y se colocan en
+ * el mismo sistema de coordenadas que el chat y los regalos, sin un nivel de mas que
+ * estorbe. Es lo que permite que los cuatro cuadrantes se repartan el alto entre
+ * ellos en vez de repartirselo antes con un contenedor intermedio. */
+.inicio-columna {
+  display: contents;
+}
+
+/* Follow arriba a la derecha; Seguidores y Actividad, en la fila de abajo. */
+.inicio-columna > .card:nth-child(1) {
+  grid-area: 1 / 3 / 2 / 4;
+}
+
+.inicio-columna > .card:nth-child(2) {
+  grid-area: 2 / 2 / 3 / 3;
+}
+
+.inicio-columna > .card:nth-child(3) {
+  grid-area: 2 / 3 / 3 / 4;
+}
+
+/* Cada tarjeta llena su cuadrante y **se desplaza por dentro**: con el alto
+   repartido a partes iguales, un tope fijo dejaria hueco muerto en las que tienen
+   poco que enseñar y cortaria las que tienen mucho. Hubo un tope de 168 px para las
+   dos listas cortas —rotulo y cuatro filas—, de cuando la fila de abajo se repartia
+   el alto con el chat; ahora cada una tiene su cuadrante entero y el tope solo
+   sobraba. */
+.inicio-columna > .card ul,
+.inicio-columna > .card ol {
+  max-height: none;
 }
 
 /* Cuerpo: menu lateral de ancho fijo y area de contenido elastica.
@@ -639,10 +695,12 @@ main {
   display: grid;
   grid-auto-rows: min-content;
   align-content: start;
-  /* El aire es lo que separa una seccion de la siguiente desde que las secciones
-     no llevan borde: con `--sp-3` se pegaban y no se sabia donde empezaba cada
-     una. Es la contrapartida de quitar las cajas, y por eso sube. */
-  gap: var(--sp-5);
+  /* El hueco entre paneles es el mismo que el de Inicio (`--sp-3`), y esa es toda
+     la razon: desde que todas las pestañas son paneles con marco, la separacion
+     tiene que ser una sola en la aplicacion. Antes eran 18 px aqui porque el aire
+     era lo unico que separaba las secciones al no llevar borde; ahora el borde ya
+     las separa, y el hueco solo tiene que dejar pasar el fondo entre dos marcos. */
+  gap: var(--sp-3);
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -653,11 +711,18 @@ main {
 /* Columnas de tarjetas. `auto-fit` + `minmax` sustituye a las dos columnas
    fijas: con dos tarjetas se ven dos, con tres (Desarrollador) se ven tres si
    caben, y al estrechar la ventana van cayendo a una sola sin dejar huecos ni
-   filas descolgadas. */
+   filas descolgadas.
+ *
+ * `align-items: stretch` (y no `start`) desde que las tarjetas llevan marco: dos
+ * paneles de al lado con el bajo a distinta altura dejan un hueco que ahora se ve,
+ * porque el borde dibuja las dos siluetas. En Voz, «Motor de voz» acababa en 120 px
+ * y «Consumo» en 141, y la columna quedaba escalonada. Estiradas, la fila se lee
+ * como dos paneles y no como un panel y un resto. Lo que sobra queda dentro del
+ * panel, que es lo que hace tambien Inicio con sus cuadrantes. */
 .grid-columns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  align-items: start;
+  align-items: stretch;
   gap: var(--sp-3);
   min-width: 0;
 }
@@ -672,23 +737,208 @@ main {
   min-width: 0;
 }
 
-/* Una `Card` **no es una tarjeta**: es una seccion.
+/* El motor de voz puesto, como **estado**, y a su lado el botón que cambia.
  *
- * Sin fondo, sin borde y sin radio. Seis cajas con borde por pantalla convierten
- * el panel en un rack de instrumentos, que es exactamente lo que hacia parecer
- * esto un centro de control. Con aire y un rotulo, la misma informacion se lee
- * como una emision.
+ * La ficha lleva el punto de color y el borde de acento, que es la forma que ya
+ * usa la aplicación para decir «esto está encendido»; el botón es el único que
+ * parece un botón. Antes eran dos botones y el activo se pintaba con el cian
+ * macizo de las acciones, así que no se distinguía el estado de la acción. */
+.motor {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.motor-actual {
+  align-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: var(--sp-2);
+  padding: 4px 10px;
+}
+
+.motor-punto {
+  background: var(--accent);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+/* --- Aportaciones: cuatro columnas por dos filas -------------------------- */
+/*
+ * Seis paneles que tienen que caber en los 674 px de alto que deja la ventana
+ * (1440x900, fija). Medido con el reparto anterior —tres filas— el contenido sumaba
+ * **1.087 px**: 413 de mas, y habia que desplazar la pagina entera para llegar a
+ * los ultimos regalos.
  *
- * El componente mantiene su API (`title`, `actions`, `children`), asi que las
- * cinco pantallas no cambian ni una linea: esto se arregla en un sitio. */
+ * Arriba van las **cuatro tablas de personas** —tap tap, regalos, seguidores y el
+ * historico—, que son la misma pregunta con distinto reloj. Abajo, el resumen por
+ * tipo de regalo y el flujo de los ultimos regalos, que se lleva las **tres
+ * columnas que sobran**: su fila tiene seis campos (hora, foto, nombre, regalo,
+ * diamantes y racha) y en una columna de 300 px no cabe.
+ *
+ * `min-height: 0` en las tarjetas es lo que hace que **cada panel se desplace por
+ * dentro** en vez de empujar la rejilla. Sin eso, el `min-height: min-content` de
+ * `.card` le gana a la fila, la tarjeta crece mas de lo que mide su celda y el
+ * propio marco la recorta sin avisar.
+ *
+ * Las posiciones van declaradas y no se dejan al reparto automatico: el ultimo
+ * panel ocupa tres columnas, y eso solo se puede decir asi. El orden del marcado
+ * tiene que ser el de `Aportaciones.tsx` (1 tap tap, 2 regalos, 3 seguidores,
+ * 4 historico, 5 por tipo, 6 ultimos regalos).
+ */
+.grid-panel.aportaciones {
+  grid-template-rows: min-content minmax(0, 1fr);
+}
+
+.aportaciones-rejilla {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* La fila de arriba pesa mas: lleva las **cuatro tablas de personas**, y con ocho
+     filas cada una se quedaba corta —la octava persona asomaba cortada por el borde,
+     y con las barras ocultas no hay forma de saber que hay mas—. La de abajo es un
+     flujo de regalos, que si puede desplazarse: es un registro y crece sin tope.
+     El 1.35 sale de medir: cada fila de tabla mide 33 px (24 los pone la foto), ocho
+     filas son 264, y la tarjeta del histórico lleva ademas su interruptor. Con 1.2
+     esa tarjeta se quedaba 3 px corta; con 1.35 entra con 8 de holgura. */
+  grid-template-rows: minmax(0, 1.35fr) minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+.aportaciones-rejilla > .card {
+  min-height: 0;
+}
+
+.aportaciones-rejilla > .card:nth-child(1) {
+  grid-area: 1 / 1 / 2 / 2;
+}
+
+.aportaciones-rejilla > .card:nth-child(2) {
+  grid-area: 1 / 2 / 2 / 3;
+}
+
+.aportaciones-rejilla > .card:nth-child(3) {
+  grid-area: 1 / 3 / 2 / 4;
+}
+
+.aportaciones-rejilla > .card:nth-child(4) {
+  grid-area: 1 / 4 / 2 / 5;
+}
+
+.aportaciones-rejilla > .card:nth-child(5) {
+  grid-area: 2 / 1 / 3 / 2;
+}
+
+.aportaciones-rejilla > .card:nth-child(6) {
+  grid-area: 2 / 2 / 3 / 5;
+}
+
+/* --- Desarrollador: la metrica en columnas y dos filas de paneles ---------- */
+/*
+ * «Metricas» era **una sola tabla de veintiun contadores** y medía 611 px de alto:
+ * por si sola ocupaba casi toda la pantalla y empujaba todo lo demas fuera. En tres
+ * columnas baja a ~230 y deja sitio para el resto.
+ *
+ * Debajo, dos filas de cuatro columnas: arriba las cuatro piezas que ya estaban
+ * —rutas, traza del chat, eventos y herramientas— y abajo las dos que se han mudado
+ * desde Voz —los descartados por los filtros y los contadores del lector—. Cada una
+ * ocupa dos columnas porque sus tablas tienen dos campos y en 300 px el valor
+ * quedaria pegado al rotulo.
+ *
+ * `min-height: 0` en las tarjetas, como en Aportaciones: es lo que hace que las
+ * listas se desplacen por dentro en vez de que la tarjeta crezca y el marco la
+ * recorte.
+ */
+.grid-panel.developer {
+  grid-template-rows: min-content minmax(0, 1fr);
+}
+
+.metricas-columnas {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.developer-rejilla {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  min-height: 0;
+  min-width: 0;
+}
+
+.developer-rejilla > .card {
+  min-height: 0;
+}
+
+.developer-rejilla > .card:nth-child(1) {
+  grid-area: 1 / 1 / 2 / 2;
+}
+
+.developer-rejilla > .card:nth-child(2) {
+  grid-area: 1 / 2 / 2 / 3;
+}
+
+.developer-rejilla > .card:nth-child(3) {
+  grid-area: 1 / 3 / 2 / 4;
+}
+
+.developer-rejilla > .card:nth-child(4) {
+  grid-area: 1 / 4 / 2 / 5;
+}
+
+.developer-rejilla > .card:nth-child(5) {
+  grid-area: 2 / 1 / 3 / 3;
+}
+
+.developer-rejilla > .card:nth-child(6) {
+  grid-area: 2 / 3 / 3 / 5;
+}
+
+/* La tarjeta es un **panel con su marco**.
+ *
+ * El rediseño quito las cajas —las secciones se separaban con aire y un rotulo—
+ * porque una pantalla con seis bordes parece un rack de instrumentos. Se ha vuelto
+ * atras, y el motivo es el que entonces no existia: ahora cada seccion lleva su
+ * propia lista y **su propio desplazamiento**, asi que sin un borde que diga donde
+ * acaba una y empieza la siguiente el ojo no sabe a cual pertenece lo que lee. El
+ * aire separaba secciones de una lectura continua; no separa dos listas que se
+ * mueven por su cuenta.
+ *
+ * El marco vive **aqui y no en cada pagina**: es el mismo en las seis pantallas
+ * —las cinco de la barra lateral y el diagnostico de la cabecera— y asi no pueden
+ * divergir. Antes estaba en un bloque suelto al final de la hoja que solo alcanzaba
+ * a Inicio, con el radio escrito a mano y el fondo repetido: con eso, «igual que
+ * Inicio» en las otras era copiar, y lo copiado se separa a la primera de cambio.
+ *
+ * El componente mantiene su API (`title`, `actions`, `children`), asi que ninguna
+ * pantalla cambia ni una linea: esto se arregla en un sitio. */
 .card {
   display: flex;
   flex-direction: column;
-  /* `min-height: min-content` y no `0`: la seccion puede encogerse (para que la
+  /* `min-height: min-content` y no `0`: la tarjeta puede encogerse (para que la
      lista de dentro se desplace) pero nunca por debajo de su cabecera. Con `0` se
      comprimia hasta 41 px y el contenido se salia. */
   min-height: min-content;
   min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radio-tarjeta);
+  /* El mismo relleno en todas: es lo que alinea los rotulos a la misma distancia
+     del borde. */
+  padding: var(--sp-3);
+  /* El contenido no se sale del redondeo: sin esto, una fila con fondo propio —la
+     del combo destacado— pinta las esquinas rectas por encima del borde. */
+  overflow: hidden;
 }
 
 .card.grow {
@@ -701,16 +951,20 @@ main {
   min-width: 0;
 }
 
-/* El rotulo. Es lo unico que separa una seccion de la siguiente, asi que tiene
-   que leerse de un vistazo: mayusculas, muy espaciado y apagado, para que no
-   compita con las cifras —que son lo unico que va grande en toda la pantalla. */
+/* El rotulo. Es lo unico que dice de que va el panel, asi que tiene que leerse de
+   un vistazo: mayusculas, muy espaciado y apagado, para que no compita con las
+   cifras —que son lo unico que va grande en toda la pantalla.
+ *
+ * `--sp-2` y no `--sp-3`: desde que la tarjeta tiene relleno propio, el rotulo ya
+ * queda separado del borde por los 10 px de arriba. Con otros 10 debajo, la
+ * cabecera flotaba en medio del panel y el contenido empezaba demasiado abajo. */
 .card-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-2);
   min-width: 0;
 }
 
@@ -732,8 +986,16 @@ main {
   min-width: 0;
 }
 
-/* El buscador del chat cede antes que los botones. */
-.card-actions input {
+/* El buscador del chat cede antes que los botones.
+ *
+ * `input` a secas **no vale**, y este es el fallo que estaba escondido aqui: una
+ * casilla de un interruptor es un `input`, asi que tambien recibia
+ * `flex: 1 1 140px` y se estiraba a 140 px de base. Como el interruptor va en la
+ * misma fila que su rotulo, se quedaba con el ancho y el rotulo se comprimia
+ * hasta su palabra mas larga: «Leer el chat» salia en **tres lineas**
+ * —«Leer», «el», «chat»— en la cabecera de Voz, medido con la casilla a 56 px y su
+ * texto a 28. Se acota por tipo, igual que el control de volumen mas abajo. */
+.card-actions input:not([type="checkbox"]):not([type="radio"]) {
   flex: 1 1 140px;
   min-width: 0;
 }
@@ -868,6 +1130,7 @@ ul.chat {
 }
 
 ul.chat li {
+  align-items: center;
   border-bottom: 1px solid var(--border-soft);
   display: flex;
   gap: 8px;
@@ -878,6 +1141,12 @@ ul.chat li {
 
 ul.chat li > * {
   min-width: 0;
+}
+
+/* La foto del chat **no cede**: con `min-width: 0` en los hijos de `li` se
+   comprimia a lo ancho y salia un ovalo. */
+ul.chat li .avatar {
+  flex: 0 0 auto;
 }
 
 ul.chat.compact li:nth-child(n + 8) {
@@ -912,44 +1181,130 @@ ul.chat li.muted .user {
   opacity: 0.6;
 }
 
-/* Las columnas fijas (62px / 1fr / auto) no encogian con la ventana: la fila
-   pedia mas ancho que la tarjeta y el contenido se salia. Ahora la columna de
-   la hora se ajusta a su contenido y la del texto es la que cede. */
+/* Fila de actividad: rotulo, hora, **quien y el regalo** y la frase. Los regalos
+   llevan ademas lo que vale el combo, en linea con la frase.
+   Las columnas fijas (62px / 1fr / auto) no encogian con la ventana: la fila
+   pedia mas ancho que la tarjeta y el contenido se salia. Ahora las columnas de
+   fuera miden lo que necesitan y la del texto es la que cede.
+   `align-items: start` y no `center`: con la fila de dos lineas —la frase
+   envuelve— centrar dejaba la hora flotando en medio. */
+/* Tres columnas: **rotulo, quien y que**. La hora ocupaba la segunda y se ha
+   quitado de toda la actividad, asi que la rejilla baja de cuatro a tres y el texto
+   gana ese ancho.
+   `align-items: start` y no `center`: con la fila de dos lineas —la frase envuelve—
+   centrar dejaba la foto flotando en medio. */
 ul.feed li {
-  align-items: baseline;
+  align-items: start;
   border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: var(--sp-2);
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
   min-width: 0;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 
-/* La lista de regalos lleva **cinco** hijos (hora, miniatura, usuario, texto,
-   diamantes) y opcionalmente la etiqueta de racha. Con `1fr` unico en el texto,
-   los cinco se reparten por columnas implicitas y la fila envuelve mal: la hora
-   caia en una columna de 52 px y los diamantes saltaban de linea.
-   Aqui cada columna mide lo que necesita salvo el texto, que es el que debe
-   ceder y envolver. */
-ul.feed.gifts li {
+/* Quien lo hizo, en celda propia. La foto iba **dentro** de la frase para no gastar
+   una columna, pero esa columna ya la ocupaba la hora: al quitarla, la foto sale a
+   la suya y las dos clases de fila —regalo y suceso— tienen la misma forma. */
+ul.feed li .feed-user {
   align-items: center;
-  grid-template-columns: max-content max-content minmax(0, 1fr) max-content max-content;
+  display: grid;
+  gap: var(--sp-1);
+  grid-auto-flow: column;
+  min-width: 0;
 }
 
-ul.feed li > * {
+ul.feed li .feed-texto {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
 ul.feed li .feed-text {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-ul.feed li .feed-time,
+/* El regalo **es** la celda de la miniatura. Si la imagen no llega, la celda
+   desaparece con ella y la frase no arranca con un hueco. */
+.feed-sello {
+  display: inline-flex;
+}
+
+/* La miniatura del regalo no lleva su propio margen aqui: el hueco lo pone el
+   `gap` de la celda. */
+ul.feed li .feed-sello img {
+  margin-right: 0;
+}
+
+/* Lo que vale el combo, en linea con la frase. Cifra tabular y sin partir: es lo
+   que se compara de una fila a otra. */
+ul.feed li .feed-value {
+  color: var(--accent);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* La hora, en el flujo de «Ultimos regalos» de Aportaciones. En Inicio ya no hay:
+   el panel enseña lo que acaba de pasar y el orden de la lista ya lo dice. */
 ul.feed li .time {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* El flujo del combo grande: **una vez y se va**.
+ *
+ * Se animan `background-color` y `box-shadow` interior, que el navegador pinta
+ * sin tocar la disposicion de la fila. Nada de `blur` ni de animaciones
+ * permanentes (docs/plan-review.md §38): la clase la quita `useDestacado` cuando
+ * la animacion termina. Con la preferencia de menos movimiento activa no se
+ * anima nada, pero el realce sigue distinguiendose mientras dura. */
+@keyframes combo-destacado {
+  0% {
+    background-color: rgba(37, 244, 238, 0.16);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  60% {
+    background-color: rgba(37, 244, 238, 0.1);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+
+ul.feed li.destacado {
+  animation: combo-destacado 1.8s ease-out 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ul.feed li.destacado {
+    animation: none;
+    background-color: rgba(37, 244, 238, 0.16);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+}
+
+/* La lista de **últimos regalos** de Aportaciones.
+ *
+ * Es otra lista, con otras columnas: hora, miniatura, persona, regalo, diamantes
+ * y la etiqueta de racha. Comparte `ul.feed` porque comparte la fila y la
+ * tipografia, pero no la plantilla: la de la actividad lleva dentro quien lo mando
+ * y esta no. Aqui cada columna mide lo que necesita salvo el texto, que es el que
+ * cede, y la etiqueta de racha —cuando la hay— cae en una columna propia. */
+ul.feed.gifts li {
+  grid-template-columns:
+    max-content max-content max-content minmax(0, 1fr) max-content max-content;
+}
+
+ul.feed.gifts li .gift-thumb {
+  margin-right: 0;
 }
 
 /* OJO: esta regla incluye `ul.ranking`, no solo `ol.ranking`.
@@ -966,7 +1321,12 @@ ol.ranking li {
   gap: var(--sp-2);
   grid-template-columns: minmax(0, 22px) minmax(0, 1fr) auto;
   min-width: 0;
-  padding: 5px 0;
+  /* `--sp-1` y no `--sp-2`: con 6 px la fila medía 31 y las ocho personas de una
+     tabla de Aportaciones sumaban 248 px, que no caben en el panel —la octava
+     asomaba cortada y, con las barras ocultas, no había forma de saber que seguía—.
+     Con 4 la fila mide 29 y entran las ocho. El alto lo manda la foto de 24 px, así
+     que 4 px de relleno siguen dejando aire de sobra. */
+  padding: var(--sp-1) 0;
 }
 
 ul.ranking li > *,
@@ -998,13 +1358,6 @@ ol.ranking .rank {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.time {
-  color: var(--muted);
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 .tag {
@@ -1135,6 +1488,14 @@ ol.ranking.board li {
   width: 24px;
 }
 
+/* La foto de las listas densas (chat y actividad): 20 px para que la fila siga
+   midiendo lo mismo que antes de tener foto. */
+.avatar-chico {
+  background: var(--panel);
+  height: 20px;
+  width: 20px;
+}
+
 /* Sustituto cuando TikTok no manda la foto: la inicial de la persona. Mantiene
    la columna alineada y deja claro que no es una imagen que no ha cargado. */
 .avatar-vacio {
@@ -1144,6 +1505,12 @@ ol.ranking.board li {
   font-size: 11px;
   font-weight: 600;
   justify-content: center;
+}
+
+/* La inicial del respaldo, en las listas apretadas: 9 px para que el disco de
+   20 px no parezca una letra recortada. */
+.avatar-chico.avatar-vacio {
+  font-size: 9px;
 }
 
 /* El nombre es un boton (abre el perfil) pero debe leerse como texto: el marco
@@ -1366,11 +1733,16 @@ footer.stats {
   padding: 0;
 }
 
+/* Cada direccion, una fila. El relleno es `--sp-1` y no `--sp-2` desde que la lista
+   de diseños comparte columna con esta tarjeta: medido, con 6 px por fila la
+   direccion medía 206 px, la lista de diseños se quedaba 11 por debajo y el ultimo
+   diseño («Esgrima») asomaba cortado por el borde. Las filas siguen separadas por su
+   linea, asi que 4 px de relleno se leen igual. */
 .direcciones li {
   align-items: center;
   display: flex;
   gap: var(--sp-3);
-  padding: var(--sp-2) 0;
+  padding: var(--sp-1) 0;
 }
 
 .direcciones li + li {
@@ -1437,32 +1809,77 @@ footer.stats {
   overflow: hidden;
 }
 
-/* La previa y la lista, en dos columnas. El ancho de la primera esta acotado
-   porque un marcador mide 420 px: dejarlo solo en una tarjeta de pantalla
-   completa llenaba de vacio los otros mil. */
-.diseno-panel {
-  align-items: start;
+/* La previa y la lista, cada una en su columna.
+ *
+ * Antes iban **dentro de la misma tarjeta**, una al lado de la otra, y se estorbaban:
+ * la previa de un marcador mide 420x524, así que la tarjeta de diseños medía 706 px
+ * de alto y la página entera 950 para 674 de alto — 276 de más. Con la previa en su
+ * propia columna de 460 px entra a tamaño natural, y la lista se queda con lo que
+ * necesita.
+ *
+ * `justify-content: center` centra el marco en su columna: la previa se escala a lo
+ * que cabe, así que casi nunca mide exactamente los 460 de la columna y sin centrar
+ * quedaría pegada a la izquierda con un hueco a la derecha. */
+.overlays-columnas {
   display: grid;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 460px) minmax(240px, 1fr);
-  margin-top: var(--sp-3);
-}
-
-.diseno-columna {
-  display: grid;
-  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
   min-width: 0;
 }
 
-.diseno-columna .hint {
-  margin: 0;
+/* La dirección es lo que mide lo que mide; la tarjeta de diseños se lleva el resto y
+   es la que cede cuando la lista no cabe, porque ya sabe desplazarse por dentro. */
+.overlays-columnas > .stack {
+  grid-template-rows: min-content minmax(0, 1fr);
+  min-height: 0;
 }
 
-/* En ventanas apretadas, una columna: la lista debajo de la previa. */
-@media (max-width: 980px) {
-  .diseno-panel {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.overlays-columnas > .card,
+.overlays-columnas > .stack > .card {
+  min-height: 0;
+}
+
+/* La página: el aviso de arriba y las dos columnas con el alto entero. */
+.grid-panel.overlays {
+  grid-template-rows: min-content minmax(0, 1fr);
+}
+
+/* El hueco de la previa: se mide a él, no al marco. Tiene el alto del panel —que
+   viene de la rejilla, no de su contenido— y por eso se puede preguntar cuánto
+   queda libre sin que la respuesta dependa de lo que se pinte dentro. */
+.previa-hueco {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 0;
+}
+
+/* El marco se ajusta a la previa ya escalada, no al revés: con `width: fit-content`
+   el borde se dibuja alrededor de lo que se ve en vez de dejar un cajón vacío. */
+.previa-marco {
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  height: fit-content;
+  overflow: hidden;
+  width: fit-content;
+}
+
+/* La lista de diseños, en **dos columnas** y con desplazamiento propio.
+ *
+ * Con once diseños, en una sola tira mide 582 px y no cabe en el panel. A dos
+ * columnas son seis filas de 47 y entra entera; si algún día hay más, la lista se
+ * desplaza por dentro en vez de empujar la página, que es lo que hacen las demás. */
+.disenos {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
 }
 
 .previa-barra {
@@ -1489,12 +1906,6 @@ footer.stats {
   transform-origin: top left;
 }
 
-.disenos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
 .diseno {
   align-items: center;
   border: 1px solid var(--border);
@@ -1502,11 +1913,10 @@ footer.stats {
   display: flex;
   gap: var(--sp-3);
   justify-content: space-between;
-  padding: var(--sp-2) var(--sp-3);
-}
-
-.diseno + .diseno {
-  margin-top: var(--sp-2);
+  /* `--sp-1` arriba y abajo, y no mas: son dos lineas de texto (nombre y resumen) y
+     con 6 px de relleno la fila medía 47 px, que por seis filas son 282 y no cabian
+     en el panel de la lista. Con 4 la fila mide 43 y los once diseños entran. */
+  padding: var(--sp-1) var(--sp-3);
 }
 
 .diseno.activo {
@@ -1629,16 +2039,71 @@ footer.stats {
   margin: 0;
 }
 
-/* La lista de avisos y el editor, en dos columnas: la lista es un indice de cinco
-   nombres, asi que se queda con un ancho acotado, y el editor se lleva el resto,
-   que es donde estan los campos. Antes eran cinco formularios iguales apilados y
-   ninguno decia cual se estaba tocando. */
-.alertas-panel {
-  align-items: start;
+/* Dos campos de formulario, uno al lado del otro, **siempre**.
+ *
+ * Es lo que separa esto de `.grid-columns`: aquella es `auto-fit` y se repliega a
+ * una columna cuando no caben dos. Aqui no interesa replegarse —un par de campos
+ * que se leen juntos, como «imagen» y «sonido», pierde el sentido si uno acaba
+ * debajo del otro—, asi que la rejilla se declara fija. */
+.campos-par {
   display: grid;
-  gap: var(--sp-4);
-  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
+}
+
+/* El ritmo vertical del editor de avisos, un punto mas apretado que el de serie.
+ *
+ * `.campo` trae 10 px de separacion y aqui hacen falta 6: medido, el editor mide
+ * 382 px de alto y su fila le da 379, asi que 3 px se quedaban fuera y el marco los
+ * recortaba —el campo «Minimo», a medias—. Con 6 px de ritmo baja a ~366 y entra con
+ * holgura.
+ *
+ * Va acotado a `.alertas-panel`, que es donde vive el editor, y no a `.campo`: el
+ * resto de formularios de la aplicacion tienen sitio de sobra y no hay por que
+ * apretarlos. */
+.alertas-panel .campo {
+  margin-top: var(--sp-2);
+}
+
+/* La lista de avisos, el editor y los medios, en **tres columnas**.
+ *
+ * Eran cuatro filas —lista y editor, medios, salida y direccion— y el contenido
+ * sumaba **1.121 px** para 674 de alto: media pagina fuera de la vista. Los medios
+ * son la tercera pieza del mismo trabajo (elegir el aviso, escribirlo y darle su
+ * medio), asi que van en la misma fila.
+ *
+ * La lista se queda con un ancho acotado porque es un indice de cinco nombres; los
+ * medios con 320 px, que es lo que pide su zona de soltar; y el editor se lleva el
+ * resto, que es donde estan los campos. */
+.alertas-panel {
+  align-items: stretch;
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) minmax(0, 320px);
+  min-height: 0;
+  min-width: 0;
+}
+
+.alertas-panel > .card {
+  min-height: 0;
+}
+
+/* La pagina: el aviso de arriba a todo el ancho, la fila de tres columnas en medio
+ * —que es la que se lleva el alto que sobra— y la salida de audio y la direccion de
+ * OBS repartidas en las dos columnas de la ultima fila.
+ *
+ * `min-content` para la ultima fila y no `1fr`: esos dos paneles tienen formularios
+ * (un desplegable y un deslizador) y no se pueden recortar. El que cede es el de
+ * arriba, que es el que tiene listas y ya sabe desplazarse por dentro. */
+.grid-panel.alertas {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: min-content minmax(0, 1fr) min-content;
+}
+
+.grid-panel.alertas > .hint,
+.grid-panel.alertas > .alertas-panel {
+  grid-column: 1 / -1;
 }
 
 /* En ventanas apretadas, una columna: la lista encima del editor. */
@@ -1648,8 +2113,10 @@ footer.stats {
   }
 }
 
-/* Los dos grupos de avisos. Se separan con aire y con su rotulo, no con una caja:
-   el proyecto quito las cajas a proposito (docs/interfaz.md §4). */
+/* Los dos grupos de avisos, **dentro** de la tarjeta que los contiene. Aqui el aire
+   sigue separando lectura continua y no lleva caja: los dos grupos son la misma
+   lista de cinco avisos partida en dos rotulos, no dos paneles. La caja la pone la
+   tarjeta de fuera, una sola vez. */
 .grupos-avisos {
   display: grid;
   gap: var(--sp-4);
@@ -1791,7 +2258,11 @@ footer.stats {
   }
 
   .card {
-    padding: var(--sp-2) var(--sp-3);
+    /* Simetrico, como el relleno de serie. Estas dos ramas son de cuando la tarjeta
+       no tenia relleno propio: le añadian `--sp-2` arriba y abajo y `--sp-3` a los
+       lados, que era una forma de dar alto sin tocar el ancho. Con el marco ya
+       puesto, lo que se aprieta es el hueco entero. */
+    padding: var(--sp-2);
   }
 
   .card-head {
@@ -1833,7 +2304,11 @@ footer.stats {
   }
 
   .card {
-    padding: var(--sp-2) var(--sp-3);
+    /* Simetrico, como el relleno de serie. Estas dos ramas son de cuando la tarjeta
+       no tenia relleno propio: le añadian `--sp-2` arriba y abajo y `--sp-3` a los
+       lados, que era una forma de dar alto sin tocar el ancho. Con el marco ya
+       puesto, lo que se aprieta es el hueco entero. */
+    padding: var(--sp-2);
   }
 
   .card-head {
@@ -1844,4 +2319,131 @@ footer.stats {
   .hint {
     font-size: 11px;
   }
+}
+
+/* --- Voz: claves de la API y consumo -------------------------------------- */
+
+/* Una fila por clave: nombre y pista enmascarada, su estado, lo que lleva
+   gastado y los botones. La rejilla es propia y no la de `ul.ranking` porque
+   alli hay tres columnas y aqui hacen falta cuatro: con tres, los botones caian
+   a una fila nueva y la lista se veia descosida. */
+ul.claves {
+  list-style: none;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+ul.claves li {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+ul.claves li > * {
+  min-width: 0;
+}
+
+.clave-datos {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* La clave se enseña **siempre** enmascarada: es el unico valor que llega a la
+   pantalla, y con la letra de codigo para que se reconozca de un vistazo. */
+.clave-datos .path {
+  color: var(--muted);
+}
+
+.clave-acciones {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* El formulario de alta, en dos columnas: el nombre es corto y la clave larga. */
+.clave-alta {
+  align-items: end;
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  margin-top: var(--sp-3);
+  min-width: 0;
+}
+
+.clave-alta .campo {
+  margin-top: 0;
+}
+
+/* El consumo, con la cifra grande: es lo unico de esta seccion que se mira de
+   reojo mientras se emite. */
+.consumo-cifra {
+  font-family: var(--fuente-datos);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.consumo-fila {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin-bottom: 2px;
+}
+
+/* La ultima fila no lleva hueco debajo: es el final de la seccion y ese aire lo
+   pone ya el margen de la rejilla. */
+.consumo-fila:last-child {
+  margin-bottom: 0;
+}
+
+.consumo-rotulo {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 90px;
+}
+
+/* Los avisos del motor de voz (falta la clave, ninguna clave sirve) no llevan
+   caja: son texto con color, como el resto de estados de la pantalla. */
+.voz-aviso {
+  color: var(--warn);
+  font-size: 12px;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Sin barras de desplazamiento ----------------------------------------- */
+/*
+ * Las barras se quitan del todo, en **toda** la aplicacion. Antes se pintaban
+ * —finas y oscuras— porque la de serie de Windows es clara y con flechas. Pero
+ * desde que cada seccion es un panel con su propio desplazamiento, la misma
+ * pantalla puede enseñar cinco barras a la vez (Inicio) o doce (Voz), y lo que
+ * ensucian es el conjunto: con el marco puesto, una barra dentro de cada caja
+ * convierte la rejilla en una colmena.
+ *
+ * Se ocultan, **no se desactivan**: el desplazamiento sigue funcionando con la
+ * rueda y con el teclado. Lo que se pierde es la pista de que hay mas contenido
+ * abajo, y eso ahora pesa mas que antes, porque el marco recorta a ras y no hay
+ * borde de contenido que se vea a medias. Es el intercambio que ha pedido el
+ * streamer, y queda dicho aqui para que no se descubra por sorpresa.
+ *
+ * Va despues de las reglas que las pintaban, asi que las sobreescribe: el ancho a
+ * cero gana sobre los 10 px de arriba.
+ */
+.app *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+/* Y los botones de flecha, que con ancho cero podrian seguir reservando su hueco
+   en algunos motores. */
+.app *::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
 }

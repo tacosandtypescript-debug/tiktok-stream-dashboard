@@ -33,7 +33,7 @@ export const t = {
     lifetime: "Histórico",
     lifetimeHint: "Totales sumando todos los directos.",
     lifetimeEmpty:
-      "El histórico está apagado. Actívalo en la página de Voz para empezar a guardar los totales de quien aporta.",
+      "El histórico está apagado: enciende el interruptor de arriba para empezar a guardar los totales de quien aporta entre directos.",
     empty: "Todavía no hay aportaciones en esta sesión.",
     value: {
       taps: "Taps",
@@ -239,11 +239,27 @@ export const t = {
        vacio mandaba a buscar en la lista algo que nunca iba a aparecer. */
     empty:
       "Aquí aparecerán los regalos, los compartidos, las suscripciones y las ráfagas grandes de likes.",
+    /**
+     * Los dos paneles en que se parte la actividad de Inicio.
+     *
+     * Antes eran «Actividad» (todo menos los follows) y «Actividad reciente» (los
+     * seis últimos regalos, en fila compacta). Los seis del resumen eran los
+     * mismos seis de la lista de arriba: el mismo suceso, la misma frase y la
+     * misma cifra. Ahora el feed se parte **por tipo y sin repetir nada**.
+     */
+    gifts: "Regalos",
+    giftsEmpty: "Todavía no ha caído ningún regalo en esta sesión.",
+    other: "Actividad",
+    otherEmpty: "Aquí aparecerán los compartidos, las suscripciones y las ráfagas grandes de likes.",
     clear: "Limpiar",
     unknown: "Alguien",
     giftOne: (who: string, name: string) => `${who} envió «${name}»`,
     giftMany: (who: string, name: string, count: number) =>
       `${who} envió «${name}» ×${count}`,
+    /* El combo crece en el sitio: mientras la racha sigue abierta se dice que va
+       por ahi, y al cerrarse se dice lo que envio. El numero es la misma racha
+       agrupada, no un incremento: si dijera «va por 1» con veinte rosas, la
+       tarjeta pareceria congelada. */
     giftStreak: (who: string, name: string, count: number) =>
       `${who} va por ${count} de «${name}»`,
     follow: (who: string) => `${who} te sigue`,
@@ -255,7 +271,16 @@ export const t = {
     likes: (who: string, count: number, total: number) =>
       `${who} +${count} likes (total ${total.toLocaleString("es-CO")})`,
     genericGift: (id: string) => `regalo ${id}`,
+    /**
+     * Lo que vale el combo, en diamantes.
+     *
+     * La cifra la calcula la interfaz **con los datos del motor**: el valor
+     * unitario (`diamond_count`) por las unidades de la racha, que es lo que
+     * documenta D14. No se estima ningun valor de regalo.
+     */
+    comboValue: (diamonds: number) => `${diamonds.toLocaleString("es-CO")} 💎`,
   },
+
   /**
    * Alertas para OBS.
    *
@@ -398,6 +423,79 @@ export const t = {
     muted: "Usuarios silenciados",
     degraded: (reason: string) => `Sin audio: ${reason}`,
     hint: "El motor decide qué se lee; Python solo convierte el texto en audio. La voz se elige por idioma del mensaje.",
+    /** Selector de motor: dos caminos, el mismo resultado (un fichero de audio). */
+    engine: "Motor de voz",
+    engineEdge: "La de siempre",
+    engineFish: "Fish Audio",
+    /* Las dos frases que hacían falta y no estaban: **qué es cada motor**, dicho
+       para quien no sabe qué es un «motor de voz». El streamer preguntó «no sé si
+       uso la de Fish o la de Edge», y la pantalla no lo decía en ninguna parte. */
+    engineEdgeHint:
+      "La voz de siempre es la de Microsoft Edge: ya viene puesta, es gratis y no hay que configurar nada.",
+    engineFishHint:
+      "Fish Audio son voces clonadas: hace falta una clave y se paga por lo que lee.",
+    engineHint:
+      "La de siempre es la que trae el programa y no cuesta nada. Fish Audio son voces clonadas y se paga por uso.",
+    /* El botón dice **a dónde se cambia**, no «pulsa aquí». Van las dos frases
+       enteras y no una plantilla con el nombre dentro: «Cambiar a La de siempre»
+       arrastraba la mayúscula del rótulo a mitad de frase. */
+    engineSwitchToEdge: "Cambiar a la de siempre",
+    engineSwitchToFish: "Cambiar a Fish Audio",
+    engineSwitchHint: "Al cambiar de motor se vacía lo que estaba en la cola.",
+    /** Estado del motor elegido, en identificadores de Rust. */
+    engineReady: {
+      ready: "Listo para leer",
+      missing_secret: "Falta la clave de la API: sin ella no se sintetiza nada.",
+      missing_voice: "Falta el código de voz: Fish no elige una voz por su cuenta.",
+      no_usable_key: "Ninguna clave se puede usar: están rechazadas o sin saldo.",
+    },
+    /* «Clave en uso», no «Usando»: al lado del nombre del motor, un «Usando la de
+       marzo» se lee como si la voz fuera esa. */
+    engineInUse: (nombre: string) => `Clave en uso: ${nombre}`,
+    engineKeys: (vivas: number, total: number) => `${vivas} de ${total} claves en pie`,
+    /** Ajustes de Fish Audio. */
+    fish: "Fish Audio",
+    fishHint: "La clave se guarda solo en este equipo y no vuelve a la pantalla.",
+    fishVoice: "Código de voz",
+    fishVoicePlaceholder: "El identificador de la voz que copiaste de Fish",
+    fishVoiceHint: "Es el «reference_id» de la voz, no su nombre.",
+    fishModel: "Modelo",
+    fishModelPrice: (precio: string) => (precio === "0" ? "gratis" : `${precio} $ por millón`),
+    /** Las claves guardadas y su relevo automatico. */
+    keys: "Claves de Fish Audio",
+    keysHint:
+      "Hasta diez. Si una deja de valer se pasa sola a la siguiente, para que la voz no se corte a mitad de directo. Un 429 no cambia de clave: espera y reintenta la misma.",
+    keysEmpty: "Todavía no hay ninguna clave guardada.",
+    keyName: "Cómo llamarla",
+    keyNamePlaceholder: "la de marzo",
+    keyValue: "Clave",
+    keyValuePlaceholder: "Pega aquí la clave de fish.audio",
+    keyAdd: "Añadir clave",
+    keyRemove: "Quitar",
+    keyReset: "Reintentar",
+    keyUsed: "En uso",
+    keyStates: {
+      viva: "En pie",
+      invalida: "Rechazada",
+      agotada: "Sin saldo",
+    },
+    keyFull: "Ya hay diez claves: quita una para añadir otra.",
+    keyEmpty: "La clave no puede estar vacía.",
+    /** Consumo: se cobra por bytes del texto enviado, así que se cuenta aquí. */
+    usage: "Consumo",
+    usageHint: "Se cobra por los bytes del texto enviado, no por el audio.",
+    usageModel: (modelo: string, precio: string) =>
+      precio === "0"
+        ? `Contando con ${modelo}: gratis`
+        : `Contando con ${modelo}: ${precio} $ por millón de bytes`,
+    usageSession: "Este directo",
+    usageTotal: "En total",
+    usageBytes: (texto: string) => `${texto} de texto`,
+    usageCalls: (texto: string) => `${texto} frases`,
+    usageFree: "gratis",
+    usageEmpty: "Todavía no se ha mandado nada a Fish Audio.",
+    usageUnknownModel:
+      "Ese modelo no está en la lista de precios: se cuenta al precio de pago, 15 $ por millón.",
   },
   developer: {
     title: "Diagnóstico",
