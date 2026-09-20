@@ -2324,6 +2324,23 @@ video.medio-mini {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+/* Cada bloque de medios —imágenes y sonidos— se lleva **su mitad** del alto y se
+   desplaza por dentro. Sin esto, los dos suman sus alturas y el marco los recorta:
+   medido, 7.213 px fuera del panel. */
+.medio-grupo {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.galeria,
+.medios {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /*
  * La galería: las imágenes y los vídeos en rejilla, no en filas.
  *

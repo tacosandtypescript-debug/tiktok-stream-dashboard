@@ -42,8 +42,6 @@ const ACEPTADOS = ".png,.jpg,.jpeg,.gif,.webp,.awebp,.apng,.mp4,.webm,.mp3,.ogg,
 const TEXTO_MAXIMO = 200;
 /** Lo que se puede **oír**. Una imagen no suena: no se ofrece en la lista. */
 const SUENA = [".mp3", ".ogg", ".wav", ".m4a"];
-/** Lo que se puede **ver** en pequeño, con miniatura. */
-const SE_VE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".awebp", ".apng"];
 /** Vídeo: se ve, pero no en miniatura —pintar un fotograma suelto de un `.webm` no
  *  lo hace el navegador solo— y suena con su propio audio. */
 const ES_VIDEO = [".mp4", ".webm"];
@@ -59,13 +57,8 @@ function suena(nombre: string): boolean {
   return SUENA.includes(extensionDe(nombre));
 }
 
-/** Si un medio del almacén se puede pintar en pequeño. */
-function seVe(nombre: string): boolean {
-  return SE_VE.includes(extensionDe(nombre));
-}
-
-/** Si es un vídeo. Va aparte de `seVe` porque el rótulo es distinto: llamar
- *  «Imagen» a un `.webm` es mentir sobre lo que el streamer va a ver. */
+/** Si es un vídeo. Va aparte porque se pinta con su primer fotograma y no con una
+ *  imagen: llamar «Imagen» a un `.webm` es mentir sobre lo que se va a ver. */
 function esVideo(nombre: string): boolean {
   return ES_VIDEO.includes(extensionDe(nombre));
 }
@@ -178,15 +171,6 @@ export function Alertas({
    * mientras se elige. No hacen falta a la vez.
    */
   const [modo, setModo] = useState<"medios" | "previa">("medios");
-  /**
-   * Qué se está mirando: todo, lo que se ve o lo que suena.
-   *
-   * Los doscientos diecinueve ficheros mezclados no se pueden mirar: lo que se
-   * busca cuando se elige un medio es **una imagen**, y cuando se elige un sonido es
-   * **un sonido**. Se separan, y las imágenes además en rejilla: una miniatura de 24
-   * px en una fila dice poco, y un sticker hay que verlo.
-   */
-  const [filtro, setFiltro] = useState<"todo" | "imagenes" | "sonidos">("imagenes");
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -350,10 +334,15 @@ export function Alertas({
     ? medios.filter((nombre) => normalizar(nombre).includes(normalizar(busqueda.trim())))
     : medios;
 
-  /** Los que además pasan el filtro de tipo: lo que se ve, o lo que suena. */
-  const visibles = encontrados.filter((nombre) =>
-    filtro === "todo" ? true : filtro === "sonidos" ? suena(nombre) : !suena(nombre),
-  );
+  /**
+   * Los que se ven —imágenes, GIF y vídeos— y los que suenan, **separados**.
+   *
+   * Antes había un filtro para elegir entre unos y otros, y un filtro obliga a
+   * mirar una cosa o la otra; lo que se hace al montar un aviso es mirar las dos
+   * —«¿qué sticker le pongo y qué suena?»—.
+   */
+  const imagenes = encontrados.filter((nombre) => !suena(nombre));
+  const sonidos = encontrados.filter((nombre) => suena(nombre));
 
   /** El nombre del aviso que se está editando. Lo usan los rótulos de «Poner». */
   const rotuloElegido = t.alertas.tipos[elegido]?.nombre ?? elegido;
@@ -562,188 +551,128 @@ export function Alertas({
                 aria-label={t.alertas.buscar}
                 onChange={(evento) => setBusqueda(evento.target.value)}
               />
-              {/* El filtro de tipo, junto al buscador: son la misma pregunta
-                  —«¿cuál de estos?»— y separarlos sería dos filas de mandos. */}
-              <div className="vista-switch">
-                <button
-                  type="button"
-                  title={t.alertas.soloImagenesHint}
-                  aria-selected={filtro === "imagenes"}
-                  className={filtro === "imagenes" ? "active" : "ghost"}
-                  onClick={() => setFiltro("imagenes")}
-                >
-                  {t.alertas.soloImagenes}
-                </button>
-                <button
-                  type="button"
-                  title={t.alertas.soloSonidosHint}
-                  aria-selected={filtro === "sonidos"}
-                  className={filtro === "sonidos" ? "active" : "ghost"}
-                  onClick={() => setFiltro("sonidos")}
-                >
-                  {t.alertas.soloSonidos}
-                </button>
-                <button
-                  type="button"
-                  title={t.alertas.soloTodoHint}
-                  aria-selected={filtro === "todo"}
-                  className={filtro === "todo" ? "active" : "ghost"}
-                  onClick={() => setFiltro("todo")}
-                >
-                  {t.alertas.soloTodo}
-                </button>
-              </div>
             </div>
           ) : null}
 
           {medios.length === 0 ? (
             <Empty>{t.alertas.vacio}</Empty>
-          ) : visibles.length === 0 ? (
-            <Empty>
-              {busqueda.trim() ? t.alertas.sinResultados(busqueda) : t.alertas.nadaDeEseTipo}
-            </Empty>
-          ) : filtro === "imagenes" ? (
-            /* **Galería** y no lista: de un sticker hay que ver el dibujo, y una
-               miniatura de 24 px en una fila no lo enseña. La rejilla también deja
-               comparar de un vistazo, que es como se elige un medio. */
-            <ul className="galeria">
-              {visibles.map((nombre) => {
-                const puesto =
-                  ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
-                const url = urlMedio(nombre);
-                const rota = rotas.has(nombre) || !url;
-                return (
-                  <li key={nombre} className={puesto ? "puesto" : undefined}>
-                    <button
-                      type="button"
-                      className="galeria-celda"
-                      title={`${nombre} · ${t.alertas.ponerMedio(rotuloElegido)}`}
-                      disabled={busy}
-                      onClick={() => cambiar(elegido, "medio", nombre)}
-                    >
-                      {rota ? (
-                        <span className="medio-icono">
-                          {esVideo(nombre) ? t.alertas.video : t.alertas.seVe}
-                        </span>
-                      ) : esVideo(nombre) ? (
-                        <video
-                          className="galeria-mini"
-                          src={url}
-                          muted
-                          preload="metadata"
-                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                        />
-                      ) : (
-                        <img
-                          className="galeria-mini"
-                          src={url}
-                          alt=""
-                          loading="lazy"
-                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                        />
-                      )}
-                      <span className="galeria-nombre">{nombre}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+          ) : encontrados.length === 0 ? (
+            <Empty>{t.alertas.sinResultados(busqueda)}</Empty>
           ) : (
-            <ul className="medios">
-              {visibles.map((nombre) => {
-                // Lo que este aviso ya tiene puesto se marca: es la pregunta que se
-                // hace al mirar la lista —«¿cuál es el que suena?»— y sin la marca
-                // hay que abrir el desplegable para averiguarlo.
-                const puesto =
-                  ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
-                return (
-                  <li key={nombre} className={puesto ? "puesto" : undefined}>
-                    {/* Miniatura de lo que se ve —imagen **o el primer fotograma de
-                        un vídeo**— y un rótulo para lo que solo suena. Sin esto la
-                        lista son nombres de fichero y hay que abrir el explorador
-                        para saber qué es cada cosa; con ciento cincuenta cargados,
-                        eso es no poder verlos. */}
-                    {urlMedio(nombre) &&
-                    !rotas.has(nombre) &&
-                    (seVe(nombre) || esVideo(nombre)) ? (
-                      esVideo(nombre) ? (
-                        // Un vídeo se enseña con su primer fotograma: `preload` en
-                        // `metadata` trae solo lo justo para pintarlo y no descarga
-                        // el fichero entero ciento cincuenta veces.
-                        <video
-                          className="medio-mini"
-                          src={urlMedio(nombre)}
-                          muted
-                          preload="metadata"
-                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                        />
-                      ) : (
-                        <img
-                          className="medio-mini"
-                          src={urlMedio(nombre)}
-                          alt=""
-                          loading="lazy"
-                          // Si la miniatura no carga —el fichero se movió, el servidor
-                          // aún no está— se cae al rótulo: un icono de imagen rota en
-                          // una lista de ajustes asusta más que no enseñar nada.
-                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                        />
-                      )
-                    ) : (
-                      <span className={suena(nombre) ? "medio-icono suena" : "medio-icono"}>
-                        {suena(nombre)
-                          ? t.alertas.suena
-                          : esVideo(nombre)
-                            ? t.alertas.video
-                            : t.alertas.seVe}
-                      </span>
-                    )}
-                    <span className="medio-nombre" title={nombre}>
-                      {nombre}
-                    </span>
-                    {/* Oír aquí, en la propia lista: es donde se está mirando cuando
-                        se quiere saber qué es cada fichero. */}
-                    {suena(nombre) ? (
-                      <button
-                        type="button"
-                        className="ghost tiny"
-                        title={t.alertas.oirHint}
-                        onClick={() => onOir(nombre)}
-                      >
-                        {t.alertas.oir}
-                      </button>
-                    ) : null}
-                    {/* **Poner**: lo asigna al aviso elegido, y a la casilla que le
-                        toca por su tipo —lo que suena al sonido, lo que se ve al
-                        medio—. Es lo que unifica las dos listas: antes esto se hacía
-                        en un desplegable del editor con los mismos ciento cincuenta
-                        nombres dentro. */}
-                    <button
-                      type="button"
-                      className="ghost tiny"
-                      title={
-                        suena(nombre)
-                          ? t.alertas.ponerSonido(rotuloElegido)
-                          : t.alertas.ponerMedio(rotuloElegido)
-                      }
-                      disabled={busy}
-                      onClick={() => cambiar(elegido, suena(nombre) ? "sonido" : "medio", nombre)}
-                    >
-                      {puesto ? t.alertas.puesto : t.alertas.poner}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      title={t.alertas.borrarHint}
-                      disabled={busy}
-                      onClick={() => onBorrarMedio(nombre)}
-                    >
-                      {t.alertas.borrar}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            /* **Dos bloques y no un filtro**: las imágenes arriba, en rejilla, y los
+               sonidos debajo, en lista. Cada uno con su rótulo, su cuenta y su propio
+               scroll, así que ninguno le quita el sitio al otro.
+
+               Un filtro obligaba a elegir entre ver una cosa o la otra; y lo que se
+               hace al montar un aviso es justo mirar las dos —«¿qué sticker le pongo
+               y qué suena?»—. */
+            <>
+              <section className="medio-grupo">
+                <h3 className="grupo-rotulo">
+                  {t.alertas.soloImagenes} · {imagenes.length}
+                </h3>
+                {imagenes.length === 0 ? (
+                  <p className="hint">{t.alertas.nadaDeEseTipo}</p>
+                ) : (
+                  <ul className="galeria">
+                    {imagenes.map((nombre) => {
+                      const puesto =
+                        ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
+                      const url = urlMedio(nombre);
+                      const rota = rotas.has(nombre) || !url;
+                      return (
+                        <li key={nombre} className={puesto ? "puesto" : undefined}>
+                          <button
+                            type="button"
+                            className="galeria-celda"
+                            title={`${nombre} · ${t.alertas.ponerMedio(rotuloElegido)}`}
+                            disabled={busy}
+                            onClick={() => cambiar(elegido, "medio", nombre)}
+                          >
+                            {rota ? (
+                              <span className="medio-icono">{t.alertas.seVe}</span>
+                            ) : esVideo(nombre) ? (
+                              <video
+                                className="galeria-mini"
+                                src={url}
+                                muted
+                                preload="metadata"
+                                onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                              />
+                            ) : (
+                              <img
+                                className="galeria-mini"
+                                src={url}
+                                alt=""
+                                loading="lazy"
+                                onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                              />
+                            )}
+                            <span className="galeria-nombre">{nombre}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+
+              <section className="medio-grupo">
+                <h3 className="grupo-rotulo">
+                  {t.alertas.soloSonidos} · {sonidos.length}
+                </h3>
+                {sonidos.length === 0 ? (
+                  <p className="hint">{t.alertas.nadaDeEseTipo}</p>
+                ) : (
+                  <ul className="medios">
+                    {sonidos.map((nombre) => {
+                      const puesto =
+                        ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
+                      return (
+                        <li key={nombre} className={puesto ? "puesto" : undefined}>
+                          <span className="medio-icono suena">{t.alertas.suena}</span>
+                          <span className="medio-nombre" title={nombre}>
+                            {nombre}
+                          </span>
+                          <button
+                            type="button"
+                            className="ghost tiny"
+                            title={t.alertas.oirHint}
+                            onClick={() => onOir(nombre)}
+                          >
+                            {t.alertas.oir}
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost tiny"
+                            title={
+                              suena(nombre)
+                                ? t.alertas.ponerSonido(rotuloElegido)
+                                : t.alertas.ponerMedio(rotuloElegido)
+                            }
+                            disabled={busy}
+                            onClick={() =>
+                              cambiar(elegido, suena(nombre) ? "sonido" : "medio", nombre)
+                            }
+                          >
+                            {puesto ? t.alertas.puesto : t.alertas.poner}
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            title={t.alertas.borrarHint}
+                            disabled={busy}
+                            onClick={() => onBorrarMedio(nombre)}
+                          >
+                            {t.alertas.borrar}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            </>
           )}
             </>
           )}
