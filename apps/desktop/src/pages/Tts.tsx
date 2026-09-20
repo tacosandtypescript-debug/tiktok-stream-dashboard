@@ -16,8 +16,8 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type TtsProvider, type TtsStatus, type TtsVoice, type TtsVozGuardada } from "../api";
-import { Card, Empty, formatNumber } from "../components";
+import { api, type TtsCuota, type TtsProvider, type TtsStatus, type TtsVoice, type TtsVozGuardada } from "../api";
+import { Anillo, Card, Empty, formatDuration, formatNumber } from "../components";
 import { t } from "../i18n/es";
 
 /** Ritmos que entiende edge-tts. */
@@ -33,6 +33,15 @@ const PITCHES = ["-12Hz", "-8Hz", "-4Hz", "+0Hz", "+4Hz", "+8Hz", "+12Hz"];
  */
 const VARIABLES = ["usuario", "mensaje", "regalo", "cantidad", "diamantes"];
 
+/**
+ * A partir de que porcentaje el saldo se pinta en rojo.
+ *
+ * Uno de cada cinco: da tiempo a recargar sin que el aviso salte tan pronto que se
+ * acabe ignorando. Es un numero de politica, no de matematica, asi que vive aqui
+ * con nombre en vez de suelto dentro del `className`.
+ */
+const UMBRAL_SALDO_BAJO = 20;
+
 /** Tope de claves, el mismo que impone el motor. */
 const TOPE_CLAVES = 10;
 
@@ -45,6 +54,8 @@ export function Tts({ initial }: Props) {
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [devices, setDevices] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** El saldo de la cuenta, preguntado aparte porque es una consulta de red. */
+  const [cuota, setCuota] = useState<TtsCuota | null>(null);
   /** Nombre y valor de la clave que se está dando de alta. */
   const [claveNombre, setClaveNombre] = useState("");
   const [claveValor, setClaveValor] = useState("");
@@ -52,6 +63,37 @@ export function Tts({ initial }: Props) {
   /** Nombre y código de la voz que se está dando de alta. */
   const [vozNombre, setVozNombre] = useState("");
   const [vozCodigo, setVozCodigo] = useState("");
+
+  /**
+   * Qué mitad de la página se está mirando.
+   *
+   * Este hook y los de las plantillas van **aquí arriba, con los demás**, y no
+   * junto al código que los usa. El motivo es un fallo que costó encontrar: más
+   * abajo hay un `return` temprano para cuando todavía no ha llegado el estado, y
+   * un hook que viva detrás de ese `return` no se ejecuta en el primer pintado.
+   * React cuenta entonces menos hooks que en el siguiente y aborta con «Rendered
+   * more hooks than during the previous render»: la pantalla entera se cae.
+   *
+   * Se destapó al abrir la aplicación en la pestaña de Voz, que es cuando esta
+   * página se monta sin estado. La regla, para no repetirlo: **ningún hook detrás
+   * de un `return` temprano**.
+   */
+  const [vista, setVista] = useState<"sonando" | "voces">("sonando");
+
+  /** Las tres plantillas de lectura, en local mientras se escriben. */
+  const [plantillas, setPlantillas] = useState<{
+    chat: string;
+    regalo: string;
+    follow: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!status || plantillas) return;
+    setPlantillas({
+      chat: status.settings.chat_template,
+      regalo: status.settings.gift_template,
+      follow: status.settings.follow_template,
+    });
+  }, [status, plantillas]);
 
   useEffect(() => {
     let active = true;
@@ -78,6 +120,39 @@ export function Tts({ initial }: Props) {
       });
     return () => {
       active = false;
+    };
+  }, []);
+
+  /**
+   * El saldo de la cuenta, preguntado a la API del motor.
+   *
+   * Se pide **cada 30 s** y no en cada refresco del estado: el estado va a 1 s
+   * porque cuenta frases, y el saldo no cambia a ese ritmo. El proveedor cachea
+   * las consultas de todos modos —no se pregunta a la API antes de cinco
+   * minutos—, pero pedirlo cada segundo serían sesenta llamadas por minuto al
+   * motor para leer el mismo número.
+   *
+   * Un fallo **no borra** lo que ya se sabía: `tts_cuota` devuelve el último
+   * estado con su motivo, y aquí solo se guarda lo que llega.
+   */
+  useEffect(() => {
+    let active = true;
+    const tick = () => {
+      void api
+        .ttsCuota()
+        .then((nuevo) => {
+          if (active) setCuota(nuevo);
+        })
+        .catch(() => {
+          // El comando no falla por red —eso viaja dentro del estado—: si falla
+          // es que el puente no está, y de eso ya avisa el estado.
+        });
+    };
+    tick();
+    const timer = window.setInterval(tick, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -173,25 +248,22 @@ export function Tts({ initial }: Props) {
   const guardadas = status.settings.fish.voces;
 
   /**
+   * El tono del anillo del saldo.
+   *
+   * Dos tonos y no tres: la paleta del proyecto usa el color con un significado
+   * fijo —cian es «va bien», rojo es «alerta»—, y meter un ambar para el tramo
+   * intermedio romperia esa regla en una pantalla mas.
+   *
+   * `apagado` cuando no hay dato. Eso **no es un cero**: es que no se sabe, y por
+   * eso no se pinta arco ninguno.
+   */
+  /**
    * Las tres plantillas se editan **en local** y se guardan al salir del campo.
    *
    * El estado de la voz llega cada segundo; si el campo se pintara desde ahi, el
    * cursor saltaria al final mientras se escribe. Es el mismo trato que el texto
    * de los avisos de OBS. Se siembra una sola vez, cuando llega el primer estado.
    */
-  const [plantillas, setPlantillas] = useState<{
-    chat: string;
-    regalo: string;
-    follow: string;
-  } | null>(null);
-  useEffect(() => {
-    if (!status || plantillas) return;
-    setPlantillas({
-      chat: status.settings.chat_template,
-      regalo: status.settings.gift_template,
-      follow: status.settings.follow_template,
-    });
-  }, [status, plantillas]);
 
   const guardarPlantilla = (cual: "chat" | "regalo" | "follow") => {
     if (!plantillas) return;
@@ -266,8 +338,22 @@ export function Tts({ initial }: Props) {
     return voz.referencia === elegida;
   };
 
-  /** Qué mitad de la página se está mirando. */
-  const [vista, setVista] = useState<"sonando" | "voces">("sonando");
+  /**
+   * El tono del anillo del saldo.
+   *
+   * Dos tonos y no tres: la paleta del proyecto usa el color con un significado
+   * fijo —cian es «va bien», rojo es «alerta»—, y meter un ambar para el tramo
+   * intermedio romperia esa regla en una pantalla mas.
+   *
+   * `apagado` cuando no hay dato. Eso **no es un cero**: es que no se sabe, y por
+   * eso no se pinta arco ninguno.
+   */
+  const tonoSaldo: "normal" | "bajo" | "apagado" =
+    cuota?.porcentaje === null || cuota?.porcentaje === undefined
+      ? "apagado"
+      : cuota.porcentaje <= UMBRAL_SALDO_BAJO
+        ? "bajo"
+        : "normal";
 
   /**
    * Guarda una voz con su nombre y la deja en uso.
@@ -706,6 +792,53 @@ export function Tts({ initial }: Props) {
 
             <div className="stack vista-voces">
               <Card title={t.tts.usage}>
+                {/* El saldo va arriba del todo del panel porque es la pregunta
+                    que se hace de un vistazo —«¿me queda?»—, y el resto del panel
+                    es el detalle de a dónde se ha ido. */}
+                <div className="saldo">
+                  <Anillo
+                    porcentaje={cuota?.porcentaje ?? null}
+                    cifra={
+                      cuota?.restante === null || cuota?.restante === undefined
+                        ? t.tts.saldoSinDato
+                        : formatNumber(cuota.restante)
+                    }
+                    pie={
+                      cuota?.total === null || cuota?.total === undefined
+                        ? undefined
+                        : t.tts.saldoDe(formatNumber(cuota.total))
+                    }
+                    tono={tonoSaldo}
+                    title={t.tts.saldoHint}
+                  />
+                  <div className="saldo-datos">
+                    <span className="saldo-rotulo">{t.tts.saldo}</span>
+                    {/* El plan: la API lo llama `free` o `pro`; si algun dia manda
+                        otro, se enseña tal cual en vez de tragarselo. */}
+                    {cuota && !cuota.error && cuota.tipo ? (
+                      <span className="hint">
+                        {t.tts.saldoPlanes[cuota.tipo] ?? cuota.tipo}
+                      </span>
+                    ) : null}
+                    {cuota?.error ? (
+                      <span className="voz-aviso">{t.tts.saldoError(cuota.error)}</span>
+                    ) : cuota ? (
+                      <span className="hint">
+                        {cuota.hace_segs < 5
+                          ? t.tts.saldoAhora
+                          : t.tts.saldoHace(formatDuration(cuota.hace_segs * 1000))}
+                      </span>
+                    ) : null}
+                    {status.consumo.claves.length === 0 ? (
+                      <span className="hint">{t.tts.saldoSinClave}</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Este texto decia ademas «no por el audio», que ya no hace falta
+                    explicar: el anillo de arriba dice en su `title` de donde sale
+                    cada numero, y la linea del modelo dice a que precio se cuenta.
+                    Se queda en lo que no se ve en ningun otro sitio. */}
                 <p className="hint">{t.tts.usageHint}</p>
                 <p className="hint">
                   {t.tts.usageModel(status.consumo.modelo, String(status.consumo.precio_por_millon))}

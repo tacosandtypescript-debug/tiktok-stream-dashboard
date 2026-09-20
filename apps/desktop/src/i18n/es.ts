@@ -498,7 +498,7 @@ export const t = {
     /** Las claves guardadas y su relevo automatico. */
     keys: "Claves de Fish Audio",
     keysHint:
-      "Hasta diez. Si una deja de valer se pasa sola a la siguiente, para que la voz no se corte a mitad de directo. Un 429 no cambia de clave: espera y reintenta la misma.",
+      "Hasta diez. Si una deja de valer, se pasa sola a la siguiente: la voz no se corta.",
     keysEmpty: "Todavía no hay ninguna clave guardada.",
     keyName: "Cómo llamarla",
     keyNamePlaceholder: "la de marzo",
@@ -517,8 +517,7 @@ export const t = {
     keyEmpty: "La clave no puede estar vacía.",
     /** Consumo: se cobra por bytes del texto enviado, así que se cuenta aquí. */
     usage: "Consumo",
-    usageHint: "Se cobra por los bytes del texto enviado, no por el audio.",
-    usageModel: (modelo: string, precio: string) =>
+    usageHint: "El gasto de aquí abajo lo cuenta la aplicación, frase a frase.",    usageModel: (modelo: string, precio: string) =>
       precio === "0"
         ? `Contando con ${modelo}: gratis`
         : `Contando con ${modelo}: ${precio} $ por millón de bytes`,
@@ -528,6 +527,22 @@ export const t = {
     usageCalls: (texto: string) => `${texto} frases`,
     usageFree: "gratis",
     usageEmpty: "Todavía no se ha mandado nada a Fish Audio.",
+
+    /* El saldo de la cuenta, preguntado a la API del motor de voz. */
+    saldo: "Saldo de la cuenta",
+    saldoHint:
+      "Lo pregunta a Fish cada 5 minutos. El gasto de aquí abajo lo cuenta la aplicación; esto es lo que dice la API.",
+    saldoRestante: "Queda",
+    saldoTotal: "De un total de",
+    saldoDe: (total: string) => `de ${total}`,
+    saldoSinDato: "—",
+    /** El plan, tal cual lo llama la API. Lo que no esté en la lista se enseña tal cual. */
+    saldoPlanes: { free: "gratuito", pro: "de pago" } as Record<string, string>,
+    saldoHace: (texto: string) => `Consultado hace ${texto}`,
+    saldoAhora: "Consultado ahora mismo",
+    saldoSinClave: "Sin una clave no hay saldo que consultar. Añade una aquí abajo.",
+    saldoError: (motivo: string) => `No se pudo preguntar el saldo: ${motivo}`,
+    saldoPoco: "Queda poco saldo",
     usageUnknownModel:
       "Ese modelo no está en la lista de precios: se cuenta al precio de pago, 15 $ por millón.",
   },

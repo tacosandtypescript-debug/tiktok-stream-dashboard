@@ -545,6 +545,19 @@ impl TtsManager {
             .clone()
     }
 
+    /// El saldo de la cuenta, preguntado al motor que este puesto.
+    ///
+    /// Se le pregunta al **medidor** y no al motor cuando son distintos: el saldo
+    /// es de quien cobra, y quien cobra es quien mide. Con el motor local puesto no
+    /// hay nadie a quien preguntar y devuelve `None`.
+    ///
+    /// El ritmo de las consultas lo lleva el propio proveedor: llamar a esto en
+    /// cada refresco de la interfaz no se traduce en una consulta a la API.
+    pub async fn cuota(&self) -> Option<crate::tts::cuota::CuotaStatus> {
+        let proveedor = self.medidor().unwrap_or_else(|| self.provider());
+        proveedor.cuota().await
+    }
+
     /// El proveedor que mide el gasto, si alguno lo hace.
     pub fn medidor(&self) -> Option<SharedTtsProvider> {
         self.medidor

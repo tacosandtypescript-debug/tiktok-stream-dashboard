@@ -5,6 +5,7 @@
 //! audio. Asi el motor de voz es sustituible sin tocar la cola ni los filtros.
 
 pub mod consumo;
+pub mod cuota;
 pub mod filters;
 pub mod fish;
 pub mod manager;

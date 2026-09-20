@@ -270,6 +270,21 @@ fn tts_status(state: State<'_, Arc<AppState>>) -> crate::tts::manager::TtsStatus
     state.tts_status()
 }
 
+/// El saldo de la cuenta del motor de voz, preguntado a su API.
+///
+/// Va **aparte** de `tts_status` y no dentro: el estado es sincrono y se refresca
+/// cada segundo, y el saldo es una consulta de red que puede tardar o fallar. Si
+/// fuera dentro, un corte de red bloquearia el refresco del estado entero.
+///
+/// Se puede llamar a menudo: el ritmo de las consultas lo lleva el proveedor.
+#[tauri::command]
+async fn tts_cuota(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<crate::tts::cuota::CuotaStatus>, String> {
+    let tts = state.tts.clone();
+    Ok(tts.cuota().await)
+}
+
 #[tauri::command]
 fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), String> {
     use crate::tts::voices::Language;
@@ -651,6 +666,7 @@ fn launch(instance_port: u16) {
             ui_chat,
             ui_error,
             tts_status,
+            tts_cuota,
             tts_update,
             tts_action,
             tts_voices,

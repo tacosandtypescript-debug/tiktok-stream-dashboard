@@ -830,6 +830,130 @@ main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* --- El anillo del saldo -------------------------------------------------- */
+/*
+ * Un anillo, no una barra: lo que se enseña es una **proporcion de un total**, y
+ * el circulo cerrado dice de un vistazo «esto es todo lo que hay». Una barra
+ * horizontal invita a leerla como una cantidad que crece; un anillo se lee como un
+ * deposito, que es lo que es.
+ *
+ * El arco se mueve con una transicion de `stroke-dashoffset` y no con
+ * `requestAnimationFrame`: el estado se refresca cada segundo, y volver a pintar el
+ * componente reiniciaria una animacion por codigo una y otra vez.
+ */
+/*
+ * El tamaño del anillo lo manda el alto de la fila en la que vive: 76 px es lo
+ * que cabe en «Voces y claves» sin que la pagina se salga de la ventana, que es
+ * fija. Con el numero dentro a 17 px se lee de un vistazo, que es lo que se le
+ * pide a un indicador.
+ */
+.anillo {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  flex: 0 0 auto;
+}
+
+.anillo svg {
+  width: 100%;
+  height: 100%;
+  /* El arco empieza arriba, como un reloj, y no a las tres en punto. */
+  transform: rotate(-90deg);
+}
+
+.anillo-pista,
+.anillo-arco {
+  fill: none;
+  stroke-width: 9;
+}
+
+.anillo-pista {
+  stroke: var(--panel-2);
+}
+
+.anillo-arco {
+  stroke-linecap: round;
+  transition: stroke-dashoffset 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Dos tonos y no tres: la paleta del proyecto usa el color con un significado
+   fijo —cian es «va bien», rojo es «alerta»— y un semaforo de tres colores
+   rompería esa regla en una pantalla mas. */
+.anillo-arco.tono-normal,
+.anillo-cifra.tono-normal {
+  stroke: var(--accent);
+  color: var(--accent);
+}
+
+.anillo-arco.tono-bajo,
+.anillo-cifra.tono-bajo {
+  stroke: var(--warn);
+  color: var(--warn);
+}
+
+/* Sin dato no hay arco, y la cifra se apaga: no es un cero, es que no se sabe. */
+.anillo-cifra.tono-apagado {
+  color: var(--muted);
+}
+
+.anillo-centro {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.anillo-cifra {
+  font-family: var(--fuente-datos);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.anillo-pie {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* El anillo y lo que lo acompaña, en fila. */
+.saldo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.saldo-datos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.saldo-linea {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.saldo-rotulo {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.saldo-cifra {
+  font-family: var(--fuente-datos);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
 /* --- Aportaciones: cuatro columnas por dos filas -------------------------- */
 /*
  * Seis paneles que tienen que caber en los 674 px de alto que deja la ventana

@@ -475,6 +475,29 @@ export interface TtsFishSettings {
 }
 
 /**
+ * El saldo de la cuenta del motor de voz.
+ *
+ * Es lo unico que **no** se calcula en local: el gasto son bytes por precio y sale
+ * de aqui, pero lo que queda en la cuenta lo lleva el proveedor. Por eso lleva
+ * `hace_segs` —para poder decir si el dato es de hace un rato— y `error` —un saldo
+ * que no se pudo consultar no es un saldo a cero—.
+ */
+export interface TtsCuota {
+  /** Lo que trae el plan. `null` si la API no lo manda. */
+  total: number | null;
+  /** Lo que queda. */
+  restante: number | null;
+  /** `free`, `pro`... Tal cual lo dice la API, sin traducir. */
+  tipo: string;
+  /** Lo que queda, de 0 a 100. `null` si no se puede calcular. */
+  porcentaje: number | null;
+  /** Hace cuanto se pregunto, en segundos. */
+  hace_segs: number;
+  /** El motivo del ultimo fallo, si lo hubo. */
+  error: string | null;
+}
+
+/**
  * Una voz de Fish guardada por el streamer.
  *
  * La `referencia` **no es un secreto**: es el identificador publico de la voz en
@@ -619,6 +642,14 @@ export const api = {
   uiError: (message: string) => invoke<void>("ui_error", { message }),
 
   ttsStatus: () => invoke<TtsStatus>("tts_status"),
+  /**
+   * El saldo de la cuenta del motor de voz, preguntado a su API.
+   *
+   * Va aparte del estado porque es una consulta de red: puede tardar y puede
+   * fallar, y el estado no tiene por qué esperarla. `null` cuando el motor puesto
+   * no tiene cuenta que mirar (el local no cobra por uso).
+   */
+  ttsCuota: () => invoke<TtsCuota | null>("tts_cuota"),
   ttsUpdate: (patch: {
     enabled?: boolean;
     volume?: number;

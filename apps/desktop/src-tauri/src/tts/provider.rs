@@ -349,6 +349,18 @@ pub trait TtsProvider: Send + Sync {
     fn usage(&self) -> Option<crate::tts::consumo::UsoProveedor> {
         None
     }
+    /// El **saldo de la cuenta**, preguntado al proveedor.
+    ///
+    /// Va aparte de [`Self::usage`] porque son dos cosas distintas: el consumo se
+    /// cuenta aqui en local y siempre esta; el saldo lo lleva el proveedor y puede
+    /// no saberse —no hay clave, no hay red, la API no lo da—. Por eso devuelve
+    /// `Option` y por eso es asincrono: hay que salir a preguntarlo.
+    ///
+    /// Por defecto no lo sabe, que es el caso del motor local: no cobra por uso y
+    /// no hay ninguna cuenta que mirar.
+    fn cuota<'a>(&'a self) -> BoxFuture<'a, Option<crate::tts::cuota::CuotaStatus>> {
+        Box::pin(async { None })
+    }
     /// `true` si el proveedor tiene ya algun secreto (clave de API) guardado.
     ///
     /// Es un booleano y no el valor a proposito: la interfaz puede saber **si**

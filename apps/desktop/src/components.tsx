@@ -393,6 +393,81 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }
 
+/** Radio del anillo, en unidades del `viewBox`. */
+const RADIO_ANILLO = 46;
+/** Perimetro: lo que mide la vuelta entera. Es la escala del arco. */
+const VUELTA = 2 * Math.PI * RADIO_ANILLO;
+
+/**
+ * Un anillo de progreso: lo que queda de un total.
+ *
+ * Se dibuja con dos círculos SVG y `stroke-dasharray`. El de abajo es la pista
+ * —la vuelta entera, en gris— y el de arriba el arco, que se recorta con
+ * `stroke-dashoffset`: cuanto menos queda, menos arco.
+ *
+ * El **giro lo hace el CSS**, no JavaScript. Aquí solo se pone el valor final; la
+ * transición de `stroke-dashoffset` se encarga del movimiento. Hacerlo con
+ * `requestAnimationFrame` sería peor por un motivo concreto: el estado del panel
+ * se refresca cada segundo y volver a pintarlo reiniciaría la animación una y otra
+ * vez, así que el arco temblaría en vez de moverse.
+ *
+ * Al montarse arranca desde la vuelta entera y se cierra hasta su sitio, para que
+ * el número se vea «llegar» en vez de aparecer de golpe.
+ *
+ * `porcentaje` en `null` significa **no se sabe** —falta el dato o falló la
+ * consulta—, y entonces no hay arco: se enseña la pista sola. Inventarse un 0 %
+ * sería pintar una barra que miente sobre el saldo.
+ */
+export function Anillo({
+  porcentaje,
+  cifra,
+  pie,
+  tono = "normal",
+  title,
+}: {
+  /** Lo que queda, de 0 a 100. `null` si no se sabe. */
+  porcentaje: number | null;
+  /** La cifra grande del centro. */
+  cifra: string;
+  /** La línea pequeña de debajo. */
+  pie?: string;
+  /** `normal` con saldo, `bajo` cuando queda poco, `apagado` si no se sabe. */
+  tono?: "normal" | "bajo" | "apagado";
+  title?: string;
+}) {
+  // Arranca a la vuelta entera para que el primer pintado anime el cierre.
+  const [cerrado, setCerrado] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setCerrado(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const queda = porcentaje === null ? 0 : Math.max(0, Math.min(100, porcentaje));
+  const arco = cerrado ? (queda / 100) * VUELTA : VUELTA;
+
+  return (
+    <div className="anillo" title={title}>
+      <svg viewBox="0 0 120 120" role="img" aria-label={cifra}>
+        <circle className="anillo-pista" cx="60" cy="60" r={RADIO_ANILLO} />
+        {porcentaje === null ? null : (
+          <circle
+            className={`anillo-arco tono-${tono}`}
+            cx="60"
+            cy="60"
+            r={RADIO_ANILLO}
+            strokeDasharray={VUELTA}
+            strokeDashoffset={VUELTA - arco}
+          />
+        )}
+      </svg>
+      <div className="anillo-centro">
+        <span className={`anillo-cifra tono-${tono}`}>{cifra}</span>
+        {pie ? <span className="anillo-pie">{pie}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Tabla de aportación por persona: puesto, foto, nombre y una cifra.
  *

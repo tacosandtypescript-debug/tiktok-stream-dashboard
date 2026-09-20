@@ -44,8 +44,8 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
@@ -53,6 +53,7 @@ use crate::providers::BoxFuture;
 use crate::secreto::Secreto;
 
 use super::consumo::{bytes_de, Consumo, UsoClave, UsoProveedor};
+use super::cuota::{ClienteCuota, ClienteHttpCuota, CuotaStatus, Saldo};
 use super::provider::{
     apply_cached, prune_cache, sink_atomically, valid_audio_file, ErrorVoz, EstadoClave,
     MotivoFallo, ProviderSettings, Readiness, TtsAudio, TtsCancellation, TtsProvider, TtsRequest,
@@ -463,6 +464,12 @@ struct FishEstado {
 pub struct FishAudio {
     config: FishConfig,
     transporte: Arc<dyn ClienteTts>,
+    /// Quien pregunta el saldo a la API. Va aparte del transporte de sintesis
+    /// porque son dos cosas distintas —una manda texto y cobra, la otra solo
+    /// mira— y asi las pruebas pueden falsear una sin tocar la otra.
+    cuota_cliente: Arc<dyn ClienteCuota>,
+    /// Lo ultimo que se pregunto del saldo y cuando, para no repetirlo.
+    saldo: Mutex<Saldo>,
     estado: RwLock<FishEstado>,
     calls: AtomicU64,
     failures: AtomicU64,
@@ -475,12 +482,72 @@ impl FishAudio {
         Self::con(config, transporte)
     }
 
+    /// El saldo es de la **cuenta**, no de la clave, y dos claves pueden ser de
+    /// cuentas distintas: al cambiar de clave, lo preguntado deja de valer.
+    fn olvidar_saldo(&self) {
+        self.saldo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .invalidar();
+    }
+
+    /// La clave con la que se pregunta el saldo: la que esta en uso.
+    fn clave_activa(&self) -> Option<Secreto> {
+        let estado = self.estado.read().unwrap_or_else(|e| e.into_inner());
+        let posicion = estado.activa?;
+        estado.claves.get(posicion).map(|c| c.secreto.clone())
+    }
+
+    /// El saldo de la cuenta, preguntado a la API **si toca**.
+    ///
+    /// Devuelve algo que enseñar en cuanto se haya preguntado una vez, sea el saldo
+    /// o el motivo por el que no se pudo. El ritmo lo lleva [`Saldo::toca`], asi
+    /// que la interfaz puede llamar a esto en cada refresco sin que eso se
+    /// traduzca en una consulta a la API.
+    pub async fn cuota(&self) -> Option<CuotaStatus> {
+        // El candado **no** se mantiene durante el `await`: si se mantuviera, una
+        // respuesta lenta de la API dejaria esperando a quien solo quiere leer el
+        // numero de antes.
+        let toca = self
+            .saldo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .toca(Instant::now());
+
+        if toca {
+            let resultado = match self.clave_activa() {
+                Some(clave) => self.cuota_cliente.pedir(&clave).await,
+                None => Err("no hay ninguna clave con la que preguntar el saldo".to_string()),
+            };
+            self.saldo
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .apuntar(Instant::now(), resultado);
+        }
+
+        self.saldo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .status(Instant::now())
+    }
+
     /// Con un transporte propio. Es lo que usan las pruebas del relevo: no toca
     /// la red.
     pub fn con(config: FishConfig, transporte: Arc<dyn ClienteTts>) -> Self {
+        Self::con_cuota(config, transporte, Arc::new(ClienteHttpCuota::nuevo()))
+    }
+
+    /// Con transporte **y** cliente de saldo propios. Solo para las pruebas.
+    pub fn con_cuota(
+        config: FishConfig,
+        transporte: Arc<dyn ClienteTts>,
+        cuota_cliente: Arc<dyn ClienteCuota>,
+    ) -> Self {
         Self {
             config,
             transporte,
+            cuota_cliente,
+            saldo: Mutex::new(Saldo::default()),
             estado: RwLock::new(FishEstado {
                 claves: Vec::new(),
                 activa: None,
@@ -515,6 +582,10 @@ impl FishAudio {
         estado.claves = claves;
         estado.consumo = consumo;
         estado.activa = estado.claves.iter().position(ClaveGuardada::esta_viva);
+        drop(estado);
+        // Se arranca sin saldo guardado: el de la sesion anterior puede ser de otra
+        // cuenta, o de hace dias.
+        self.olvidar_saldo();
     }
 
     /// Anade una clave al final de la lista. Devuelve su posicion.
@@ -544,6 +615,9 @@ impl FishAudio {
         if estado.activa.is_none() {
             estado.activa = Some(estado.claves.len() - 1);
         }
+        drop(estado);
+        // La clave nueva puede ser de otra cuenta: el saldo guardado ya no vale.
+        self.olvidar_saldo();
         Ok(posicion)
     }
 
@@ -564,6 +638,9 @@ impl FishAudio {
         }
         // La activa se recalcula: la que apuntaba puede haberse ido con el hueco.
         estado.activa = estado.claves.iter().position(ClaveGuardada::esta_viva);
+        drop(estado);
+        // Quien pregunta el saldo puede haber cambiado: la que se fue era la activa.
+        self.olvidar_saldo();
         true
     }
 
@@ -581,6 +658,9 @@ impl FishAudio {
         if estado.activa.is_none() {
             estado.activa = Some(posicion as usize);
         }
+        drop(estado);
+        // Una clave que estaba agotada puede tener saldo: hay que volver a mirarlo.
+        self.olvidar_saldo();
         true
     }
 
@@ -966,6 +1046,10 @@ impl TtsProvider for FishAudio {
 
     fn usage(&self) -> Option<UsoProveedor> {
         Some(self.uso())
+    }
+
+    fn cuota<'a>(&'a self) -> BoxFuture<'a, Option<CuotaStatus>> {
+        Box::pin(async move { FishAudio::cuota(self).await })
     }
 
     /// Sin clave y sin codigo de voz no hay nada que preguntar: se contesta al
