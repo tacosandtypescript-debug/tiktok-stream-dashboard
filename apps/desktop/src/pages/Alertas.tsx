@@ -178,6 +178,15 @@ export function Alertas({
    * mientras se elige. No hacen falta a la vez.
    */
   const [modo, setModo] = useState<"medios" | "previa">("medios");
+  /**
+   * Qué se está mirando: todo, lo que se ve o lo que suena.
+   *
+   * Los doscientos diecinueve ficheros mezclados no se pueden mirar: lo que se
+   * busca cuando se elige un medio es **una imagen**, y cuando se elige un sonido es
+   * **un sonido**. Se separan, y las imágenes además en rejilla: una miniatura de 24
+   * px en una fila dice poco, y un sticker hay que verlo.
+   */
+  const [filtro, setFiltro] = useState<"todo" | "imagenes" | "sonidos">("imagenes");
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -340,6 +349,11 @@ export function Alertas({
   const encontrados = busqueda.trim()
     ? medios.filter((nombre) => normalizar(nombre).includes(normalizar(busqueda.trim())))
     : medios;
+
+  /** Los que además pasan el filtro de tipo: lo que se ve, o lo que suena. */
+  const visibles = encontrados.filter((nombre) =>
+    filtro === "todo" ? true : filtro === "sonidos" ? suena(nombre) : !suena(nombre),
+  );
 
   /** El nombre del aviso que se está editando. Lo usan los rótulos de «Poner». */
   const rotuloElegido = t.alertas.tipos[elegido]?.nombre ?? elegido;
@@ -548,19 +562,95 @@ export function Alertas({
                 aria-label={t.alertas.buscar}
                 onChange={(evento) => setBusqueda(evento.target.value)}
               />
-              <span className="buscar-cuenta">
-                {t.alertas.cuenta(encontrados.length, medios.length)}
-              </span>
+              {/* El filtro de tipo, junto al buscador: son la misma pregunta
+                  —«¿cuál de estos?»— y separarlos sería dos filas de mandos. */}
+              <div className="vista-switch">
+                <button
+                  type="button"
+                  title={t.alertas.soloImagenesHint}
+                  aria-selected={filtro === "imagenes"}
+                  className={filtro === "imagenes" ? "active" : "ghost"}
+                  onClick={() => setFiltro("imagenes")}
+                >
+                  {t.alertas.soloImagenes}
+                </button>
+                <button
+                  type="button"
+                  title={t.alertas.soloSonidosHint}
+                  aria-selected={filtro === "sonidos"}
+                  className={filtro === "sonidos" ? "active" : "ghost"}
+                  onClick={() => setFiltro("sonidos")}
+                >
+                  {t.alertas.soloSonidos}
+                </button>
+                <button
+                  type="button"
+                  title={t.alertas.soloTodoHint}
+                  aria-selected={filtro === "todo"}
+                  className={filtro === "todo" ? "active" : "ghost"}
+                  onClick={() => setFiltro("todo")}
+                >
+                  {t.alertas.soloTodo}
+                </button>
+              </div>
             </div>
           ) : null}
 
           {medios.length === 0 ? (
             <Empty>{t.alertas.vacio}</Empty>
-          ) : encontrados.length === 0 ? (
-            <Empty>{t.alertas.sinResultados(busqueda)}</Empty>
+          ) : visibles.length === 0 ? (
+            <Empty>
+              {busqueda.trim() ? t.alertas.sinResultados(busqueda) : t.alertas.nadaDeEseTipo}
+            </Empty>
+          ) : filtro === "imagenes" ? (
+            /* **Galería** y no lista: de un sticker hay que ver el dibujo, y una
+               miniatura de 24 px en una fila no lo enseña. La rejilla también deja
+               comparar de un vistazo, que es como se elige un medio. */
+            <ul className="galeria">
+              {visibles.map((nombre) => {
+                const puesto =
+                  ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
+                const url = urlMedio(nombre);
+                const rota = rotas.has(nombre) || !url;
+                return (
+                  <li key={nombre} className={puesto ? "puesto" : undefined}>
+                    <button
+                      type="button"
+                      className="galeria-celda"
+                      title={`${nombre} · ${t.alertas.ponerMedio(rotuloElegido)}`}
+                      disabled={busy}
+                      onClick={() => cambiar(elegido, "medio", nombre)}
+                    >
+                      {rota ? (
+                        <span className="medio-icono">
+                          {esVideo(nombre) ? t.alertas.video : t.alertas.seVe}
+                        </span>
+                      ) : esVideo(nombre) ? (
+                        <video
+                          className="galeria-mini"
+                          src={url}
+                          muted
+                          preload="metadata"
+                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                        />
+                      ) : (
+                        <img
+                          className="galeria-mini"
+                          src={url}
+                          alt=""
+                          loading="lazy"
+                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                        />
+                      )}
+                      <span className="galeria-nombre">{nombre}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           ) : (
             <ul className="medios">
-              {encontrados.map((nombre) => {
+              {visibles.map((nombre) => {
                 // Lo que este aviso ya tiene puesto se marca: es la pregunta que se
                 // hace al mirar la lista —«¿cuál es el que suena?»— y sin la marca
                 // hay que abrir el desplegable para averiguarlo.

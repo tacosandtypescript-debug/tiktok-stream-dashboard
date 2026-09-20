@@ -2324,6 +2324,60 @@ video.medio-mini {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+/*
+ * La galería: las imágenes y los vídeos en rejilla, no en filas.
+ *
+ * De un sticker hay que ver el dibujo. En una fila, la miniatura son 24 px y el
+ * nombre se come el resto; en una rejilla de cuatro por fila cada uno ocupa lo suyo
+ * y se comparan de un vistazo, que es como se elige un medio.
+ *
+ * Se desplaza por dentro como la lista: los ficheros que carga el streamer no
+ * tienen tope.
+ */
+.galeria {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+  flex: 1 1 auto;
+}
+
+.galeria-celda {
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio-tarjeta);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1);
+  width: 100%;
+}
+
+.galeria li.puesto .galeria-celda {
+  border-color: var(--accent);
+}
+
+.galeria-mini {
+  height: 48px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.galeria-nombre {
+  color: var(--muted);
+  font-size: 9px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Un campo de formulario con su rótulo encima. El `min-width: 0` es lo que deja
    encoger la columna dentro de la rejilla en vez de empujar la tarjeta. */
 .campo {
