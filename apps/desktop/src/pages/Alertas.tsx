@@ -37,13 +37,13 @@ import { t } from "../i18n/es";
 /** Tope del selector de archivos. Arrastrar no tiene tope: va por ruta. */
 const TOPE_BYTES = 24 * 1024 * 1024;
 /** Lo mismo que acepta el motor (`alerts::ACEPTADOS`), para el `accept`. */
-const ACEPTADOS = ".png,.jpg,.jpeg,.gif,.webp,.apng,.mp4,.webm,.mp3,.ogg,.wav,.m4a";
+const ACEPTADOS = ".png,.jpg,.jpeg,.gif,.webp,.awebp,.apng,.mp4,.webm,.mp3,.ogg,.wav,.m4a";
 /** Lo mismo que recorta Rust en el saneado. */
 const TEXTO_MAXIMO = 200;
 /** Lo que se puede **oír**. Una imagen no suena: no se ofrece en la lista. */
 const SUENA = [".mp3", ".ogg", ".wav", ".m4a"];
 /** Lo que se puede **ver** en pequeño, con miniatura. */
-const SE_VE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng"];
+const SE_VE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".awebp", ".apng"];
 /** Vídeo: se ve, pero no en miniatura —pintar un fotograma suelto de un `.webm` no
  *  lo hace el navegador solo— y suena con su propio audio. */
 const ES_VIDEO = [".mp4", ".webm"];

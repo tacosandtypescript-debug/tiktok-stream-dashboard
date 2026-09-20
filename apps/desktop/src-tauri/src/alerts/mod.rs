@@ -49,6 +49,10 @@ pub const ACEPTADOS: &[(&str, &str)] = &[
     ("jpeg", "image/jpeg"),
     ("gif", "image/gif"),
     ("webp", "image/webp"),
+    // Los stickers animados de TikTok se descargan con extension `.awebp`, que es
+    // WebP animado y no un formato aparte. Sin esta linea entraban como binario
+    // —extension desconocida— y el overlay los descargaba en vez de pintarlos.
+    ("awebp", "image/webp"),
     ("apng", "image/apng"),
     ("mp4", "video/mp4"),
     ("webm", "video/webm"),
