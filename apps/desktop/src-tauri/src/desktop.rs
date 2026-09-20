@@ -167,6 +167,87 @@ fn importar_medio_alerta_bytes(
     Ok(state.snapshot())
 }
 
+/// Lo que salio de importar varios ficheros de golpe.
+#[derive(serde::Serialize)]
+pub struct ImportacionMedios {
+    /// Cuantos entraron.
+    pub importados: usize,
+    /// Los que no, ya con su motivo escrito. Se enseñan: un fichero que se queda
+    /// fuera en silencio es un fichero que el streamer cree que tiene y no tiene.
+    pub fallos: Vec<String>,
+    /// El estado nuevo, para que la interfaz no tenga que pedirlo aparte.
+    pub snapshot: Snapshot,
+}
+
+/// Copia **varios** ficheros al almacen de una vez.
+///
+/// Es lo que hace usable traerse una carpeta de sonidos: de uno en uno, entre
+/// abrir el dialogo, elegir y esperar, se hace eterno. Recorre el mismo
+/// `importar_desde_ruta` que el de a uno, asi que la validacion —lista blanca de
+/// formatos, tope de tamano, nombre saneado— es **exactamente** la misma: por aqui
+/// no entra nada que no entrara por alli.
+///
+/// Una **carpeta** se abre y se importa lo que haya dentro, sin bajar a
+/// subcarpetas: es lo que permite soltar de una vez la carpeta entera donde el
+/// streamer guarda sus sonidos. Un fichero que falla **no tira los demas**: en una
+/// carpeta siempre hay uno que no vale, y perder los otros nueve por ese seria peor
+/// que no tener la funcion.
+#[tauri::command]
+fn importar_medios_alerta(
+    state: State<'_, Arc<AppState>>,
+    rutas: Vec<String>,
+) -> Result<ImportacionMedios, String> {
+    let almacen = crate::alerts::Almacen::nuevo();
+    let mut importados = 0;
+    let mut fallos = Vec::new();
+
+    for ruta in rutas {
+        let camino = std::path::Path::new(&ruta);
+        // Una carpeta se abre; un fichero se importa. Se mira antes de importar
+        // porque `importar_desde_ruta` rechazaria la carpeta con «no es un fichero»
+        // y el streamer no sabria por que.
+        let dentro: Vec<std::path::PathBuf> = if camino.is_dir() {
+            match std::fs::read_dir(camino) {
+                Ok(entradas) => entradas
+                    .filter_map(|entrada| entrada.ok())
+                    .map(|entrada| entrada.path())
+                    // Solo ficheros: una subcarpeta se ignora en vez de fallar, para
+                    // que soltar una carpeta con carpetas dentro no llene la lista de
+                    // errores que no lo son.
+                    .filter(|p| p.is_file())
+                    .collect(),
+                Err(error) => {
+                    fallos.push(format!("{ruta}: no se pudo abrir la carpeta ({error})"));
+                    continue;
+                }
+            }
+        } else {
+            vec![camino.to_path_buf()]
+        };
+
+        for fichero in dentro {
+            match almacen.importar_desde_ruta(&fichero) {
+                Ok(_) => importados += 1,
+                Err(error) => fallos.push(format!("{}: {error}", fichero.display())),
+            }
+        }
+    }
+
+    Ok(ImportacionMedios {
+        importados,
+        fallos,
+        snapshot: state.snapshot(),
+    })
+}
+
+/// Suena un medio del almacen en el monitor del streamer, sin encolar nada.
+///
+/// Es el boton de oir del editor: una lista de nombres no dice como suena nada.
+#[tauri::command]
+fn oir_medio(state: State<'_, Arc<AppState>>, nombre: String) -> Result<(), String> {
+    state.oir_medio(&nombre)
+}
+
 /// Borra un medio del almacen.
 ///
 /// Los avisos que lo usaran se quedan sin medio: el saneado los limpia al
@@ -567,6 +648,21 @@ pub fn run() {
 }
 
 fn launch(instance_port: u16) {
+    // Los sonidos del pack, **antes** de que nadie lea los ajustes de alertas.
+    //
+    // El orden importa: los ajustes de fabrica apuntan a estos ficheros, y el
+    // `sanear` que corre al guardar quita toda referencia que no este en el
+    // almacen. Sembrando despues, una instalacion nueva se quedaria sin sonido en
+    // el primer guardado y el aviso saldria mudo sin que nada fallara.
+    //
+    // Va aqui y **no** en `AppState::new`: los tests construyen el estado con una
+    // base temporal, pero `data_dir()` sigue apuntando a la carpeta de verdad, asi
+    // que sembrar alli escribiria en el equipo del streamer en cada `cargo test`.
+    let sembrados = crate::alerts::Almacen::nuevo().sembrar_pack();
+    if sembrados > 0 {
+        tracing::info!(sembrados, "sonidos de las alertas puestos en el almacen");
+    }
+
     let app = tauri::Builder::default()
         .setup(move |app| {
             let state = Arc::new(AppState::new(instance_port).map_err(|e| e.to_string())?);
@@ -658,6 +754,8 @@ fn launch(instance_port: u16) {
             set_alertas,
             importar_medio_alerta,
             importar_medio_alerta_bytes,
+            importar_medios_alerta,
+            oir_medio,
             borrar_medio_alerta,
             probar_alerta,
             abrir_perfil,

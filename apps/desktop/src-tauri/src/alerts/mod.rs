@@ -58,16 +58,23 @@ pub const ACEPTADOS: &[(&str, &str)] = &[
     ("m4a", "audio/mp4"),
 ];
 
-/// Los cinco avisos que existen.
+/// Los siete avisos que existen.
 ///
 /// El identificador viaja en el JSON y se guarda en los ajustes, asi que **no se
 /// puede renombrar** sin migrar. Las entradas a la sala no estan a proposito: son
 /// el mensaje mas frecuente de TikTok y con una alerta por entrada la cola se
 /// comeria las de los regalos.
+///
+/// Los regalos van **por tramos** —normal, grande y enorme— porque un regalo de
+/// diez diamantes no puede sonar igual que uno de cinco mil: es la diferencia
+/// entre una alerta que acompaña al directo y una que lo interrumpe. Cual de los
+/// tres toca lo decide [`tramo_de_regalo`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TipoAviso {
     Gift,
+    GiftGrande,
+    GiftEnorme,
     Follow,
     Subscribe,
     Share,
@@ -75,18 +82,32 @@ pub enum TipoAviso {
 }
 
 impl TipoAviso {
-    pub const TODOS: [TipoAviso; 5] = [
+    pub const TODOS: [TipoAviso; 7] = [
         TipoAviso::Gift,
+        TipoAviso::GiftGrande,
+        TipoAviso::GiftEnorme,
         TipoAviso::Follow,
         TipoAviso::Subscribe,
         TipoAviso::Share,
         TipoAviso::Like,
     ];
 
+    /// Los tramos de regalo, **de mayor a menor**.
+    ///
+    /// El orden importa y es el que usa [`tramo_de_regalo`]: se mira primero el mas
+    /// alto para que un regalo de cinco mil no se conforme con el tramo normal.
+    pub const TRAMOS_DE_REGALO: [TipoAviso; 3] = [
+        TipoAviso::GiftEnorme,
+        TipoAviso::GiftGrande,
+        TipoAviso::Gift,
+    ];
+
     /// Identificador estable. Es el que va en la URL y en el JSON.
     pub fn id(self) -> &'static str {
         match self {
             TipoAviso::Gift => "gift",
+            TipoAviso::GiftGrande => "gift_grande",
+            TipoAviso::GiftEnorme => "gift_enorme",
             TipoAviso::Follow => "follow",
             TipoAviso::Subscribe => "subscribe",
             TipoAviso::Share => "share",
@@ -98,6 +119,8 @@ impl TipoAviso {
     pub fn desde_id(id: &str) -> Option<TipoAviso> {
         match id {
             "gift" => Some(TipoAviso::Gift),
+            "gift_grande" => Some(TipoAviso::GiftGrande),
+            "gift_enorme" => Some(TipoAviso::GiftEnorme),
             "follow" => Some(TipoAviso::Follow),
             "subscribe" => Some(TipoAviso::Subscribe),
             "share" => Some(TipoAviso::Share),
@@ -111,19 +134,41 @@ impl TipoAviso {
     /// Un follow no tiene cantidad con la que filtrar, asi que ofrecer un minimo
     /// ahi seria un campo que no hace nada.
     pub fn admite_minimo(self) -> bool {
-        matches!(self, TipoAviso::Gift | TipoAviso::Like)
+        matches!(
+            self,
+            TipoAviso::Gift | TipoAviso::GiftGrande | TipoAviso::GiftEnorme | TipoAviso::Like
+        )
     }
 
     /// Los nombres de las variables que esta plantilla puede usar.
     pub fn variables(self) -> &'static [&'static str] {
         match self {
-            TipoAviso::Gift => &["usuario", "regalo", "cantidad", "diamantes"],
+            TipoAviso::Gift | TipoAviso::GiftGrande | TipoAviso::GiftEnorme => {
+                &["usuario", "regalo", "cantidad", "diamantes"]
+            }
             TipoAviso::Follow => &["usuario"],
             TipoAviso::Subscribe => &["usuario", "meses", "meses_texto"],
             TipoAviso::Share => &["usuario"],
             TipoAviso::Like => &["usuario", "likes"],
         }
     }
+}
+
+/// Que tramo de regalo le toca a una aportacion de `diamantes`.
+///
+/// Se recorre [`TipoAviso::TRAMOS_DE_REGALO`] de mayor a menor y gana el primero
+/// que sirva: util —encendido y con algo que enseñar— y con su `minimo` cumplido.
+///
+/// Se **cae al tramo de abajo** cuando el de arriba no sirve, y eso es a
+/// proposito: apagar el aviso de los regalos enormes no puede significar que un
+/// leon entre sin ninguna alerta. Lo que si se respeta es el minimo del tramo al
+/// que se cae, asi que una racha por debajo del minimo del normal sigue sin
+/// sonar, que es como estaba.
+pub fn tramo_de_regalo(ajustes: &AjustesAlertas, diamantes: i64) -> Option<TipoAviso> {
+    TipoAviso::TRAMOS_DE_REGALO.into_iter().find(|tramo| {
+        let ajuste = ajustes.de(*tramo);
+        ajuste.util() && diamantes >= ajuste.minimo
+    })
 }
 
 /// Lo que se puede configurar de un tipo de aviso.
@@ -199,13 +244,21 @@ impl SalidaAlertas {
     }
 }
 
-/// Los cinco ajustes, uno por tipo, mas por donde se oyen aqui.
+/// Los siete ajustes, uno por tipo, mas por donde se oyen aqui.
 ///
 /// Campos con nombre y no un mapa: asi el JSON es estable, el compilador obliga a
-/// rellenar los cinco y un tipo nuevo no se olvida en silencio.
+/// rellenar los siete y un tipo nuevo no se olvida en silencio.
+///
+/// Los dos tramos de regalo nuevos llevan `#[serde(default)]` para que los ajustes
+/// guardados **antes** de que existieran sigan cargando: un perfil de la version
+/// anterior no tiene esas claves y sin el `default` no abriria.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AjustesAlertas {
     pub gift: AjusteAviso,
+    #[serde(default = "tramo_grande_de_fabrica")]
+    pub gift_grande: AjusteAviso,
+    #[serde(default = "tramo_enorme_de_fabrica")]
+    pub gift_enorme: AjusteAviso,
     pub follow: AjusteAviso,
     pub subscribe: AjusteAviso,
     pub share: AjusteAviso,
@@ -220,6 +273,8 @@ impl AjustesAlertas {
     pub fn de(&self, tipo: TipoAviso) -> &AjusteAviso {
         match tipo {
             TipoAviso::Gift => &self.gift,
+            TipoAviso::GiftGrande => &self.gift_grande,
+            TipoAviso::GiftEnorme => &self.gift_enorme,
             TipoAviso::Follow => &self.follow,
             TipoAviso::Subscribe => &self.subscribe,
             TipoAviso::Share => &self.share,
@@ -230,6 +285,8 @@ impl AjustesAlertas {
     pub fn de_mut(&mut self, tipo: TipoAviso) -> &mut AjusteAviso {
         match tipo {
             TipoAviso::Gift => &mut self.gift,
+            TipoAviso::GiftGrande => &mut self.gift_grande,
+            TipoAviso::GiftEnorme => &mut self.gift_enorme,
             TipoAviso::Follow => &mut self.follow,
             TipoAviso::Subscribe => &mut self.subscribe,
             TipoAviso::Share => &mut self.share,
@@ -240,24 +297,30 @@ impl AjustesAlertas {
     /// Los tres primeros vienen encendidos: son los que el streamer espera ver sin
     /// tener que configurar nada. Compartidos y likes, apagados: un share sale
     /// poco y una rafaga de likes puede ser constante.
+    ///
+    /// Los siete traen sonido y texto, para que un directo recien instalado suene
+    /// sin tocar nada. Los sonidos son **del proyecto**: los genera
+    /// `scripts/generar-sonidos.mjs` y viajan dentro del ejecutable.
     pub fn de_fabrica() -> Self {
         Self {
             gift: AjusteAviso {
                 activo: true,
                 texto: "{usuario} donó {regalo} ×{cantidad}".to_string(),
                 medio: String::new(),
-                sonido: String::new(),
+                sonido: pack::CAMPANA_SUAVE.to_string(),
                 duracion_ms: 5000,
                 volumen: 0.8,
                 // Con una rosa no salta: en un directo movido, cada rosa es una
                 // alerta y el aviso del regalo grande se pierde entre ellas.
                 minimo: 10,
             },
+            gift_grande: tramo_grande_de_fabrica(),
+            gift_enorme: tramo_enorme_de_fabrica(),
             follow: AjusteAviso {
                 activo: true,
                 texto: "{usuario} te sigue".to_string(),
                 medio: String::new(),
-                sonido: String::new(),
+                sonido: pack::SUBIDA.to_string(),
                 duracion_ms: 4000,
                 volumen: 0.8,
                 minimo: 0,
@@ -266,7 +329,7 @@ impl AjustesAlertas {
                 activo: true,
                 texto: "{usuario} se suscribió ({meses_texto})".to_string(),
                 medio: String::new(),
-                sonido: String::new(),
+                sonido: pack::FANFARRIA.to_string(),
                 duracion_ms: 5000,
                 volumen: 0.8,
                 minimo: 0,
@@ -275,22 +338,56 @@ impl AjustesAlertas {
                 activo: false,
                 texto: "{usuario} compartió el directo".to_string(),
                 medio: String::new(),
-                sonido: String::new(),
+                sonido: pack::TOQUE.to_string(),
                 duracion_ms: 4000,
-                volumen: 0.8,
+                volumen: 0.75,
                 minimo: 0,
             },
             like: AjusteAviso {
                 activo: false,
                 texto: "{usuario} +{likes} likes".to_string(),
                 medio: String::new(),
-                sonido: String::new(),
+                sonido: pack::PIZCA.to_string(),
                 duracion_ms: 3500,
                 volumen: 0.6,
                 minimo: 50,
             },
             salida: SalidaAlertas::default(),
         }
+    }
+}
+
+/// El tramo grande de fabrica.
+///
+/// Es una funcion y no un literal repetido porque la usan **dos** sitios: los
+/// ajustes de fabrica y el `#[serde(default)]` de `AjustesAlertas`, que es el que
+/// rellena el hueco de un perfil guardado antes de que este tramo existiera. Con
+/// el valor escrito dos veces, un dia se cambiaria uno y no el otro.
+fn tramo_grande_de_fabrica() -> AjusteAviso {
+    AjusteAviso {
+        activo: true,
+        texto: "{usuario} suelta {regalo} ×{cantidad}".to_string(),
+        medio: String::new(),
+        sonido: pack::CAMPANA_BRILLANTE.to_string(),
+        duracion_ms: 6000,
+        volumen: 0.85,
+        // Cien diamantes es el terreno de las gafas de sol y los corazones con las
+        // manos: regalos que ya se notan, pero que no son el momento del directo.
+        minimo: 100,
+    }
+}
+
+/// El tramo enorme de fabrica. Mismo motivo que el grande para ser funcion.
+fn tramo_enorme_de_fabrica() -> AjusteAviso {
+    AjusteAviso {
+        activo: true,
+        texto: "¡{usuario} va en serio! {regalo} ×{cantidad}".to_string(),
+        medio: String::new(),
+        sonido: pack::REDOBLE.to_string(),
+        duracion_ms: 8000,
+        volumen: 0.9,
+        // Mil diamantes es una galaxia. Si esto entra, el directo para.
+        minimo: 1000,
     }
 }
 
@@ -501,6 +598,22 @@ impl Aviso {
     }
 }
 
+/// Los nombres del pack de sonidos que trae la aplicacion.
+///
+/// Estan aqui, en un solo sitio, porque los usan **dos**: los ajustes de fabrica
+/// —que apuntan a ellos— y la siembra del almacen —que los escribe—. Con el nombre
+/// escrito en los dos lados, un dia se cambiaria uno y el aviso quedaria mudo sin
+/// que nada fallara.
+pub mod pack {
+    pub const CAMPANA_SUAVE: &str = "campana-suave.wav";
+    pub const CAMPANA_BRILLANTE: &str = "campana-brillante.wav";
+    pub const REDOBLE: &str = "redoble.wav";
+    pub const SUBIDA: &str = "subida.wav";
+    pub const FANFARRIA: &str = "fanfarria.wav";
+    pub const TOQUE: &str = "toque.wav";
+    pub const PIZCA: &str = "pizca.wav";
+}
+
 /// El almacen de medios: lo que el streamer ha cargado, copiado a nuestra carpeta.
 ///
 /// Lleva la carpeta dentro y no la consulta al entorno en cada llamada: los tests
@@ -510,6 +623,32 @@ impl Aviso {
 pub struct Almacen {
     dir: PathBuf,
 }
+
+/// Los sonidos que van **dentro del ejecutable**.
+///
+/// Son propios: los sintetiza `scripts/generar-sonidos.mjs` y se versionan en
+/// `src-tauri/sonidos/`. Van embebidos y no repartidos al lado porque la release
+/// son dos ficheros y no tiene por que pasar a ser nueve: una carpeta de assets
+/// que se queda a medias al copiar es justo el fallo que ya costo una tarde con el
+/// motor de voz.
+const PACK: &[(&str, &[u8])] = &[
+    (
+        pack::CAMPANA_SUAVE,
+        include_bytes!("../../sonidos/campana-suave.wav"),
+    ),
+    (
+        pack::CAMPANA_BRILLANTE,
+        include_bytes!("../../sonidos/campana-brillante.wav"),
+    ),
+    (pack::REDOBLE, include_bytes!("../../sonidos/redoble.wav")),
+    (pack::SUBIDA, include_bytes!("../../sonidos/subida.wav")),
+    (
+        pack::FANFARRIA,
+        include_bytes!("../../sonidos/fanfarria.wav"),
+    ),
+    (pack::TOQUE, include_bytes!("../../sonidos/toque.wav")),
+    (pack::PIZCA, include_bytes!("../../sonidos/pizca.wav")),
+];
 
 impl Almacen {
     /// El almacen de verdad: junto a la base y los logs.
@@ -524,6 +663,37 @@ impl Almacen {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Escribe en el almacen los sonidos del pack que **falten**.
+    ///
+    /// Devuelve cuantos ha escrito. No pisa nada: si ya hay un fichero con ese
+    /// nombre se respeta, porque puede ser uno que el streamer haya puesto en su
+    /// sitio a proposito. Es idempotente —la segunda pasada escribe cero— y por eso
+    /// se puede llamar en cada arranque sin miedo.
+    ///
+    /// Se llama al abrir la aplicacion y **no** en el camino de una alerta: escribir
+    /// siete ficheros no puede estar entre un regalo y su aviso.
+    pub fn sembrar_pack(&self) -> usize {
+        if std::fs::create_dir_all(&self.dir).is_err() {
+            return 0;
+        }
+        let mut escritos = 0;
+        for (nombre, bytes) in PACK {
+            let destino = self.dir.join(nombre);
+            if destino.exists() {
+                continue;
+            }
+            match std::fs::write(&destino, bytes) {
+                Ok(()) => escritos += 1,
+                // Un fichero que no se puede escribir no puede tumbar el arranque:
+                // los avisos funcionan igual, sin ese sonido.
+                Err(error) => {
+                    tracing::warn!(fichero = nombre, %error, "no se pudo sembrar un sonido del pack")
+                }
+            }
+        }
+        escritos
     }
 
     /// El tipo MIME de un fichero del almacen, por su extension.
@@ -878,6 +1048,236 @@ mod tests {
             std::process::id()
         ));
         (Almacen::en(dir.clone()), dir)
+    }
+
+    /// El tramo que le toca a un regalo, por lo que vale.
+    ///
+    /// Es la regla que decide si un leon suena distinto que una rosa, asi que se
+    /// prueba entera: los tres tramos, el limite exacto de cada uno, el regalo que
+    /// no llega al minimo y el tramo apagado.
+    #[test]
+    fn el_regalo_elige_su_tramo_por_diamantes() {
+        let ajustes = AjustesAlertas::de_fabrica();
+
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 5_000),
+            Some(TipoAviso::GiftEnorme)
+        );
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 1_000),
+            Some(TipoAviso::GiftEnorme),
+            "el minimo entra: mil es el limite, no el primer numero que se queda fuera"
+        );
+        assert_eq!(tramo_de_regalo(&ajustes, 999), Some(TipoAviso::GiftGrande));
+        assert_eq!(tramo_de_regalo(&ajustes, 100), Some(TipoAviso::GiftGrande));
+        assert_eq!(tramo_de_regalo(&ajustes, 99), Some(TipoAviso::Gift));
+        assert_eq!(tramo_de_regalo(&ajustes, 10), Some(TipoAviso::Gift));
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 9),
+            None,
+            "por debajo del minimo del tramo mas bajo no hay aviso, como con una rosa"
+        );
+    }
+
+    /// Apagar un tramo no puede dejar al regalo sin ninguna alerta.
+    ///
+    /// Es la decision que hace que esto sirva en un directo: si el streamer apaga
+    /// el aviso de los regalos enormes —porque le corta el ritmo, porque esta
+    /// cansado de la fanfarria—, un leon tiene que seguir entrando por el tramo de
+    /// abajo. Lo que si se respeta es el minimo del tramo al que se cae.
+    #[test]
+    fn apagar_un_tramo_cae_al_de_abajo() {
+        let mut ajustes = AjustesAlertas::de_fabrica();
+        ajustes.gift_enorme.activo = false;
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 5_000),
+            Some(TipoAviso::GiftGrande),
+            "el enorme apagado no puede tragarse el aviso de un regalo de cinco mil"
+        );
+
+        ajustes.gift_grande.activo = false;
+        assert_eq!(tramo_de_regalo(&ajustes, 5_000), Some(TipoAviso::Gift));
+    }
+
+    /// Un tramo sin nada que enseñar es como si estuviera apagado.
+    ///
+    /// `util()` es lo que mira el motor para decidir si un aviso sale, y un tramo
+    /// con el texto en blanco y sin medio no se puede pintar: tiene que caer al de
+    /// abajo igual que si estuviera apagado.
+    #[test]
+    fn un_tramo_vacio_cae_al_de_abajo() {
+        let mut ajustes = AjustesAlertas::de_fabrica();
+        ajustes.gift_enorme.texto = "   ".to_string();
+        ajustes.gift_enorme.medio = String::new();
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 5_000),
+            Some(TipoAviso::GiftGrande)
+        );
+    }
+
+    /// Con los tres tramos apagados, un regalo no dispara nada.
+    #[test]
+    fn sin_tramos_no_hay_aviso() {
+        let mut ajustes = AjustesAlertas::de_fabrica();
+        for tramo in TipoAviso::TRAMOS_DE_REGALO {
+            ajustes.de_mut(tramo).activo = false;
+        }
+        assert_eq!(tramo_de_regalo(&ajustes, 5_000), None);
+    }
+
+    /// Los ajustes guardados **antes** de que existieran los tramos siguen cargando.
+    ///
+    /// Es el perfil de la version anterior: cinco avisos y ningun `gift_grande`. Si
+    /// el `#[serde(default)]` faltara, la aplicacion no abriria para quien ya la
+    /// tenia puesta, que es el peor fallo posible de una actualizacion.
+    #[test]
+    fn un_perfil_de_la_version_anterior_carga_con_los_tramos_de_fabrica() {
+        let viejo = r#"{
+            "gift": {"activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7},
+            "follow": {"activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7},
+            "subscribe": {"activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7},
+            "share": {"activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7},
+            "like": {"activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7}
+        }"#;
+        let ajustes: AjustesAlertas = serde_json::from_str(viejo).expect("tiene que cargar");
+        assert_eq!(
+            ajustes.gift_grande,
+            tramo_grande_de_fabrica(),
+            "el tramo que no estaba entra con los valores de fabrica"
+        );
+        assert_eq!(ajustes.gift_enorme, tramo_enorme_de_fabrica());
+        assert_eq!(
+            tramo_de_regalo(&ajustes, 5_000),
+            Some(TipoAviso::GiftEnorme),
+            "y los tramos funcionan sin que el streamer toque nada"
+        );
+    }
+
+    /// Los siete avisos de fabrica traen sonido, y ese sonido esta en el pack.
+    ///
+    /// Sin esto, un nombre mal escrito en `de_fabrica` no lo cazaria nadie: el
+    /// aviso saldria sin sonido y no habria un solo error en ningun sitio.
+    #[test]
+    fn los_avisos_de_fabrica_suenan_y_su_sonido_existe() {
+        let ajustes = AjustesAlertas::de_fabrica();
+        let nombres: Vec<&str> = PACK.iter().map(|(nombre, _)| *nombre).collect();
+
+        for tipo in TipoAviso::TODOS {
+            let ajuste = ajustes.de(tipo);
+            assert!(
+                !ajuste.sonido.is_empty(),
+                "el aviso {} viene sin sonido",
+                tipo.id()
+            );
+            assert!(
+                nombres.contains(&ajuste.sonido.as_str()),
+                "el aviso {} apunta a «{}», que no esta en el pack",
+                tipo.id(),
+                ajuste.sonido
+            );
+        }
+
+        // Los cinco que vienen encendidos tienen que poder salir tal cual, sin que
+        // el streamer toque nada.
+        for tipo in [
+            TipoAviso::Gift,
+            TipoAviso::GiftGrande,
+            TipoAviso::GiftEnorme,
+            TipoAviso::Follow,
+            TipoAviso::Subscribe,
+        ] {
+            assert!(ajustes.de(tipo).util(), "el aviso {} no sale", tipo.id());
+        }
+
+        // Y los dos que vienen apagados lo estan a proposito: un share sale poco y
+        // una rafaga de likes puede ser constante. Se comprueba para que nadie los
+        // encienda «arreglando» el test sin pensar en el directo.
+        for tipo in [TipoAviso::Share, TipoAviso::Like] {
+            assert!(
+                !ajustes.de(tipo).activo,
+                "el aviso {} viene apagado",
+                tipo.id()
+            );
+        }
+    }
+
+    /// El pack: siete WAV que se pueden reproducir y que **no son silencio**.
+    ///
+    /// Un fichero de ceros pasa todas las demas comprobaciones y no suena. Es el
+    /// fallo que no se ve en una captura ni en un test de tipos, asi que se mira la
+    /// onda: que haya muestras distintas y que el pico sea de verdad.
+    #[test]
+    fn el_pack_son_wav_con_contenido() {
+        assert_eq!(PACK.len(), 7, "el pack son siete sonidos");
+
+        for (nombre, bytes) in PACK {
+            assert!(bytes.len() > 44, "{nombre} no tiene ni cabecera");
+            assert_eq!(&bytes[0..4], b"RIFF", "{nombre} no es un RIFF");
+            assert_eq!(&bytes[8..12], b"WAVE", "{nombre} no es un WAVE");
+            assert_eq!(&bytes[36..40], b"data", "{nombre} no trae bloque de datos");
+
+            // La cabecera que escribe el generador: PCM, mono, 16 bits, 44,1 kHz.
+            assert_eq!(u16::from_le_bytes([bytes[20], bytes[21]]), 1, "PCM");
+            assert_eq!(u16::from_le_bytes([bytes[22], bytes[23]]), 1, "mono");
+            assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 16, "16 bits");
+            let hz = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+            assert_eq!(hz, 44_100, "{nombre} no esta a 44,1 kHz");
+
+            let muestras = (bytes.len() - 44) / 2;
+            let segundos = muestras as f64 / hz as f64;
+            assert!(
+                (0.1..=1.5).contains(&segundos),
+                "{nombre} dura {segundos:.2} s: un aviso es corto o no es un aviso"
+            );
+
+            let mut pico: i32 = 0;
+            let mut distintos = std::collections::HashSet::new();
+            for i in 0..muestras {
+                let v = i16::from_le_bytes([bytes[44 + i * 2], bytes[45 + i * 2]]) as i32;
+                pico = pico.max(v.abs());
+                // Solo unos cuantos: con contar los de cada mil muestras basta para
+                // distinguir una onda de una ristra de ceros.
+                if i % 101 == 0 {
+                    distintos.insert(v);
+                }
+            }
+            assert!(pico > 3_000, "{nombre} suena a nada: pico {pico}");
+            assert!(
+                pico <= 32_767,
+                "{nombre} recorta: un pico a tope suena a chasquido"
+            );
+            assert!(
+                distintos.len() > 20,
+                "{nombre} es un tono plano o silencio: {} valores distintos",
+                distintos.len()
+            );
+        }
+    }
+
+    /// El pack se siembra una vez y **no pisa** lo que ya hay.
+    ///
+    /// Que no pise es lo que permite llamarlo en cada arranque: si el streamer ha
+    /// puesto su propio `campana-suave.wav` —o ha retocado el nuestro—, la
+    /// aplicacion no se lo puede cambiar por debajo.
+    #[test]
+    fn el_pack_se_siembra_y_no_pisa_nada() {
+        let (almacen, dir) = almacen_de_prueba("pack");
+
+        assert_eq!(almacen.listar().len(), 0, "la carpeta nace vacia");
+        assert_eq!(almacen.sembrar_pack(), PACK.len(), "la primera vez, todos");
+        assert_eq!(almacen.listar().len(), PACK.len());
+
+        // La segunda pasada no escribe nada: es lo que lo hace seguro en cada
+        // arranque.
+        assert_eq!(almacen.sembrar_pack(), 0, "la segunda vez, ninguno");
+
+        // Y uno propio con el mismo nombre se respeta.
+        let mio = dir.join(pack::PIZCA);
+        std::fs::write(&mio, b"lo mio").unwrap();
+        assert_eq!(almacen.sembrar_pack(), 0);
+        assert_eq!(std::fs::read(&mio).unwrap(), b"lo mio", "no se pisa");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// El recorrido entero del almacen: importar, listar, encontrar y borrar.

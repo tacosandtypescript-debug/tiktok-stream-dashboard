@@ -2167,6 +2167,15 @@ footer.stats {
   list-style: none;
   margin: var(--sp-3) 0 0;
   padding: 0;
+  /* La lista de medios **tambien** se desplaza por dentro, y aqui hacia mas falta:
+     no tiene tope de ninguna clase, y con los nueve ficheros del pack mas los que
+     traiga el streamer se pasaba 292 px y recortaba ocho nombres. El marco no se
+     toca nunca; el que cede es el contenido. */
+  min-height: 0;
+  overflow-y: auto;
+  /* Y se queda con el alto que sobra: la zona de soltar y la frase de ayuda no se
+     encogen, y la lista no tiene por que hacerlo mientras haya sitio. */
+  flex: 1 1 auto;
 }
 
 .medios li {
@@ -2178,12 +2187,77 @@ footer.stats {
   padding: var(--sp-2) 0;
 }
 
+/*
+ * La miniatura, **24 px**: lo justo para reconocer un GIF de un vistazo sin que la
+ * fila crezca. La lista de medios puede tener cuarenta ficheros y la página mide lo
+ * que mide; una miniatura de 64 px convertiría el panel en una galería que hay que
+ * desplazar.
+ */
+.medio-mini {
+  border-radius: 4px;
+  flex: 0 0 auto;
+  height: 24px;
+  object-fit: cover;
+  width: 24px;
+}
+
+/* Lo que no se puede pintar en pequeño lleva un rótulo: así un sonido no se
+   confunde con un vídeo sin miniatura.
+ *
+ * Crece con la palabra en vez de quedarse en 24 px: «Suena» e «Imagen» no caben en
+ * el ancho de la miniatura, y recortarlas dejaba nueve textos cortados —uno por
+ * fila— y una etiqueta que no se podía leer. El alto sí se fija, para que la fila
+ * del sonido mida lo mismo que la de la imagen. */
+.medio-icono {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 9px;
+  height: 24px;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.medio-icono.suena {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .medio-nombre {
   font-size: 12px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Los que no entraron al importar una carpeta, uno por línea y con su motivo. */
+.fallos {
+  color: var(--warn);
+  font-size: 11px;
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  max-height: 72px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Un campo con un botón al lado: el selector de sonido y su «Oír». */
+.campo-fila {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.campo-fila select {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Un campo de formulario con su rótulo encima. El `min-width: 0` es lo que deja
@@ -2274,6 +2348,13 @@ footer.stats {
   min-height: 0;
 }
 
+/* La tarjeta de los medios, tambien en columna: la lista tiene que poder encogerse
+   dentro y quedarse con lo que sobre, que es lo que le da el alto. */
+.alertas-panel > .card:last-child {
+  display: flex;
+  flex-direction: column;
+}
+
 /* La pagina: el aviso de arriba a todo el ancho, la fila de tres columnas en medio
  * —que es la que se lleva el alto que sobra— y la salida de audio y la direccion de
  * OBS repartidas en las dos columnas de la ultima fila.
@@ -2300,14 +2381,34 @@ footer.stats {
 
 /* Los dos grupos de avisos, **dentro** de la tarjeta que los contiene. Aqui el aire
    sigue separando lectura continua y no lleva caja: los dos grupos son la misma
-   lista de cinco avisos partida en dos rotulos, no dos paneles. La caja la pone la
-   tarjeta de fuera, una sola vez. */
+   lista de avisos partida en dos rotulos, no dos paneles. La caja la pone la
+   tarjeta de fuera, una sola vez.
+ *
+ * Se desplaza **por dentro**, y eso es nuevo: con los cinco avisos de antes cabia
+ * justo, pero los tramos de regalo lo dejaron en siete y la columna mide 379 px.
+ * Medido con el banco, la lista se pasaba 24 px y el marco los recortaba en
+ * silencio. Es la misma excepcion que el chat de Inicio: una lista que crece se
+ * desplaza ella, nunca la pagina.
+ *
+ * La tarjeta pasa a columna flexible para que la lista —y no el marco— sea lo que
+ * cede cuando no cabe. */
+.alertas-panel > .card:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
 .grupos-avisos {
   display: grid;
-  gap: var(--sp-4);
+  /* Un escalon menos de aire entre los dos grupos de lo que pedia con cinco avisos:
+     con los siete —los tres tramos de regalo mas los cuatro de siempre— la columna
+     se pasaba 24 px y el septimo quedaba detras de la barra. Apretar aqui, que es
+     aire, es mejor que dejar un aviso que no se ve. */
+  gap: var(--sp-2);
   /* Aire de sobra bajo la frase de ayuda: el rotulo del primer grupo es un
      encabezado, no la ultima linea de la frase. */
-  margin-top: var(--sp-3);
+  margin-top: var(--sp-2);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* El rotulo de grupo es del mismo material que el de una seccion —mayusculas,
@@ -2318,7 +2419,7 @@ footer.stats {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.11em;
-  margin: 0 0 var(--sp-2);
+  margin: 0 0 var(--sp-1);
   text-transform: uppercase;
 }
 

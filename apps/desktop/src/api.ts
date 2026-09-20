@@ -218,9 +218,13 @@ export interface SalidaAlertas {
   en_directo: boolean;
 }
 
-/** Los cinco avisos, por identificador, más por dónde se oyen aquí. */
+/** Los siete avisos, por identificador, más por dónde se oyen aquí. */
 export interface AjustesAlertas {
   gift: AjusteAviso;
+  /** Tramo medio. El `minimo` decide dónde empieza. */
+  gift_grande: AjusteAviso;
+  /** Tramo alto. */
+  gift_enorme: AjusteAviso;
   follow: AjusteAviso;
   subscribe: AjusteAviso;
   share: AjusteAviso;
@@ -236,7 +240,14 @@ export interface AjustesAlertas {
  * pediría texto y medio para un ajuste que no es un aviso. El compilador no se
  * queja de eso, y en pantalla se vería como una tarjeta de más, vacía.
  */
-export type TipoAviso = "gift" | "follow" | "subscribe" | "share" | "like";
+export type TipoAviso =
+  | "gift"
+  | "gift_grande"
+  | "gift_enorme"
+  | "follow"
+  | "subscribe"
+  | "share"
+  | "like";
 
 /**
  * Los tipos, en el orden en que se enseñan.
@@ -244,7 +255,15 @@ export type TipoAviso = "gift" | "follow" | "subscribe" | "share" | "like";
  * Vive aquí y no en la página porque los identificadores los fija Rust: si
  * mañana hay uno nuevo, el compilador avisa en los dos sitios.
  */
-export const TIPOS_AVISO: TipoAviso[] = ["gift", "follow", "subscribe", "share", "like"];
+export const TIPOS_AVISO: TipoAviso[] = [
+  "gift",
+  "gift_grande",
+  "gift_enorme",
+  "follow",
+  "subscribe",
+  "share",
+  "like",
+];
 
 /**
  * Un diseño del overlay: su identificador y dónde se puede elegir.
@@ -283,9 +302,21 @@ export interface Metrics {
   db_critical_dropped: number;
 }
 
+/**
+ * Lo que salió de importar varios medios de golpe.
+ *
+ * `fallos` lleva el motivo ya escrito, uno por fichero, con su ruta: en una
+ * carpeta siempre hay algo que no vale, y saber **cuál** es lo que evita tener que
+ * probarlos de uno en uno para encontrarlo.
+ */
+export interface ImportacionMedios {
+  importados: number;
+  fallos: string[];
+  snapshot: Snapshot;
+}
+
 export interface Snapshot {
-  protocol_version: number;
-  provider: string;
+  protocol_version: number;  provider: string;
   status: string;
   status_detail: string | null;
   handle: string;
@@ -729,11 +760,27 @@ export const api = {
   importarMedioAlertaBytes: (nombre: string, bytes: number[]) =>
     invoke<Snapshot>("importar_medio_alerta_bytes", { nombre, bytes }),
 
+  /**
+   * Copia **varios** ficheros de una vez.
+   *
+   * Un fichero que no vale no tira los demás: devuelve cuántos entraron y qué
+   * falló en cada uno, y eso se enseña.
+   */
+  importarMediosAlerta: (rutas: string[]) =>
+    invoke<ImportacionMedios>("importar_medios_alerta", { rutas }),
+
   borrarMedioAlerta: (nombre: string) =>
     invoke<Snapshot>("borrar_medio_alerta", { nombre }),
 
   /** Encola un aviso de prueba para verlo en OBS sin esperar a que pase algo. */
   probarAlerta: (tipo: string) => invoke<Snapshot>("probar_alerta", { tipo }),
+
+  /**
+   * Suena un medio en el monitor del streamer, sin encolar ningún aviso.
+   *
+   * Es el botón de oír: una lista de nombres no dice cómo suena nada.
+   */
+  oirMedio: (nombre: string) => invoke<void>("oir_medio", { nombre }),
 
   /**
    * Abre el perfil de TikTok de una persona en el navegador.

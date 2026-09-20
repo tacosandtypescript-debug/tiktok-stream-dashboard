@@ -399,8 +399,9 @@ Lo que en StreamElements o StreamLabs se llama *alert box*: cuando alguien regal
 
 | Pieza | Decision |
 |---|---|
-| Disparadores | cinco. **No** las entradas a la sala: es el mensaje mas frecuente de TikTok y la cola se comeria las alertas de los regalos, que son las que importan |
+| Disparadores | **siete**: los tres tramos de regalo y los cuatro de siempre. **No** las entradas a la sala: es el mensaje mas frecuente de TikTok y la cola se comeria las alertas de los regalos, que son las que importan |
 | Regalos | disparan **al cerrar la racha**, y con la aportacion comprometida, no con el ultimo incremento. Uno por rosa seria una alerta cada pocos segundos |
+| Tramos | normal, grande y enorme, con el `minimo` de cada uno como frontera. Un regalo de diez diamantes no puede sonar igual que uno de cinco mil |
 | Texto | plantilla con variables (`{usuario}`, `{regalo}`, `{cantidad}`…) **rellenada en Rust**: el overlay solo pinta. Es el mismo criterio que las frases del lector de voz |
 | Medio | se **copia** a `%LOCALAPPDATA%\…\alertas\` y lo sirve el servidor de overlays con token. Una ruta del escritorio se rompe en cuanto se mueve el fichero, y entonces en OBS sale un hueco |
 | Sonido | el del propio fichero de la alerta. **No se toca el lector de voz**: es otra cosa y se configura en otro sitio |
@@ -410,6 +411,20 @@ Lo que en StreamElements o StreamLabs se llama *alert box*: cuando alguien regal
 **Los medios los sirve la aplicacion, no el disco del streamer.** Se aceptan doce formatos (lista blanca, no lista negra), con tope de 48 MB, y el nombre final lo pone el almacen: se limpia el que venga y se le añade un numero si ya existe. El nombre viaja en la URL, asi que `ruta_de` rechaza `/`, `\`, `..` y lo que empiece por punto; sin eso, `/media/../../base.db` seria una lectura arbitraria.
 
 **Los ajustes se sanean al guardar.** Duracion entre 0,5 y 60 s, volumen entre 0 y 1, texto de 200 caracteres, minimo nunca negativo y solo donde tiene sentido (un follow no trae cantidad con la que filtrar). El motor no se fia del renderer: un `duracion_ms` de un millon dejaria la fuente de OBS ocupada durante horas.
+
+### D23 · Los tramos de regalo y los sonidos propios (2026-09-19)
+
+**Los regalos van por tramos** (normal, grande y enorme), y el tramo lo elige el motor en `alerts::tramo_de_regalo`, no quien llama: cual de los tres toca es politica de las alertas y vive con ellas. Los umbrales son el `minimo` que cada aviso ya tenia —100 y 1.000 diamantes de fabrica—, asi que **no hizo falta ni un campo nuevo**.
+
+Se recorre la lista **de mayor a menor** y gana el primero que sirva. Si el tramo de arriba esta apagado o sin nada que enseñar, **se cae al de abajo**: apagar el aviso de los regalos enormes no puede significar que un leon entre sin ninguna alerta. Lo que si se respeta es el minimo del tramo al que se cae, asi que una racha por debajo del minimo del normal sigue sin sonar, igual que antes.
+
+**Los sonidos de fabrica son del proyecto.** Los sintetiza `scripts/generar-sonidos.mjs` —Node pelado, sin dependencias: un WAV PCM es una cabecera de 44 bytes y aritmetica— y se versionan en `src-tauri/sonidos/`. Van **dentro del ejecutable** con `include_bytes!` y el almacen los siembra al arrancar, sin pisar lo que ya haya.
+
+El motivo de hacerlos en vez de traerlos es concreto: los bancos de sonidos de internet son en su mayoria clips con dueño, y este proyecto **publica releases publicas**. Repartirlos seria redistribuir material ajeno. Y los de myinstants, ademas, no se pueden ni leer: el dominio entero responde **403 de Cloudflare** al acceso automatico, incluido su `robots.txt`.
+
+Quien quiera sus propios memes los baja en su navegador y los **suelta en la ventana** —ficheros o la carpeta entera—: el importador en lote recorre el mismo camino validado que el de a uno, con la misma lista blanca. Nada de eso sale del equipo ni acaba en la release.
+
+**Los siete avisos de fabrica traen sonido y texto**, para que un directo recien instalado suene sin tocar nada. Los cinco que el streamer espera ver vienen encendidos; compartidos y likes siguen apagados por el motivo de siempre.
 
 ### El fallo que aparecio, y es el peor de los que han salido
 

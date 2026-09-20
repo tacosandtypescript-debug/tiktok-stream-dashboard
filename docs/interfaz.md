@@ -102,14 +102,27 @@ de siempre se ven iguales.
 ### Alertas — ensena todo a la vez y no ensena el resultado
 Hoy: cinco formularios identicos apilados (27 campos) y el texto se escribe a ciegas.
 
-- **Lista a la izquierda, editor a la derecha.** Los cinco avisos con su interruptor,
-  y solo se abre el que se toca.
+- **Lista a la izquierda, editor a la derecha.** Los avisos con su interruptor, y solo se
+  abre el que se toca. Hecho.
 - **Previa en vivo arriba del editor.** Ya esta la maquina: la pagina de alertas es una
   pagina real y la pestana Overlays ya enmarca cosas en una previa. Es el mismo patron.
 - **El texto se lee mientras se escribe**, con un ejemplo: `Juan dono Rosa ×5`.
-- **Los medios por miniatura y el sonido con un boton de oir.** Hoy son nombres de
-  fichero.
+- **Los medios por miniatura y el sonido con un boton de oir.** Hecho: la miniatura a
+  24 px —lo justo para reconocer un GIF sin que la fila crezca—, un rotulo para lo que
+  solo suena o es video, y **Oir** en la lista y junto al selector. Una lista de nombres no
+  dice como suena nada, y hasta ahora habia que probar la alerta entera para averiguarlo.
 - **La direccion de OBS se muda a Overlays.** Es una direccion, como las otras tres.
+
+### Los tramos de regalo
+
+Un regalo de diez diamantes y uno de cinco mil no pueden sonar igual: son **tres avisos**
+—normal, grande y enorme— con su texto, su sonido y su duracion, y el tramo lo elige el
+motor por los diamantes. El campo «Minimo» de cada uno **es la frontera**, no un filtro:
+por debajo de él el regalo cae al tramo de abajo. El rotulo lo dice asi, porque «solo a
+partir de» suena a descarte y no lo es.
+
+Es lo que hace que una alerta acompañe al directo en vez de interrumpirlo: lo pequeño
+pasa discreto y lo grande para todo.
 
 ### Voz — mezcla lo que se configura con lo que esta pasando
 Hoy: ocho tarjetas, y la mitad son diagnostico.
@@ -171,10 +184,16 @@ página**:
 | Voz | la cabecera a todo el ancho, **dos vistas** y tres columnas de paneles en cada una |
 | Desarrollador | las métricas en tres columnas, y dos filas de cuatro y de dos paneles |
 
-Dos listas **sí** se desplazan por dentro, y es a propósito: el **chat** de Inicio y el
-**flujo de últimos regalos**. Son registros que crecen sin tope; un panel de 300 px no
-puede enseñar cien regalos, y recortarlos sin más sería mentir. Lo que no se desplaza
-nunca es la página.
+Tres listas **sí** se desplazan por dentro, y es a propósito: el **chat** de Inicio, el
+**flujo de últimos regalos** y los **medios cargados** de Alertas. Son registros que crecen
+sin tope; un panel de 300 px no puede enseñar cien regalos, y recortarlos sin más sería
+mentir. Lo que no se desplaza nunca es la página.
+
+La lista de **avisos** estuvo a punto de ser la cuarta: al pasar de cinco avisos a siete
+—los tres tramos de regalo— se pasaba 24 px y el marco recortaba el séptimo en silencio.
+En vez de dejarla desplazándose se apretó el aire entre los dos grupos, que es aire y no
+contenido, y los siete entran enteros. El desplazamiento se quedó puesto por si alguien
+llega a más, pero hoy no hace falta.
 
 Cuando un panel no cabe, el que cede es su contenido y **nunca** el marco: `.card` lleva
 `overflow: hidden` para que las esquinas redondeadas no las pise una fila con fondo, y

@@ -700,8 +700,10 @@ impl AppState {
                 // —la misma que va al historico— para que el aviso diga lo que de
                 // verdad se ha donado y no el ultimo incremento.
                 if gift.commits() {
-                    self.disparar_alerta(
-                        crate::alerts::TipoAviso::Gift,
+                    // El tramo lo elige el motor por los diamantes, no quien llama:
+                    // cual de los tres avisos toca es politica de las alertas y vive
+                    // con ellas, en `alerts`.
+                    self.disparar_alerta_de_regalo(
                         crate::alerts::Variables {
                             usuario: crate::alerts::nombre_de(user),
                             regalo: if gift.name.trim().is_empty() {
@@ -1940,6 +1942,29 @@ impl AppState {
         }
     }
 
+    /// Suena **un medio** del almacen, aqui y ahora, sin encolar ningun aviso.
+    ///
+    /// Es el boton de oir del editor de alertas: elegir un sonido de una lista de
+    /// nombres no dice nada de como suena, y hasta ahora habia que probar la alerta
+    /// entera —con su texto y su medio— para averiguarlo. Suena por el **monitor**
+    /// del streamer, el mismo que el boton de probar, no por la fuente de OBS.
+    pub fn oir_medio(&self, nombre: &str) -> Result<(), String> {
+        if nombre.trim().is_empty() {
+            return Err("no hay ningun sonido elegido".to_string());
+        }
+        let Some(ruta) = crate::alerts::Almacen::nuevo().ruta_de(nombre) else {
+            return Err(format!("«{nombre}» ya no esta en la carpeta de medios"));
+        };
+        let volumen = self.alertas().salida.volumen;
+        let salida = self
+            .salida_alertas
+            .read()
+            .map_err(|_| "el monitor de alertas no responde".to_string())?;
+        salida
+            .play(&ruta, volumen)
+            .map_err(|error| format!("no se pudo sonar: {error}"))
+    }
+
     /// Encola un aviso de prueba y lo devuelve.
     ///
     /// **No** pasa por el filtro de minimo a proposito: el boton de probar esta
@@ -1954,6 +1979,25 @@ impl AppState {
         // tener OBS delante, que es justo cuando se esta configurando.
         self.sonar_en_local(&aviso);
         aviso
+    }
+
+    /// Dispara el aviso de un regalo, **eligiendo el tramo** por lo que vale.
+    ///
+    /// El tramo se resuelve con los ajustes delante, asi que se leen una sola vez:
+    /// leerlos dos —una para elegir y otra para disparar— dejaria una ventana en la
+    /// que el streamer podria cambiar los ajustes entre las dos y salir un aviso
+    /// que ya no toca.
+    fn disparar_alerta_de_regalo(&self, variables: crate::alerts::Variables, diamantes: i64) {
+        let Ok(ajustes) = self.alertas.read() else {
+            return;
+        };
+        let tramo = crate::alerts::tramo_de_regalo(&ajustes, diamantes);
+        drop(ajustes);
+        // Sin tramo no hay aviso: o todos estan apagados, o la aportacion no llega
+        // al minimo del mas bajo. Es el mismo silencio que hacia antes una rosa.
+        if let Some(tramo) = tramo {
+            self.disparar_alerta(tramo, variables, diamantes);
+        }
     }
 
     /// Dispara un aviso si su tipo esta activo y pasa el minimo.

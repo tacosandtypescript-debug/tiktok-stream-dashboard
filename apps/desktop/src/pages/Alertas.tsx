@@ -16,10 +16,21 @@
 //!     27 campos a la vez y ninguno se distinguia de los otros: la lista dice cual
 //!     esta encendido y cual se esta tocando, y el editor solo existe para el
 //!     elegido.
+//!   * **Los regalos van por tramos.** Un regalo de diez diamantes y uno de cinco
+//!     mil no pueden sonar igual: son tres avisos —normal, grande y enorme— y cual
+//!     toca lo decide Rust por los diamantes, no esta pagina.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { TIPOS_AVISO, api, type AjusteAviso, type AjustesAlertas, type SalidaAlertas, type TipoAviso } from "../api";
+import {
+  TIPOS_AVISO,
+  api,
+  type AjusteAviso,
+  type AjustesAlertas,
+  type ImportacionMedios,
+  type SalidaAlertas,
+  type TipoAviso,
+} from "../api";
 import { Card, Copiar, Empty } from "../components";
 import { t } from "../i18n/es";
 
@@ -29,6 +40,35 @@ const TOPE_BYTES = 24 * 1024 * 1024;
 const ACEPTADOS = ".png,.jpg,.jpeg,.gif,.webp,.apng,.mp4,.webm,.mp3,.ogg,.wav,.m4a";
 /** Lo mismo que recorta Rust en el saneado. */
 const TEXTO_MAXIMO = 200;
+/** Lo que se puede **oír**. Una imagen no suena: no se ofrece en la lista. */
+const SUENA = [".mp3", ".ogg", ".wav", ".m4a"];
+/** Lo que se puede **ver** en pequeño, con miniatura. */
+const SE_VE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng"];
+/** Vídeo: se ve, pero no en miniatura —pintar un fotograma suelto de un `.webm` no
+ *  lo hace el navegador solo— y suena con su propio audio. */
+const ES_VIDEO = [".mp4", ".webm"];
+
+/** La extensión en minúsculas, con el punto. */
+function extensionDe(nombre: string): string {
+  const punto = nombre.lastIndexOf(".");
+  return punto < 0 ? "" : nombre.slice(punto).toLowerCase();
+}
+
+/** Si un medio del almacén es de los que suenan. */
+function suena(nombre: string): boolean {
+  return SUENA.includes(extensionDe(nombre));
+}
+
+/** Si un medio del almacén se puede pintar en pequeño. */
+function seVe(nombre: string): boolean {
+  return SE_VE.includes(extensionDe(nombre));
+}
+
+/** Si es un vídeo. Va aparte de `seVe` porque el rótulo es distinto: llamar
+ *  «Imagen» a un `.webm` es mentir sobre lo que el streamer va a ver. */
+function esVideo(nombre: string): boolean {
+  return ES_VIDEO.includes(extensionDe(nombre));
+}
 const DURACION_MINIMA_MS = 500;
 const DURACION_MAXIMA_MS = 60_000;
 
@@ -44,7 +84,7 @@ type RotuloGrupo = "grupoRegalos" | "grupoActividad";
  * reparten, no se inventan ni se dejan fuera.
  */
 const GRUPOS: Array<{ rotulo: RotuloGrupo; tipos: TipoAviso[] }> = [
-  { rotulo: "grupoRegalos", tipos: ["gift", "follow"] },
+  { rotulo: "grupoRegalos", tipos: ["gift", "gift_grande", "gift_enorme", "follow"] },
   { rotulo: "grupoActividad", tipos: ["subscribe", "share", "like"] },
 ];
 
@@ -65,10 +105,13 @@ interface Props {
   audioProblema: string | null;
   busy: boolean;
   onGuardar: (ajustes: AjustesAlertas) => void;
-  onImportarRuta: (ruta: string) => void;
   onImportarBytes: (nombre: string, bytes: number[]) => void;
+  /** Importa varios ficheros —o una carpeta— de golpe. */
+  onImportarRutas: (rutas: string[]) => Promise<ImportacionMedios>;
   onBorrarMedio: (nombre: string) => void;
   onProbar: (tipo: TipoAviso) => void;
+  /** Suena un medio en el monitor, sin encolar ningún aviso. */
+  onOir: (nombre: string) => void;
 }
 
 export function Alertas({
@@ -80,13 +123,30 @@ export function Alertas({
   audioProblema,
   busy,
   onGuardar,
-  onImportarRuta,
   onImportarBytes,
+  onImportarRutas,
   onBorrarMedio,
   onProbar,
+  onOir,
 }: Props) {
   const [encima, setEncima] = useState(false);
   const [avisoMedio, setAvisoMedio] = useState<string | null>(null);
+  /**
+   * Lo que pasó en la última importación en lote.
+   *
+   * Se enseña siempre, aunque haya ido bien: «entraron 12» es la confirmación de
+   * que el trabajo está hecho, y con una carpeta de cuarenta ficheros nadie va a
+   * contarlos a mano.
+   */
+  const [resultado, setResultado] = useState<ImportacionMedios | null>(null);
+  /**
+   * Las miniaturas que no cargaron.
+   *
+   * Se recuerda el fallo para no volver a pedirlas en cada pintado: sin esto, un
+   * fichero que ya no está se reintentaría cada segundo y la consola se llenaría de
+   * errores de red.
+   */
+  const [rotas, setRotas] = useState<Set<string>>(() => new Set());
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -148,6 +208,24 @@ export function Alertas({
 
   // Arrastrar un fichero a la ventana. Tauri da la **ruta**, que es justo lo que
   // hace falta para copiarlo sin mover decenas de megas por el IPC.
+  //
+  // Se define **antes** del efecto que lo usa: un `useCallback` no se eleva como una
+  // función normal, y llamarlo desde arriba lo dejaría sin asignar en el primer
+  // pintado.
+  const importarLote = useCallback(
+    async (rutas: string[]) => {
+      if (rutas.length === 0) return;
+      setAvisoMedio(null);
+      setResultado(null);
+      try {
+        setResultado(await onImportarRutas(rutas));
+      } catch (cause: unknown) {
+        setAvisoMedio(String(cause));
+      }
+    },
+    [onImportarRutas],
+  );
+
   useEffect(() => {
     let cancelar: (() => void) | undefined;
     let cancelado = false;
@@ -161,7 +239,11 @@ export function Alertas({
         const quitar = await getCurrentWebview().onDragDropEvent((evento) => {
           if (evento.payload.type === "drop") {
             setEncima(false);
-            for (const ruta of evento.payload.paths) onImportarRuta(ruta);
+            // Todo de una vez, incluida una **carpeta**: el motor la abre y saca lo
+            // que haya dentro. Antes era un comando por fichero, con su refresco del
+            // estado cada uno: soltar la carpeta de sonidos entera eran cuarenta
+            // viajes de ida y vuelta.
+            void importarLote(evento.payload.paths);
           } else if (evento.payload.type === "over" || evento.payload.type === "enter") {
             setEncima(true);
           } else {
@@ -179,11 +261,12 @@ export function Alertas({
       cancelado = true;
       cancelar?.();
     };
-  }, [onImportarRuta]);
+  }, [importarLote]);
 
   const elegir = useCallback(
     async (archivo: File | undefined) => {
       setAvisoMedio(null);
+      setResultado(null);
       if (!archivo) return;
       if (archivo.size > TOPE_BYTES) {
         setAvisoMedio(t.alertas.demasiadoGrande(Math.round(TOPE_BYTES / (1024 * 1024))));
@@ -193,6 +276,28 @@ export function Alertas({
       onImportarBytes(archivo.name, Array.from(datos));
     },
     [onImportarBytes],
+  );
+
+  /**
+   * La dirección de un medio dentro del servidor de overlays.
+   *
+   * Se arma desde la del Browser Source, que ya trae el token: los medios los sirve
+   * el mismo servidor y con la misma credencial, así que no hay una segunda
+   * dirección que mantener. Sin dirección —el servidor todavía no ha arrancado— no
+   * hay miniatura, y la fila se queda con su nombre.
+   */
+  const urlMedio = useCallback(
+    (nombre: string) => {
+      if (!url) return undefined;
+      try {
+        const base = new URL(url);
+        const token = base.searchParams.get("t") ?? "";
+        return `${base.origin}/media/${encodeURIComponent(nombre)}?t=${encodeURIComponent(token)}`;
+      } catch {
+        return undefined;
+      }
+    },
+    [url],
   );
 
   return (
@@ -277,6 +382,7 @@ export function Alertas({
           busy={busy}
           onCambiar={cambiar}
           onProbar={onProbar}
+          onOir={onOir}
         />
 
         {/* Los medios, en la misma fila que la lista y el editor: es la tercera
@@ -315,6 +421,25 @@ export function Alertas({
             <p className="hint">{t.alertas.formatos}</p>
           </div>
           {avisoMedio ? <p className="empty">{avisoMedio}</p> : null}
+          {/* El recuento se enseña aunque haya ido bien: con una carpeta de cuarenta
+              ficheros, «entraron 12» es la confirmación de que el trabajo está hecho
+              y no hay que contarlos a mano. Los que fallan van uno a uno con su
+              motivo: saber **cuál** es lo que evita probarlos de uno en uno. */}
+          {resultado ? (
+            <p className="empty">
+              {t.alertas.importados(resultado.importados)}
+              {resultado.fallos.length > 0
+                ? ` · ${t.alertas.fallos(resultado.fallos.length)}`
+                : ""}
+            </p>
+          ) : null}
+          {resultado && resultado.fallos.length > 0 ? (
+            <ul className="fallos">
+              {resultado.fallos.map((fallo) => (
+                <li key={fallo}>{fallo}</li>
+              ))}
+            </ul>
+          ) : null}
 
           {medios.length === 0 ? (
             <Empty>{t.alertas.vacio}</Empty>
@@ -322,9 +447,44 @@ export function Alertas({
             <ul className="medios">
               {medios.map((nombre) => (
                 <li key={nombre}>
+                  {/* Miniatura de lo que se ve, y un rótulo de lo que solo suena.
+                      Sin esto la lista son nombres de fichero y hay que abrir el
+                      explorador para saber qué es cada cosa. */}
+                  {seVe(nombre) && urlMedio(nombre) && !rotas.has(nombre) ? (
+                    <img
+                      className="medio-mini"
+                      src={urlMedio(nombre)}
+                      alt=""
+                      loading="lazy"
+                      // Si la miniatura no carga —el fichero se movió, el servidor
+                      // aún no está— se cae al rótulo: un icono de imagen rota en
+                      // una lista de ajustes asusta más que no enseñar nada.
+                      onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                    />
+                  ) : (
+                    <span className={suena(nombre) ? "medio-icono suena" : "medio-icono"}>
+                      {suena(nombre)
+                        ? t.alertas.suena
+                        : esVideo(nombre)
+                          ? t.alertas.video
+                          : t.alertas.seVe}
+                    </span>
+                  )}
                   <span className="medio-nombre" title={nombre}>
                     {nombre}
                   </span>
+                  {/* Oír aquí, en la propia lista: es donde se está mirando cuando
+                      se quiere saber qué es cada fichero. */}
+                  {suena(nombre) ? (
+                    <button
+                      type="button"
+                      className="ghost tiny"
+                      title={t.alertas.oirHint}
+                      onClick={() => onOir(nombre)}
+                    >
+                      {t.alertas.oir}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="ghost"
@@ -450,6 +610,7 @@ function Aviso({
   busy,
   onCambiar,
   onProbar,
+  onOir,
 }: {
   tipo: TipoAviso;
   ajuste: AjusteAviso;
@@ -457,9 +618,13 @@ function Aviso({
   busy: boolean;
   onCambiar: (tipo: TipoAviso, campo: keyof AjusteAviso, valor: AjusteAviso[keyof AjusteAviso]) => void;
   onProbar: (tipo: TipoAviso) => void;
+  onOir: (nombre: string) => void;
 }) {
   const rotulo = t.alertas.tipos[tipo];
-  const admiteMinimo = tipo === "gift" || tipo === "like";
+  // El mínimo vale para los tres tramos de regalo y para los likes: un follow o un
+  // share no traen cantidad con la que filtrar.
+  const admiteMinimo =
+    tipo === "gift" || tipo === "gift_grande" || tipo === "gift_enorme" || tipo === "like";
 
   /**
    * El texto se edita en local y se guarda al salir del campo.
@@ -540,23 +705,37 @@ function Aviso({
 
         <div className="campo">
           <label htmlFor={`sonido-${tipo}`}>{t.alertas.sonido}</label>
-          <select
-            id={`sonido-${tipo}`}
-            value={ajuste.sonido}
-            disabled={busy}
-            onChange={(evento) => onCambiar(tipo, "sonido", evento.target.value)}
-          >
-            <option value="">{t.alertas.sinSonido}</option>
-            {medios
-              // Solo lo que puede sonar: ofrecer un PNG en la lista de sonidos
-              // seria ofrecer algo que no va a sonar.
-              .filter((nombre) => /\.(mp3|ogg|wav|m4a|mp4|webm)$/i.test(nombre))
-              .map((nombre) => (
-                <option key={nombre} value={nombre}>
-                  {nombre}
-                </option>
-              ))}
-          </select>
+          {/* El botón, **al lado del selector**: elegir un sonido de una lista de
+              nombres no dice cómo suena, y hasta ahora había que probar la alerta
+              entera —con su texto y su medio— para averiguarlo. */}
+          <div className="campo-fila">
+            <select
+              id={`sonido-${tipo}`}
+              value={ajuste.sonido}
+              disabled={busy}
+              onChange={(evento) => onCambiar(tipo, "sonido", evento.target.value)}
+            >
+              <option value="">{t.alertas.sinSonido}</option>
+              {medios
+                // Solo lo que puede sonar: ofrecer un PNG en la lista de sonidos
+                // seria ofrecer algo que no va a sonar.
+                .filter((nombre) => suena(nombre))
+                .map((nombre) => (
+                  <option key={nombre} value={nombre}>
+                    {nombre}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              className="ghost"
+              title={t.alertas.oirHint}
+              disabled={!ajuste.sonido}
+              onClick={() => onOir(ajuste.sonido)}
+            >
+              {t.alertas.oir}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -600,7 +779,14 @@ function Aviso({
         <div className="campo">
           <label htmlFor={`minimo-${tipo}`}>
             {t.alertas.minimo} ·{" "}
-            {tipo === "gift" ? t.alertas.minimoGift : t.alertas.minimoLike}
+            {/* En un tramo de regalo el mínimo **no filtra: es la frontera**. Por
+                debajo de él, el regalo cae al tramo de abajo, así que el rótulo
+                tiene que decir eso y no «solo a partir de», que suena a descarte. */}
+            {tipo === "like"
+              ? t.alertas.minimoLike
+              : tipo === "gift"
+                ? t.alertas.minimoGift
+                : t.alertas.minimoTramo}
           </label>
           <input
             id={`minimo-${tipo}`}

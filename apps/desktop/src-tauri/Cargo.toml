@@ -1,6 +1,6 @@
 [package]
 name = "tiktok-stream-dashboard"
-version = "0.3.1"
+version = "0.4.0"
 description = "Panel de control ligero para TikTok LIVE con overlays para OBS"
 authors = ["Isaac"]
 edition = "2021"

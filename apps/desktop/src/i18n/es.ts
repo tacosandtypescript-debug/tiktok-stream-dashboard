@@ -311,8 +311,7 @@ export const t = {
      * y que se edita el elegido.
      */
     lista: "Avisos",
-    listaHint:
-      "Elige un aviso para configurarlo. El interruptor lo enciende o lo apaga sin abrirlo.",
+    listaHint: "Elige uno para configurarlo. El interruptor lo enciende sin abrirlo.",
     /**
      * Los dos grupos de la lista.
      *
@@ -326,6 +325,16 @@ export const t = {
         nombre: "Regalos",
         descripcion:
           "Sale al cerrarse la racha, no con cada rosa: si no, el aviso del regalo grande se perdería entre veinte iguales.",
+      },
+      gift_grande: {
+        nombre: "Regalos grandes",
+        descripcion:
+          "El tramo de en medio. Un regalo que ya se nota no puede sonar como una rosa.",
+      },
+      gift_enorme: {
+        nombre: "Regalos enormes",
+        descripcion:
+          "El momento del directo. Si esto entra, para todo lo demás.",
       },
       follow: { nombre: "Seguidores", descripcion: "Quién empieza a seguirte." },
       subscribe: {
@@ -351,14 +360,25 @@ export const t = {
     minimo: "Mínimo",
     minimoGift: "Solo a partir de estos diamantes",
     minimoLike: "Solo a partir de estos likes",
+    /* El mínimo de un tramo decide dónde empieza: por debajo de él, el regalo cae
+       al tramo de abajo. */
+    minimoTramo: "Desde estos diamantes",
     probar: "Probar",
     probarHint:
       "Encola un aviso de mentira con el texto y el medio de arriba. No pasa por el mínimo a propósito: si lo tienes alto, la prueba se quedaría muda y parecería roto.",
+    oir: "Oír",
+    oirHint:
+      "Suena aquí, en tu monitor, sin encolar ningún aviso: es la única forma de saber qué es un fichero sin tener OBS delante.",
+    suena: "Suena",
+    seVe: "Imagen",
+    video: "Vídeo",
     medios: "Medios cargados",
     mediosHint:
-      "Arrastra un fichero a la ventana, o pulsa para elegirlo. Se copian a la carpeta de datos y los sirve la propia aplicación, así que no se rompen si mueves el original.",
-    soltar: "Suelta el fichero aquí",
+      "Arrastra ficheros a la ventana —o la carpeta entera— y entran todos de golpe. Se copian a la carpeta de datos y los sirve la propia aplicación, así que no se rompen si mueves el original.",
+    soltar: "Suelta los ficheros o la carpeta aquí",
     elegir: "Elegir fichero",
+    importados: (n: number) => (n === 1 ? "Entró 1 fichero." : `Entraron ${n} ficheros.`),
+    fallos: (n: number) => (n === 1 ? "1 no entró:" : `${n} no entraron:`),
     borrar: "Borrar",
     borrarHint:
       "Si algún aviso lo estaba usando, se queda sin medio: no se puede apuntar a un fichero que ya no está.",

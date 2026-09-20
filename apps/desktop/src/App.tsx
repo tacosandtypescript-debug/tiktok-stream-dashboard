@@ -103,9 +103,11 @@ const EMPTY_TOTALS: Totals = {
  */
 const ALERTAS_VACIAS: AjustesAlertas = {
   gift: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, minimo: 0 },
+  gift_grande: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 6000, volumen: 0.85, minimo: 0 },
+  gift_enorme: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 8000, volumen: 0.9, minimo: 0 },
   follow: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.8, minimo: 0 },
   subscribe: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, minimo: 0 },
-  share: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.8, minimo: 0 },
+  share: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.75, minimo: 0 },
   like: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 3500, volumen: 0.6, minimo: 0 },
   salida: { dispositivo: "", volumen: 0.8, en_directo: false },
 };
@@ -777,14 +779,31 @@ export function App() {
     (ajustes: AjustesAlertas) => accionAlertas(() => api.setAlertas(ajustes)),
     [accionAlertas],
   );
-  const importarMedioRuta = useCallback(
-    (ruta: string) => accionAlertas(() => api.importarMedioAlerta(ruta)),
-    [accionAlertas],
-  );
   const importarMedioBytes = useCallback(
     (nombre: string, bytes: number[]) =>
       accionAlertas(() => api.importarMedioAlertaBytes(nombre, bytes)),
     [accionAlertas],
+  );
+  /**
+   * Importa varios ficheros de golpe y devuelve el recuento.
+   *
+   * No pasa por `accionAlertas` porque devuelve algo más que el estado —cuántos
+   * entraron y cuáles no— y eso hay que enseñarlo: un fichero que se queda fuera
+   * sin decirlo es un fichero que el streamer cree que tiene.
+   */
+  const importarMediosRutas = useCallback(
+    async (rutas: string[]) => {
+      setAlertasBusy(true);
+      try {
+        const resultado = await api.importarMediosAlerta(rutas);
+        applySnapshot(resultado.snapshot);
+        setError(null);
+        return resultado;
+      } finally {
+        setAlertasBusy(false);
+      }
+    },
+    [applySnapshot],
   );
   const borrarMedio = useCallback(
     (nombre: string) => accionAlertas(() => api.borrarMedioAlerta(nombre)),
@@ -794,6 +813,17 @@ export function App() {
     (tipo: string) => accionAlertas(() => api.probarAlerta(tipo)),
     [accionAlertas],
   );
+  /**
+   * Suena un medio en el monitor, sin encolar ningún aviso.
+   *
+   * El error **sí** se enseña aquí, al contrario que en el resto de acciones de
+   * alertas: si el streamer pulsa oír y no suena nada, tiene que saber si es que el
+   * fichero ya no está o que el monitor está mudo. Callarlo dejaría un botón que
+   * parece roto.
+   */
+  const oirMedio = useCallback((nombre: string) => {
+    void api.oirMedio(nombre).catch((cause: unknown) => setError(String(cause)));
+  }, []);
 
   return (
     <div className="app">
@@ -999,10 +1029,11 @@ export function App() {
               url={snapshot?.overlay_urls?.["alerts"]}
               busy={alertasBusy}
               onGuardar={guardarAlertas}
-              onImportarRuta={importarMedioRuta}
               onImportarBytes={importarMedioBytes}
+              onImportarRutas={importarMediosRutas}
               onBorrarMedio={borrarMedio}
               onProbar={probarAlerta}
+              onOir={oirMedio}
             />
           ) : null}
 
