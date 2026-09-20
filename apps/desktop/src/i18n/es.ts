@@ -357,7 +357,7 @@ export const t = {
     sinSonido: "Sin sonido",
     /* El aviso de que el vídeo no suena solo. Va en la ayuda del campo, y no en la
        opción vacía: si estuviera ahí, parecería una característica y no una regla. */
-    videoMudo: "El vídeo va siempre en mudo: el audio sale del sonido.",
+    videoMudo: "el vídeo va en mudo",
     duracion: "Duración",
     volumen: "Volumen",
     minimo: "Mínimo",
@@ -387,6 +387,14 @@ export const t = {
     seVe: "Imagen",
     video: "Vídeo",
     medios: "Medios cargados",
+    mediosCorto: "Medios",
+    previa: "Previa del aviso",
+    previaCorto: "Previa",
+    previaNota: "el overlay de verdad",
+    previaHint:
+      "Es la misma página que carga OBS, así que lo que sale aquí es lo que sale en antena. Dale a Probar y mira cómo entra.",
+    previaSinServidor:
+      "El servidor de overlays todavía no ha arrancado, así que no hay nada que previsualizar.",
     mediosHint:
       "Arrastra ficheros a la ventana —o la carpeta entera— y entran todos de golpe. Se copian a la carpeta de datos y los sirve la propia aplicación, así que no se rompen si mueves el original.",
     soltar: "Suelta los ficheros o la carpeta aquí",

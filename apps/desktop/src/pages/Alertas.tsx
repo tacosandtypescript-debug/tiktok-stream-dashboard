@@ -31,7 +31,7 @@ import {
   type SalidaAlertas,
   type TipoAviso,
 } from "../api";
-import { Card, Copiar, Empty } from "../components";
+import { Card, Copiar, Empty, VistaPrevia } from "../components";
 import { t } from "../i18n/es";
 
 /** Tope del selector de archivos. Arrastrar no tiene tope: va por ruta. */
@@ -170,6 +170,14 @@ export function Alertas({
    * y a cambio no hay que acordarse de meter la lista en las dependencias.
    */
   const [busqueda, setBusqueda] = useState("");
+  /**
+   * Qué enseña la tercera columna: los medios cargados o la previa del aviso.
+   *
+   * Dos modos y no dos tarjetas porque la página mide 674 px y está llena: la previa
+   * es lo que se mira antes de dar un aviso por bueno, y los medios lo que se mira
+   * mientras se elige. No hacen falta a la vez.
+   */
+  const [modo, setModo] = useState<"medios" | "previa">("medios");
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -423,7 +431,59 @@ export function Alertas({
             pieza del mismo trabajo —elegir el aviso, escribirlo y darle su medio—,
             y con ellos en una fila propia la pagina medía 1.121 px para 674 de
             alto. Aqui cabe. */}
-        <Card title={t.alertas.medios}>
+        <Card
+          title={modo === "previa" ? t.alertas.previa : t.alertas.medios}
+          actions={
+            // Dos modos en la misma columna y no una tarjeta más: la página mide
+            // 674 px y está llena. La previa es lo que se mira **antes** de dar por
+            // bueno un aviso; los medios, lo que se mira mientras se elige, así que
+            // no hacen falta a la vez.
+            <div className="vista-switch">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modo === "medios"}
+                className={modo === "medios" ? "active" : "ghost"}
+                onClick={() => setModo("medios")}
+              >
+                {t.alertas.mediosCorto}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modo === "previa"}
+                className={modo === "previa" ? "active" : "ghost"}
+                onClick={() => setModo("previa")}
+              >
+                {t.alertas.previaCorto}
+              </button>
+            </div>
+          }
+        >
+          {modo === "previa" ? (
+            <>
+              {/* **El overlay de verdad**, no una maqueta: es el mismo documento que
+                  carga OBS, así que lo que se ve aquí es lo que sale en antena. Dale a
+                  Probar en el editor y sale en esta previa.
+
+                  El lienzo que se le supone son 1920×1080, que es lo que suele tener
+                  la escena de OBS: es lo único que se puede suponer, porque la página
+                  ocupa lo que le dé la fuente. */}
+              {url ? (
+                <VistaPrevia
+                  url={url}
+                  ancho={1920}
+                  alto={1080}
+                  etiqueta={t.alertas.previa}
+                  nota={t.alertas.previaNota}
+                />
+              ) : (
+                <Empty>{t.alertas.previaSinServidor}</Empty>
+              )}
+              <p className="hint">{t.alertas.previaHint}</p>
+            </>
+          ) : (
+            <>
           <p className="hint">{t.alertas.mediosHint}</p>
           <div
             className={encima ? "soltar encima" : "soltar"}
@@ -508,20 +568,37 @@ export function Alertas({
                   ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
                 return (
                   <li key={nombre} className={puesto ? "puesto" : undefined}>
-                    {/* Miniatura de lo que se ve, y un rótulo de lo que solo suena.
-                        Sin esto la lista son nombres de fichero y hay que abrir el
-                        explorador para saber qué es cada cosa. */}
-                    {seVe(nombre) && urlMedio(nombre) && !rotas.has(nombre) ? (
-                      <img
-                        className="medio-mini"
-                        src={urlMedio(nombre)}
-                        alt=""
-                        loading="lazy"
-                        // Si la miniatura no carga —el fichero se movió, el servidor
-                        // aún no está— se cae al rótulo: un icono de imagen rota en
-                        // una lista de ajustes asusta más que no enseñar nada.
-                        onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                      />
+                    {/* Miniatura de lo que se ve —imagen **o el primer fotograma de
+                        un vídeo**— y un rótulo para lo que solo suena. Sin esto la
+                        lista son nombres de fichero y hay que abrir el explorador
+                        para saber qué es cada cosa; con ciento cincuenta cargados,
+                        eso es no poder verlos. */}
+                    {urlMedio(nombre) &&
+                    !rotas.has(nombre) &&
+                    (seVe(nombre) || esVideo(nombre)) ? (
+                      esVideo(nombre) ? (
+                        // Un vídeo se enseña con su primer fotograma: `preload` en
+                        // `metadata` trae solo lo justo para pintarlo y no descarga
+                        // el fichero entero ciento cincuenta veces.
+                        <video
+                          className="medio-mini"
+                          src={urlMedio(nombre)}
+                          muted
+                          preload="metadata"
+                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                        />
+                      ) : (
+                        <img
+                          className="medio-mini"
+                          src={urlMedio(nombre)}
+                          alt=""
+                          loading="lazy"
+                          // Si la miniatura no carga —el fichero se movió, el servidor
+                          // aún no está— se cae al rótulo: un icono de imagen rota en
+                          // una lista de ajustes asusta más que no enseñar nada.
+                          onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                        />
+                      )
                     ) : (
                       <span className={suena(nombre) ? "medio-icono suena" : "medio-icono"}>
                         {suena(nombre)
@@ -577,6 +654,8 @@ export function Alertas({
                 );
               })}
             </ul>
+          )}
+            </>
           )}
         </Card>
       </div>
@@ -770,7 +849,12 @@ function Aviso({
             Se elige allí, con su buscador; aquí solo se ve qué hay puesto y se
             quita. */}
         <div className="campo">
-          <label htmlFor={`medio-${tipo}`}>{t.alertas.medio}</label>
+          {/* La regla del audio va en el **rótulo** y no en una línea aparte: el
+              editor mide 379 px y una línea más lo sacaba del marco por 6. Aquí no
+              ocupa alto y se lee igual. */}
+          <label htmlFor={`medio-${tipo}`}>
+            {t.alertas.medio} · {t.alertas.videoMudo}
+          </label>
           <div className="asignado" id={`medio-${tipo}`}>
             <span className={ajuste.medio ? "asignado-nombre" : "asignado-nombre vacio"}>
               {ajuste.medio || t.alertas.sinMedio}
@@ -787,9 +871,6 @@ function Aviso({
               </button>
             ) : null}
           </div>
-          {/* Se dice aquí y no en la opción vacía del sonido: es una **regla**, no
-              una característica, y puesta en la lista parecería que se puede elegir. */}
-          <p className="hint">{t.alertas.videoMudo}</p>
         </div>
 
         <div className="campo">

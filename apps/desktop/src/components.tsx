@@ -4,7 +4,7 @@
 //! sin blur, sin sombras costosas. Todo es CSS plano y barato de pintar.
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type {
   ChatEntry,
@@ -391,6 +391,92 @@ export function FeedList({
 
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
+}
+
+/**
+ * El marco de una vista previa, escalado a lo que quepa en su hueco.
+ *
+ * **Es el overlay de verdad**, no una maqueta: se carga el mismo documento que va a
+ * cargar OBS, así que lo que se ve aquí es lo que sale en antena. Si hubiera dos
+ * implementaciones, la previa mentiría en cuanto una de las dos cambiara. Lo usan la
+ * pestaña de Overlays y la de Alertas.
+ *
+ * Se mide con `ResizeObserver` en vez de con un ancho fijo porque el hueco depende
+ * de la columna en la que vive. La escala se limita por **las dos** dimensiones: con
+ * el tope solo de ancho, un lienzo de 1080×1920 a 460 px de ancho pedía 818 de alto
+ * y empujaba la página fuera de la ventana.
+ *
+ * El hueco se mide **descontando la barra** (que va dentro y no se encoge) y los dos
+ * píxeles del borde: `box-sizing: border-box` los mete dentro del alto.
+ */
+export function VistaPrevia({
+  url,
+  ancho,
+  alto,
+  etiqueta,
+  nota,
+}: {
+  /** Dirección del overlay, con su token. */
+  url: string;
+  /** Lienzo real del diseño, en píxeles. */
+  ancho: number;
+  alto: number;
+  /** Rótulo de la barra. */
+  etiqueta: string;
+  /** Lo que va a la derecha de la barra: el diseño, el simulador... */
+  nota: string;
+}) {
+  const hueco = useRef<HTMLDivElement>(null);
+  const [escala, setEscala] = useState(1);
+
+  useLayoutEffect(() => {
+    const nodo = hueco.current;
+    if (!nodo) return;
+    const medir = () => {
+      const anchoHueco = nodo.clientWidth;
+      const barra = nodo.querySelector(".previa-barra");
+      const altoHueco =
+        nodo.clientHeight - (barra?.getBoundingClientRect().height ?? 0) - 2;
+      if (anchoHueco > 0 && altoHueco > 0) {
+        setEscala(Math.min(1, anchoHueco / ancho, altoHueco / alto));
+      }
+    };
+    medir();
+    const observador = new ResizeObserver(medir);
+    observador.observe(nodo);
+    return () => observador.disconnect();
+  }, [ancho, alto]);
+
+  return (
+    <div className="previa-hueco" ref={hueco}>
+      {/*
+       * El tope de ancho es `min(100%, lienzo)` y **no** el lienzo a secas: con el
+       * número suelto el marco crecía hasta los 1080 del iframe, se salía de su
+       * columna y se pintaba encima de lo de al lado. Y era un bucle, porque la
+       * escala se calcula midiendo ese mismo marco.
+       */}
+      <div className="previa-marco" style={{ maxWidth: `min(100%, ${ancho}px)` }}>
+        <div className="previa-barra">
+          <span className="etiqueta">{etiqueta}</span>
+          <span className="previa-aviso">{nota}</span>
+        </div>
+        <div
+          className="previa-caja"
+          style={{ width: Math.round(ancho * escala), height: Math.round(alto * escala) }}
+        >
+          {/* La `key` recarga el marco al cambiar la dirección: sin ella, React
+              reutilizaría el mismo `iframe` y el documento viejo seguiría pintado. */}
+          <iframe
+            key={url}
+            className="previa"
+            src={url}
+            title={`${etiqueta} · ${nota}`}
+            style={{ width: ancho, height: alto, transform: `scale(${escala})` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Radio del anillo, en unidades del `viewBox`. */

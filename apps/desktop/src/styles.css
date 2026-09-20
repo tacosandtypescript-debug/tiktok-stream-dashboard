@@ -2201,6 +2201,12 @@ footer.stats {
   width: 24px;
 }
 
+/* Un vídeo lleva los mismos 24 px que una imagen: la lista no puede crecer por
+   enseñar el primer fotograma. */
+video.medio-mini {
+  background: var(--panel-2);
+}
+
 /* Lo que no se puede pintar en pequeño lleva un rótulo: así un sonido no se
    confunde con un vídeo sin miniatura.
  *

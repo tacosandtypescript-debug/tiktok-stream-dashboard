@@ -18,10 +18,10 @@
 //! está abierta (docs/plan-review.md §175). Por eso se pinta **una vista a la
 //! vez** y no las tres: pasar de pestaña desmonta el marco y lo libera.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import type { OverlayDesignInfo } from "../api";
-import { Card, Copiar } from "../components";
+import { Card, Copiar, VistaPrevia } from "../components";
 import { t } from "../i18n/es";
 
 /** Las vistas, en el orden en que se enseñan. */
@@ -170,8 +170,10 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
           <Card>
             <VistaPrevia
               url={urlDePrevia(base, vista, actual.id)}
-              previa={actual.previa}
-              diseno={actual.id}
+              ancho={actual.previa.ancho}
+              alto={actual.previa.alto}
+              etiqueta={t.overlay.preview}
+              nota={`${t.overlay.simulator} · ${actual.id}`}
             />
             <p className="hint">{t.overlay.previewHint}</p>
           </Card>
@@ -182,92 +184,7 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
 }
 
 /**
- * El marco de la vista previa, escalado a lo que quepa en su hueco.
- *
- * El diseño se dibuja en su lienzo real —420 px de ancho, o 1080×1920 en los de
- * pantalla completa— y se escala entero. Se mide con `ResizeObserver` en vez de con
- * un ancho fijo porque la ventana se redimensiona: con un tamaño fijo, la previa se
- * salía de la tarjeta o dejaba franjas.
- *
- * La escala se limita por **las dos** dimensiones, y esa es la diferencia con lo que
- * había: solo se miraba el ancho. Medido, el marcador de tap tap mide 420×524 —la
- * tarjeta de diseños se iba a 706 px de alto por su culpa— y un diseño de pantalla
- * completa (1080×1920) a 460 px de ancho pide **818** de alto. Con el tope de ancho
- * solo, esos dos casos empujaban la página fuera de la ventana. Ahora la previa cabe
- * siempre en su columna, sea cual sea el diseño elegido.
- *
- * El hueco se mide **descontando la barra** (que va dentro y no se encoge) y los dos
- * píxeles del borde: `box-sizing: border-box` los mete dentro del alto.
+ * El marco de la vista previa vive en `components.tsx`: lo comparten esta página y
+ * la de Alertas, que también enseña su overlay de verdad. Tener dos copias de la
+ * misma cuenta de escala sería dos sitios donde equivocarse con el tamaño.
  */
-function VistaPrevia({
-  url,
-  previa,
-  diseno,
-}: {
-  url: string;
-  previa: { ancho: number; alto: number };
-  diseno: string;
-}) {
-  const hueco = useRef<HTMLDivElement>(null);
-  const [escala, setEscala] = useState(1);
-
-  useLayoutEffect(() => {
-    const nodo = hueco.current;
-    if (!nodo) return;
-    const medir = () => {
-      const ancho = nodo.clientWidth;
-      const barra = nodo.querySelector(".previa-barra");
-      const alto = nodo.clientHeight - (barra?.getBoundingClientRect().height ?? 0) - 2;
-      if (ancho > 0 && alto > 0) {
-        setEscala(Math.min(1, ancho / previa.ancho, alto / previa.alto));
-      }
-    };
-    medir();
-    const observador = new ResizeObserver(medir);
-    observador.observe(nodo);
-    return () => observador.disconnect();
-  }, [previa.ancho, previa.alto]);
-
-  return (
-    <div className="previa-hueco" ref={hueco}>
-      {/*
-       * El tope de ancho es `min(100%, lienzo)` y **no** `previa.ancho` a secas.
-       *
-       * Con el numero suelto, el marco crecia hasta los 1080 del iframe: se salia de
-       * su columna y se pintaba encima de la lista de diseños. Y era un bucle,
-       * porque la escala se calcula midiendo ese mismo marco — medía 1080, sacaba
-       * escala 1, y el iframe volvia a medir 1080. Con el `min(100%, …)` el marco no
-       * puede pasar de su columna.
-       */}
-      <div className="previa-marco" style={{ maxWidth: `min(100%, ${previa.ancho}px)` }}>
-        <div className="previa-barra">
-          <span className="etiqueta">{t.overlay.preview}</span>
-          <span className="previa-aviso">
-            {t.overlay.simulator} · {diseno}
-          </span>
-        </div>
-        <div
-          className="previa-caja"
-          style={{
-            width: Math.round(previa.ancho * escala),
-            height: Math.round(previa.alto * escala),
-          }}
-        >
-          {/* La `key` recarga el marco al cambiar de diseño: sin ella, React
-              reutilizaría el mismo `iframe` y el documento viejo seguiría pintado. */}
-          <iframe
-            key={url}
-            className="previa"
-            src={url}
-            title={`${t.overlay.preview} · ${diseno}`}
-            style={{
-              width: previa.ancho,
-              height: previa.alto,
-              transform: `scale(${escala})`,
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
