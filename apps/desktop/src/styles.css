@@ -814,6 +814,22 @@ main {
   align-items: start;
 }
 
+/*
+ * Y cada vista reparte **las columnas que necesita**, no siempre tres.
+ *
+ * «Lo que suena» tiene seis paneles: tres arriba y tres abajo llenan los 529 px
+ * utiles (215 + 292 + el hueco = 517). «Voces y claves» solo tiene cuatro, y con
+ * tres columnas quedaban tres arriba y **uno solo abajo a la izquierda**, con
+ * media pagina vacia al lado. A dos columnas son dos filas de dos y la pagina
+ * queda llena (291 + 193 + el hueco = 494 de 529).
+ *
+ * Es `repeat(2, ...)` y no `auto-fit`: con `auto-fit` y 1.240 px de ancho caben
+ * tres columnas aunque solo haya cuatro tarjetas, que es justo lo que pasaba.
+ */
+.grid-panel.voz[data-vista="voces"] .grid-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 /* --- Aportaciones: cuatro columnas por dos filas -------------------------- */
 /*
  * Seis paneles que tienen que caber en los 674 px de alto que deja la ventana
