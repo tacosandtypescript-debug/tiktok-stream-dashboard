@@ -260,7 +260,18 @@ export function App() {
     [],
   );
 
-  const applySnapshot = useCallback((next: Snapshot) => {
+  /**
+   * Aplica una foto del motor.
+   *
+   * Acepta `null` **a proposito**, aunque el tipo del puente diga que siempre viene
+   * una foto: el puente puede devolver nada —sin la inyeccion de Tauri, que es el
+   * caso del banco de la interfaz en un navegador, o si el comando falla— y sin esta
+   * guarda `next.status` reventaba con «Cannot read properties of null (reading
+   * 'status')» y se caia la pantalla entera. Una foto que no llega tiene que dejar
+   * lo que ya habia, no llevarse por delante lo que el streamer esta viendo.
+   */
+  const applySnapshot = useCallback((next: Snapshot | null | undefined) => {
+    if (!next) return;
     setSnapshot(next);
     setStatus(next.status);
     setDetail(next.status_detail);
@@ -542,7 +553,10 @@ export function App() {
     api
       .snapshot()
       .then((initial) => {
-        if (!cancelled) {
+        // Sin foto no hay nada que aplicar **ni de donde sacar el ultimo usuario**:
+        // el `?.` de `ultimos_usuarios` no basta, porque el `?? initial.handle` de
+        // detras se evalua igual y revienta con la foto en `null`.
+        if (!cancelled && initial) {
           applySnapshot(initial);
           // El campo se rellena con el último usuario recordado, y se rellena
           // **solo si está vacío**: si el streamer ya ha empezado a teclear,
