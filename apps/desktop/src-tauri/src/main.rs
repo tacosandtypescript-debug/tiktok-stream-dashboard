@@ -51,6 +51,18 @@ fn main() {
         return;
     }
 
+    if args.iter().any(|arg| arg == "--medios") {
+        let Some(carpeta) = value_of(&args, "--medios") else {
+            eprintln!("--medios necesita una carpeta: --medios \"C:\\ruta\\a\\los\\sonidos\"");
+            std::process::exit(1);
+        };
+        if let Err(error) = dashboard::importar_medios(std::path::Path::new(&carpeta)) {
+            eprintln!("importación fallida: {error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if args.iter().any(|arg| arg == "--self-test") {
         let seconds = value_of(&args, "--seconds")
             .and_then(|value| value.parse().ok())

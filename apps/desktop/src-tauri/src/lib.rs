@@ -151,6 +151,36 @@ pub fn tts_probe(
     })
 }
 
+/// Importa al almacen de medios todos los ficheros validos de una carpeta.
+///
+/// Es la puerta **sin ventana** al mismo importador que usa la interfaz —llama a
+/// `Almacen::importar_carpeta`, que a su vez llama a `importar_desde_ruta`—, para
+/// traerse una carpeta entera de sonidos sin abrir la aplicacion y sin que nadie
+/// tenga que reescribir en un script las reglas del almacen.
+///
+/// **No baja nada de internet.** Solo copia lo que ya esta en el disco: lo que
+/// entra aqui es lo que el streamer se ha bajado el mismo.
+pub fn importar_medios(carpeta: &std::path::Path) -> anyhow::Result<()> {
+    telemetry::init()?;
+
+    let almacen = alerts::Almacen::nuevo();
+    let resumen = almacen.importar_carpeta(carpeta)?;
+
+    let salida = serde_json::json!({
+        "carpeta": carpeta.display().to_string(),
+        "destino": almacen.dir().display().to_string(),
+        "importados": resumen.importados.len(),
+        "fallos": resumen.fallos.len(),
+        "nombres": resumen.importados,
+        "motivos": resumen.fallos
+            .iter()
+            .map(|(nombre, motivo)| format!("{nombre}: {motivo}"))
+            .collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&salida)?);
+    Ok(())
+}
+
 /// Lista las voces que ofrece el sidecar (todas las de edge-tts).
 pub fn tts_voices() -> anyhow::Result<()> {
     telemetry::init()?;

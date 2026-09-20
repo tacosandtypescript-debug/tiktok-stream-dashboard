@@ -809,6 +809,46 @@ impl Almacen {
         std::fs::remove_file(&ruta).with_context(|| format!("borrando {}", ruta.display()))?;
         Ok(())
     }
+
+    /// Importa **todos** los ficheros validos de una carpeta.
+    ///
+    /// No baja a subcarpetas a proposito: lo que se suelta es *una* carpeta de
+    /// sonidos, y recorrer un arbol entero sin querer traeria cosas que nadie pidio.
+    ///
+    /// Un fichero que no vale **no tira los demas** y queda apuntado con su motivo:
+    /// en una carpeta de ciento cincuenta siempre hay alguno que no es un formato
+    /// admitido, y perder los otros por ese seria peor que no tener la funcion.
+    ///
+    /// Es el mismo camino que el de la interfaz —llama a `importar_desde_ruta`—, para
+    /// que las reglas del almacen vivan en un solo sitio y no haya una segunda copia
+    /// de `limpiar_nombre` en un script.
+    pub fn importar_carpeta(&self, dir: &Path) -> Result<ResumenImportacion> {
+        let entradas = std::fs::read_dir(dir)
+            .with_context(|| format!("abriendo la carpeta {}", dir.display()))?;
+
+        let mut resumen = ResumenImportacion::default();
+        for entrada in entradas.filter_map(|e| e.ok()) {
+            let camino = entrada.path();
+            if !camino.is_file() {
+                continue;
+            }
+            let nombre = entrada.file_name().to_string_lossy().to_string();
+            match self.importar_desde_ruta(&camino) {
+                Ok(nuevo) => resumen.importados.push(nuevo),
+                Err(error) => resumen.fallos.push((nombre, error.to_string())),
+            }
+        }
+        Ok(resumen)
+    }
+}
+
+/// Lo que salio de importar una carpeta entera.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ResumenImportacion {
+    /// Los nombres **nuevos**, ya saneados: son los que lista la interfaz.
+    pub importados: Vec<String>,
+    /// Los que no entraron, con el nombre de origen y el motivo.
+    pub fallos: Vec<(String, String)>,
 }
 
 /// La extension en minusculas, sin el punto.
@@ -837,6 +877,15 @@ fn limpiar_nombre(nombre: &str) -> String {
         })
         .collect();
     let stem = stem.trim_matches('-').to_string();
+    // Las rachas de guiones se juntan en uno: «001 - gato riendo» daba
+    // «001---gato-riendo», y ese relleno no aporta nada al nombre que se lee en la
+    // lista de medios. Ademas deja el nombre mas corto, que importa porque el tope
+    // de 48 caracteres recorta por el final.
+    let stem: String = stem
+        .split('-')
+        .filter(|trozo| !trozo.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
     let stem = if stem.is_empty() {
         "medio".to_string()
     } else {
@@ -1280,6 +1329,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Importar una carpeta entera: entran los validos y los demas se cuentan.
+    ///
+    /// Lo que se prueba de verdad es que **un fichero malo no tira los buenos** y que
+    /// el resumen dice cual fallo: sin eso, una carpeta de ciento cincuenta sonidos
+    /// con un `.txt` dentro se quedaria a medias sin decir por que.
+    #[test]
+    fn la_carpeta_entera_entra_y_los_malos_se_cuentan() {
+        let (almacen, dir) = almacen_de_prueba("carpeta");
+        let origen = dir.join("origen");
+        std::fs::create_dir_all(&origen).unwrap();
+        std::fs::write(
+            origen.join("golpe.wav"),
+            b"no es un wav de verdad pero tiene bytes",
+        )
+        .unwrap();
+        std::fs::write(origen.join("confeti.gif"), b"GIF89a").unwrap();
+        // Este no vale: la extension no esta en la lista blanca.
+        std::fs::write(origen.join("notas.txt"), b"hola").unwrap();
+        // Y una subcarpeta, que se ignora en vez de fallar.
+        std::fs::create_dir_all(origen.join("otra")).unwrap();
+
+        let resumen = almacen.importar_carpeta(&origen).unwrap();
+
+        assert_eq!(resumen.importados.len(), 2, "entran los dos validos");
+        assert_eq!(resumen.fallos.len(), 1, "y el .txt queda apuntado");
+        assert_eq!(resumen.fallos[0].0, "notas.txt");
+        assert!(
+            resumen.fallos[0].1.contains("formato no admitido"),
+            "el motivo tiene que decir por que: {}",
+            resumen.fallos[0].1
+        );
+        // Los nombres que devuelve son los **nuevos**, los que lista la interfaz.
+        assert!(resumen.importados.contains(&"golpe.wav".to_string()));
+        assert!(almacen.listar().contains(&"confeti.gif".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// El recorrido entero del almacen: importar, listar, encontrar y borrar.
     #[test]
     fn el_almacen_importa_lista_y_borra() {
@@ -1346,6 +1433,14 @@ mod tests {
         assert_eq!(limpiar_nombre("../../evil.png"), "evil.png");
         assert_eq!(limpiar_nombre("sin-extension"), "sin-extension.");
         assert_eq!(limpiar_nombre(""), "medio.");
+        // Las rachas de guiones se juntan en uno: una carpeta de sonidos bajados de
+        // internet viene numerada —«001 - gato riendo»— y el relleno se comia el
+        // nombre.
+        assert_eq!(
+            limpiar_nombre("001 - gato riendo.mp3"),
+            "001-gato-riendo.mp3"
+        );
+        assert_eq!(limpiar_nombre("a   ---   b.mp3"), "a-b.mp3");
     }
 
     #[test]
