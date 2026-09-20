@@ -8,9 +8,12 @@
  *   2. **Los avisos se encolan aqui, no en el servidor.** El motor manda lo que
  *      pasa y esta pagina los va sacando; asi el servidor no tiene que saber
  *      cuanto dura cada uno.
- *   3. **El audio sale del fichero de sonido.** Si la alerta trae sonido, el video
- *      va en silencio para no solapar dos audios; si no lo trae, el video suena
- *      con su propio audio. Es la unica regla que hace falta.
+ *   3. **El audio de un aviso sale siempre del fichero de sonido, y de ningun otro
+ *      sitio.** El video va **siempre** en silencio. Antes sonaba con su propio
+ *      audio cuando la alerta no traia sonido, y eso eran dos maneras de que un
+ *      aviso tuviera audio: para saber si una alerta suena habia que mirar dos
+ *      campos, y el mismo video sonaba o no segun lo que tuviera el otro. Una
+ *      regla, un sitio.
  */
 (() => {
   const parametros = new URLSearchParams(location.search);
@@ -135,9 +138,11 @@
       const url = urlDeMedio(medio);
       if (esVideo(medio)) {
         video.src = url;
-        // Con sonido propio, el video va en silencio: dos audios a la vez suenan
-        // a error.
-        video.muted = audio !== "";
+        // **Siempre en silencio**, tenga o no sonido la alerta. El audio de un
+        // aviso sale del campo de sonido y de ningun otro sitio: si el video sonara
+        // cuando no hay sonido, la misma alerta se oiria o no segun un campo que no
+        // es el del audio, y eso es lo que confundia.
+        video.muted = true;
         video.volume = volumen;
         video.loop = false;
         video.classList.add("puesto");

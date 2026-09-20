@@ -354,7 +354,10 @@ export const t = {
     medio: "Imagen, GIF o vídeo",
     sonido: "Sonido",
     sinMedio: "Sin medio",
-    sinSonido: "Sin sonido y el vídeo suena con su propio audio",
+    sinSonido: "Sin sonido",
+    /* El aviso de que el vídeo no suena solo. Va en la ayuda del campo, y no en la
+       opción vacía: si estuviera ahí, parecería una característica y no una regla. */
+    videoMudo: "El vídeo va siempre en mudo: el audio sale del sonido.",
     duracion: "Duración",
     volumen: "Volumen",
     minimo: "Mínimo",

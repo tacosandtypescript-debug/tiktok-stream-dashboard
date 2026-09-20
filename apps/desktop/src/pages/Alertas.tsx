@@ -787,6 +787,9 @@ function Aviso({
               </button>
             ) : null}
           </div>
+          {/* Se dice aquí y no en la opción vacía del sonido: es una **regla**, no
+              una característica, y puesta en la lista parecería que se puede elegir. */}
+          <p className="hint">{t.alertas.videoMudo}</p>
         </div>
 
         <div className="campo">
