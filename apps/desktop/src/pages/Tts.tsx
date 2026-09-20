@@ -747,28 +747,6 @@ export function Tts({ initial }: Props) {
             pantalla—. */}
 
         <div className="stack vista-sonando">
-          <Card title={t.tts.sources}>
-            <p className="hint">{t.tts.sourcesHint}</p>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={status.settings.read_gifts}
-                onChange={(event) => update({ read_gifts: event.target.checked })}
-              />
-              <span>{t.tts.readGifts}</span>
-            </label>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={status.settings.read_follows}
-                onChange={(event) => update({ read_follows: event.target.checked })}
-              />
-              <span>{t.tts.readFollows}</span>
-            </label>
-          </Card>
-        </div>
-
-        <div className="stack vista-sonando">
           {/* El panel se llamaba «Volumen» y aqui dentro estaban **las voces**:
               «Voz en español» y «Voz en inglés». El streamer las busco y no las
               encontro —tuvo que preguntarlo— porque nadie mira debajo de un
@@ -855,6 +833,32 @@ export function Tts({ initial }: Props) {
                 {t.tts.voiceSave}
               </button>
             </div>
+          </Card>
+        </div>
+
+        {/* «Qué se lee» va **después** de «La voz» y no antes: las dos ocupan la
+            primera fila junto a «Cola», y en ese orden las tres miden 136, 136 y
+            215 en vez de 136, 119 y 215. La fila mide lo que su tarjeta más alta,
+            así que poner juntas las bajas deja menos hueco muerto debajo. */}
+        <div className="stack vista-sonando">
+          <Card title={t.tts.sources}>
+            <p className="hint">{t.tts.sourcesHint}</p>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={status.settings.read_gifts}
+                onChange={(event) => update({ read_gifts: event.target.checked })}
+              />
+              <span>{t.tts.readGifts}</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={status.settings.read_follows}
+                onChange={(event) => update({ read_follows: event.target.checked })}
+              />
+              <span>{t.tts.readFollows}</span>
+            </label>
           </Card>
         </div>
 

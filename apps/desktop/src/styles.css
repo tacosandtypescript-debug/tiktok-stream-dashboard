@@ -795,6 +795,25 @@ main {
   margin-top: var(--sp-3);
 }
 
+/*
+ * En Voz cada tarjeta conserva **su alto natural**.
+ *
+ * La rejilla reparte por filas y una fila mide lo que su tarjeta mas alta; con
+ * `stretch` —que es lo que hace el resto de la aplicacion— las bajas se estiran
+ * hasta esa altura y les queda un hueco **dentro** del marco. Medido en la vista
+ * «Lo que suena»: «Salida de audio» mide 157 px y su fila 292, asi que arrastraba
+ * 135 px de vacio por dentro del borde, y «La voz» otros 77. Con `start` ese hueco
+ * se queda **fuera** de las cajas, que es donde no molesta: cada panel acaba donde
+ * acaba su contenido y el borde lo dice.
+ *
+ * Va acotado a esta pagina porque en Aportaciones el criterio es el contrario —dos
+ * tablas de la misma fila con los bajos a distinta altura se leen como un
+ * descuadre— y alli siguen estirandose.
+ */
+.grid-panel.voz .grid-columns {
+  align-items: start;
+}
+
 /* --- Aportaciones: cuatro columnas por dos filas -------------------------- */
 /*
  * Seis paneles que tienen que caber en los 674 px de alto que deja la ventana
