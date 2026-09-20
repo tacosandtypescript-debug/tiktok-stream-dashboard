@@ -369,6 +369,17 @@ export const t = {
     oir: "Oír",
     oirHint:
       "Suena aquí, en tu monitor, sin encolar ningún aviso: es la única forma de saber qué es un fichero sin tener OBS delante.",
+    poner: "Poner",
+    puesto: "Puesto",
+    ponerSonido: (aviso: string) => `Ponlo como sonido de «${aviso}».`,
+    ponerMedio: (aviso: string) => `Ponlo como imagen o vídeo de «${aviso}».`,
+    quitar: "Quitar",
+    quitarHint: "Se lo quita a este aviso. El fichero sigue en la lista.",
+    buscar: "Buscar en los medios",
+    buscarPlaceholder: "Buscar…",
+    cuenta: (vistos: number, total: number) =>
+      vistos === total ? `${total}` : `${vistos} de ${total}`,
+    sinResultados: (texto: string) => `Ningún medio coincide con «${texto}».`,
     suena: "Suena",
     seVe: "Imagen",
     video: "Vídeo",

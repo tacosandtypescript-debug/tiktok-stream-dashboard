@@ -2260,6 +2260,64 @@ footer.stats {
   min-width: 0;
 }
 
+/*
+ * Lo que un aviso tiene puesto: el nombre y, si lo hay, el botón de quitarlo.
+ *
+ * Sustituye a los dos desplegables que había aquí —medio y sonido— con los ciento
+ * cincuenta ficheros dentro cada uno. Los mismos nombres ya están en la lista de
+ * medios, que ahora tiene buscador: dos listas de lo mismo era el problema, no la
+ * solución.
+ */
+.asignado {
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio-campo, 6px);
+  display: flex;
+  gap: var(--sp-2);
+  min-height: 30px;
+  padding: 0 var(--sp-2);
+}
+
+.asignado-nombre {
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Vacío se apaga: no hay nada puesto y no debe parecer que sí. */
+.asignado-nombre.vacio {
+  color: var(--muted);
+}
+
+/* El buscador de medios, encima de la lista. */
+.buscar {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.buscar input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.buscar-cuenta {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* El medio que el aviso elegido tiene puesto, marcado en la lista. */
+.medios li.puesto {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 /* Un campo de formulario con su rótulo encima. El `min-width: 0` es lo que deja
    encoger la columna dentro de la rejilla en vez de empujar la tarjeta. */
 .campo {

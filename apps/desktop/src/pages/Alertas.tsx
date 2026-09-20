@@ -69,6 +69,21 @@ function seVe(nombre: string): boolean {
 function esVideo(nombre: string): boolean {
   return ES_VIDEO.includes(extensionDe(nombre));
 }
+
+/**
+ * Texto para comparar: sin acentos y en minúsculas.
+ *
+ * Los ficheros se llaman como los llamó quien los subió —«¡Trae ese qlo para acá!»,
+ * «Duermete alv ya»—, así que buscar «trae» tiene que encontrarlo y buscar «aca»
+ * también, aunque el original lleve tilde. Sin esto, la mitad de las búsquedas
+ * fallarían por una letra que el streamer ni ve.
+ */
+function normalizar(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
 const DURACION_MINIMA_MS = 500;
 const DURACION_MAXIMA_MS = 60_000;
 
@@ -147,6 +162,14 @@ export function Alertas({
    * errores de red.
    */
   const [rotas, setRotas] = useState<Set<string>>(() => new Set());
+  /**
+   * Lo que se ha escrito en el buscador de medios.
+   *
+   * Se filtra en cada pintado y sin `useMemo` a propósito: son ciento cincuenta
+   * cadenas y el estado se refresca cada segundo, así que la cuenta es despreciable
+   * y a cambio no hay que acordarse de meter la lista en las dependencias.
+   */
+  const [busqueda, setBusqueda] = useState("");
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -300,9 +323,21 @@ export function Alertas({
     [url],
   );
 
+  /**
+   * Los medios que pasan el buscador.
+   *
+   * Se compara **sin acentos y sin mayúsculas**: los ficheros se llaman como los
+   * llamó quien los subió, y buscar «aca» tiene que encontrar «para acá».
+   */
+  const encontrados = busqueda.trim()
+    ? medios.filter((nombre) => normalizar(nombre).includes(normalizar(busqueda.trim())))
+    : medios;
+
+  /** El nombre del aviso que se está editando. Lo usan los rótulos de «Poner». */
+  const rotuloElegido = t.alertas.tipos[elegido]?.nombre ?? elegido;
+
   return (
-    <div className="grid-panel alertas">
-      <p className="hint">{t.alertas.hint}</p>
+    <div className="grid-panel alertas">      <p className="hint">{t.alertas.hint}</p>
 
       {/* Primero lo que se configura —la lista y su editor— y despues el resto: los
           ficheros con los que se configura, donde se oye y, al final, la direccion
@@ -378,7 +413,6 @@ export function Alertas({
           key={elegido}
           tipo={elegido}
           ajuste={ajustes[elegido]}
-          medios={medios}
           busy={busy}
           onCambiar={cambiar}
           onProbar={onProbar}
@@ -441,61 +475,107 @@ export function Alertas({
             </ul>
           ) : null}
 
+          {/* El buscador, y la lista filtrada por él.
+              Con ciento cincuenta ficheros, encontrar «vine boom» bajando a ojo por
+              una lista que se desplaza es peor que no tener lista. */}
+          {medios.length > 0 ? (
+            <div className="buscar">
+              <input
+                type="search"
+                value={busqueda}
+                placeholder={t.alertas.buscarPlaceholder}
+                spellCheck={false}
+                aria-label={t.alertas.buscar}
+                onChange={(evento) => setBusqueda(evento.target.value)}
+              />
+              <span className="buscar-cuenta">
+                {t.alertas.cuenta(encontrados.length, medios.length)}
+              </span>
+            </div>
+          ) : null}
+
           {medios.length === 0 ? (
             <Empty>{t.alertas.vacio}</Empty>
+          ) : encontrados.length === 0 ? (
+            <Empty>{t.alertas.sinResultados(busqueda)}</Empty>
           ) : (
             <ul className="medios">
-              {medios.map((nombre) => (
-                <li key={nombre}>
-                  {/* Miniatura de lo que se ve, y un rótulo de lo que solo suena.
-                      Sin esto la lista son nombres de fichero y hay que abrir el
-                      explorador para saber qué es cada cosa. */}
-                  {seVe(nombre) && urlMedio(nombre) && !rotas.has(nombre) ? (
-                    <img
-                      className="medio-mini"
-                      src={urlMedio(nombre)}
-                      alt=""
-                      loading="lazy"
-                      // Si la miniatura no carga —el fichero se movió, el servidor
-                      // aún no está— se cae al rótulo: un icono de imagen rota en
-                      // una lista de ajustes asusta más que no enseñar nada.
-                      onError={() => setRotas((antes) => new Set(antes).add(nombre))}
-                    />
-                  ) : (
-                    <span className={suena(nombre) ? "medio-icono suena" : "medio-icono"}>
-                      {suena(nombre)
-                        ? t.alertas.suena
-                        : esVideo(nombre)
-                          ? t.alertas.video
-                          : t.alertas.seVe}
+              {encontrados.map((nombre) => {
+                // Lo que este aviso ya tiene puesto se marca: es la pregunta que se
+                // hace al mirar la lista —«¿cuál es el que suena?»— y sin la marca
+                // hay que abrir el desplegable para averiguarlo.
+                const puesto =
+                  ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
+                return (
+                  <li key={nombre} className={puesto ? "puesto" : undefined}>
+                    {/* Miniatura de lo que se ve, y un rótulo de lo que solo suena.
+                        Sin esto la lista son nombres de fichero y hay que abrir el
+                        explorador para saber qué es cada cosa. */}
+                    {seVe(nombre) && urlMedio(nombre) && !rotas.has(nombre) ? (
+                      <img
+                        className="medio-mini"
+                        src={urlMedio(nombre)}
+                        alt=""
+                        loading="lazy"
+                        // Si la miniatura no carga —el fichero se movió, el servidor
+                        // aún no está— se cae al rótulo: un icono de imagen rota en
+                        // una lista de ajustes asusta más que no enseñar nada.
+                        onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                      />
+                    ) : (
+                      <span className={suena(nombre) ? "medio-icono suena" : "medio-icono"}>
+                        {suena(nombre)
+                          ? t.alertas.suena
+                          : esVideo(nombre)
+                            ? t.alertas.video
+                            : t.alertas.seVe}
+                      </span>
+                    )}
+                    <span className="medio-nombre" title={nombre}>
+                      {nombre}
                     </span>
-                  )}
-                  <span className="medio-nombre" title={nombre}>
-                    {nombre}
-                  </span>
-                  {/* Oír aquí, en la propia lista: es donde se está mirando cuando
-                      se quiere saber qué es cada fichero. */}
-                  {suena(nombre) ? (
+                    {/* Oír aquí, en la propia lista: es donde se está mirando cuando
+                        se quiere saber qué es cada fichero. */}
+                    {suena(nombre) ? (
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        title={t.alertas.oirHint}
+                        onClick={() => onOir(nombre)}
+                      >
+                        {t.alertas.oir}
+                      </button>
+                    ) : null}
+                    {/* **Poner**: lo asigna al aviso elegido, y a la casilla que le
+                        toca por su tipo —lo que suena al sonido, lo que se ve al
+                        medio—. Es lo que unifica las dos listas: antes esto se hacía
+                        en un desplegable del editor con los mismos ciento cincuenta
+                        nombres dentro. */}
                     <button
                       type="button"
                       className="ghost tiny"
-                      title={t.alertas.oirHint}
-                      onClick={() => onOir(nombre)}
+                      title={
+                        suena(nombre)
+                          ? t.alertas.ponerSonido(rotuloElegido)
+                          : t.alertas.ponerMedio(rotuloElegido)
+                      }
+                      disabled={busy}
+                      onClick={() => cambiar(elegido, suena(nombre) ? "sonido" : "medio", nombre)}
                     >
-                      {t.alertas.oir}
+                      {puesto ? t.alertas.puesto : t.alertas.poner}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="ghost"
-                    title={t.alertas.borrarHint}
-                    disabled={busy}
-                    onClick={() => onBorrarMedio(nombre)}
-                  >
-                    {t.alertas.borrar}
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      className="ghost"
+                      title={t.alertas.borrarHint}
+                      disabled={busy}
+                      onClick={() => onBorrarMedio(nombre)}
+                    >
+                      {t.alertas.borrar}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
@@ -606,7 +686,6 @@ function claseDeFila(elegida: boolean, activa: boolean): string {
 function Aviso({
   tipo,
   ajuste,
-  medios,
   busy,
   onCambiar,
   onProbar,
@@ -614,7 +693,6 @@ function Aviso({
 }: {
   tipo: TipoAviso;
   ajuste: AjusteAviso;
-  medios: string[];
   busy: boolean;
   onCambiar: (tipo: TipoAviso, campo: keyof AjusteAviso, valor: AjusteAviso[keyof AjusteAviso]) => void;
   onProbar: (tipo: TipoAviso) => void;
@@ -686,55 +764,61 @@ function Aviso({
           solo le daba 379, así que el marco le recortaba 154. Un par de campos que
           se leen juntos no debe replegarse. */}
       <div className="campos-par">
+        {/* Lo que tiene puesto, en una línea, y **no un desplegable**: los mismos
+            ficheros ya están en la lista de medios, y repetirlos aquí dentro era
+            tener dos listas de lo mismo —con ciento cincuenta nombres en cada una—.
+            Se elige allí, con su buscador; aquí solo se ve qué hay puesto y se
+            quita. */}
         <div className="campo">
           <label htmlFor={`medio-${tipo}`}>{t.alertas.medio}</label>
-          <select
-            id={`medio-${tipo}`}
-            value={ajuste.medio}
-            disabled={busy}
-            onChange={(evento) => onCambiar(tipo, "medio", evento.target.value)}
-          >
-            <option value="">{t.alertas.sinMedio}</option>
-            {medios.map((nombre) => (
-              <option key={nombre} value={nombre}>
-                {nombre}
-              </option>
-            ))}
-          </select>
+          <div className="asignado" id={`medio-${tipo}`}>
+            <span className={ajuste.medio ? "asignado-nombre" : "asignado-nombre vacio"}>
+              {ajuste.medio || t.alertas.sinMedio}
+            </span>
+            {ajuste.medio ? (
+              <button
+                type="button"
+                className="ghost tiny"
+                title={t.alertas.quitarHint}
+                disabled={busy}
+                onClick={() => onCambiar(tipo, "medio", "")}
+              >
+                {t.alertas.quitar}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="campo">
           <label htmlFor={`sonido-${tipo}`}>{t.alertas.sonido}</label>
-          {/* El botón, **al lado del selector**: elegir un sonido de una lista de
-              nombres no dice cómo suena, y hasta ahora había que probar la alerta
-              entera —con su texto y su medio— para averiguarlo. */}
-          <div className="campo-fila">
-            <select
-              id={`sonido-${tipo}`}
-              value={ajuste.sonido}
-              disabled={busy}
-              onChange={(evento) => onCambiar(tipo, "sonido", evento.target.value)}
-            >
-              <option value="">{t.alertas.sinSonido}</option>
-              {medios
-                // Solo lo que puede sonar: ofrecer un PNG en la lista de sonidos
-                // seria ofrecer algo que no va a sonar.
-                .filter((nombre) => suena(nombre))
-                .map((nombre) => (
-                  <option key={nombre} value={nombre}>
-                    {nombre}
-                  </option>
-                ))}
-            </select>
-            <button
-              type="button"
-              className="ghost"
-              title={t.alertas.oirHint}
-              disabled={!ajuste.sonido}
-              onClick={() => onOir(ajuste.sonido)}
-            >
-              {t.alertas.oir}
-            </button>
+          <div className="asignado" id={`sonido-${tipo}`}>
+            <span className={ajuste.sonido ? "asignado-nombre" : "asignado-nombre vacio"}>
+              {ajuste.sonido || t.alertas.sinSonido}
+            </span>
+            {/* Oír, al lado de lo que está puesto: elegir un sonido de una lista de
+                nombres no dice cómo suena, y había que probar la alerta entera
+                —con su texto y su medio— para averiguarlo. */}
+            {ajuste.sonido ? (
+              <>
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  title={t.alertas.oirHint}
+                  onClick={() => onOir(ajuste.sonido)}
+                >
+                  {t.alertas.oir}
+                </button>
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  title={t.alertas.quitarHint}
+                  disabled={busy}
+                  onClick={() => onCambiar(tipo, "sonido", "")}
+                >
+                  {t.alertas.quitar}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
