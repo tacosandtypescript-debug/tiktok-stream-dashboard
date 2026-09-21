@@ -13,7 +13,7 @@
 import { useState } from "react";
 
 import { t } from "../i18n/es";
-import { idiomaLegible } from "./tipos";
+import { esVozDeFish, idiomaLegible } from "./tipos";
 
 /** Lo que se puede hacer con una voz desde su tarjeta. */
 export interface AccionesVoz {
@@ -200,9 +200,7 @@ export function TarjetaVoz({
 
 /** El rotulo del motor, corto: es lo que distingue una voz de otra en la tarjeta. */
 export function motorDeVoz(proveedor: string): string {
-  return proveedor === "fish" || proveedor === "fish-audio"
-    ? t.tts.voiceProvider.fish
-    : t.tts.voiceProvider.edge;
+  return esVozDeFish(proveedor) ? t.tts.voiceProvider.fish : t.tts.voiceProvider.edge;
 }
 
 /** El idioma, ya legible. Se exporta para no repetir el `??` en cada sitio. */

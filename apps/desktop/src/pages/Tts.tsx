@@ -21,7 +21,7 @@ import { Anillo, Card, Empty, formatDuration, formatNumber } from "../components
 import { t } from "../i18n/es";
 import { BibliotecaVoces } from "../voces/BibliotecaVoces";
 import { MenuVoz } from "../voces/MenuVoz";
-import { vozGuardada } from "../voces/tipos";
+import { esVozDeFish, vozGuardada } from "../voces/tipos";
 
 /** Ritmos que entiende edge-tts. */
 const RATES = ["-50%", "-25%", "+0%", "+25%", "+50%", "+100%"];
@@ -365,7 +365,7 @@ export function Tts({ initial, urlOverlay }: Props) {
    * voz del mismo motor no tiene por qué cortar lo que está leyendo.
    */
   const usarVoz = (voz: TtsVozGuardada) => {
-    const esFish = voz.proveedor === "fish";
+    const esFish = esVozDeFish(voz.proveedor);
     const motor: TtsProvider = esFish ? "fish" : "edge";
     const cambio = motor === status.voz.proveedor ? {} : { provider: motor };
     if (esFish) {

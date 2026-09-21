@@ -48,7 +48,35 @@ pub const DEV_PYTHON: &str = ".tooling/venv/Scripts/python.exe";
 /// hacer incluye volver a abrir la aplicacion, que es lo que faltaba decir: la
 /// ruta del motor se resuelve **una vez, al arrancar**, asi que copiar el fichero
 /// con la aplicacion abierta no arregla nada hasta reiniciarla.
-pub const SIN_MOTOR: &str = "falta el motor de voz. Descarga tiktok-tts-provider-x86_64-pc-windows-msvc.exe, ponlo en la misma carpeta que la aplicacion y vuelve a abrirla";
+///
+/// La **carpeta** va dentro del mensaje a proposito. «Ponlo en la misma carpeta
+/// que la aplicacion» no sirve de nada cuando no sabes cual es esa carpeta: el
+/// navegador deja el motor en `Descargas` y la aplicacion se abre desde otro
+/// sitio. Fue el unico fallo real de la v0.4.0 en un equipo ajeno —el aviso
+/// mandaba a un sitio sin decir cual—, y por eso ahora lo nombra.
+pub fn sin_motor(carpeta: Option<&Path>) -> String {
+    let nombre = sidecar_filename();
+    match carpeta {
+        Some(carpeta) => format!(
+            "falta el motor de voz. Descarga {nombre} y ponlo en {}, junto a la aplicacion, y vuelve a abrirla",
+            carpeta.display()
+        ),
+        None => format!(
+            "falta el motor de voz. Descarga {nombre} y ponlo junto a la aplicacion, y vuelve a abrirla"
+        ),
+    }
+}
+
+/// La carpeta donde la aplicacion busca el motor: la suya.
+///
+/// Sale de aqui y no de `provider.rs` para que el aviso y la busqueda
+/// (`sidecar_candidates`) no puedan discrepar: los dos miran la carpeta del
+/// ejecutable.
+pub fn carpeta_de_la_aplicacion() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
 
 /// Sufijo que Tauri exige en `src-tauri/binaries/` para el binario de cada
 /// arquitectura. El proyecto publica Windows x64 por ahora; si se habilita
@@ -196,6 +224,33 @@ mod tests {
     // La composicion de la frase que se lee ya no vive aqui: se mudo a
     // `tts::plantilla`, con sus variables y sus pruebas. Estas dos se han ido con
     // ella en vez de quedarse duplicadas.
+
+    /// El aviso tiene que decir **donde**, no solo que falta.
+    ///
+    /// El fallo de la v0.4.0 en un equipo ajeno fue exactamente ese: el mensaje
+    /// mandaba a «la misma carpeta que la aplicacion» sin decir cual, y el motor
+    /// estaba en `Descargas`. Sin el nombre del fichero y la carpeta, el aviso no
+    /// se puede seguir.
+    #[test]
+    fn el_aviso_de_motor_ausente_dice_el_fichero_y_la_carpeta() {
+        let aviso = sin_motor(Some(Path::new("C:/TikTokDashboard")));
+        assert!(
+            aviso.contains(&sidecar_filename()),
+            "el aviso no nombra el fichero que falta: {aviso}"
+        );
+        assert!(
+            aviso.contains("TikTokDashboard"),
+            "el aviso no dice en que carpeta se ha buscado: {aviso}"
+        );
+        assert!(
+            aviso.contains("vuelve a abrirla"),
+            "el aviso se deja fuera lo unico que se puede hacer: {aviso}"
+        );
+
+        // Sin carpeta conocida no se inventa una ruta: sigue diciendo el fichero.
+        let sin_carpeta = sin_motor(None);
+        assert!(sin_carpeta.contains(&sidecar_filename()));
+    }
 
     #[test]
     fn la_configuracion_apunta_a_un_script_existente_en_este_repositorio() {

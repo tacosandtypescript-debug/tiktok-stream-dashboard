@@ -223,6 +223,21 @@ export function claveDeVoz(voz: { proveedor: string; referencia: string }): stri
   return `${voz.proveedor}:${voz.referencia}`;
 }
 
+/**
+ * Si una voz guardada es de Fish Audio.
+ *
+ * El proveedor de Fish tiene **dos formas** en el repositorio y las dos son
+ * legitimas: el catalogo guarda `fish-audio` —que es el `PROVIDER_ID` de Rust— y
+ * el motor se llama `fish`. Comparar con una sola de las dos fue un fallo real:
+ * una voz guardada desde el catalogo no se reconocia como de Fish, su codigo se
+ * escribia en «Voz en español» y, con la voz de siempre puesta, el sidecar
+ * respondia `ValueError: Invalid voice '8d2c17a9…'`. La comprobacion vive aqui,
+ * en un solo sitio, para que no vuelva a haber dos listas que se desincronicen.
+ */
+export function esVozDeFish(proveedor: string): boolean {
+  return proveedor === "fish" || proveedor === "fish-audio";
+}
+
 /** Si esa voz ya esta en «Mis voces». */
 export function estaGuardada(
   guardadas: TtsVozGuardada[],

@@ -453,6 +453,17 @@ async fn stop_sidecar(sidecar: &mut Option<Sidecar>) {
     }
 }
 
+/// La carpeta que se le enseña al streamer cuando falta el motor de voz.
+///
+/// Si el motor ya se habia resuelto, la suya: es donde la aplicacion lo espera.
+/// Si no se resolvio nunca, la de la propia aplicacion, que es donde lo busca
+/// `sidecar_candidates` antes de mirar el arbol de trabajo.
+fn carpeta_del_motor(resuelto: Option<&Path>) -> Option<PathBuf> {
+    resuelto
+        .and_then(|ruta| ruta.parent().map(Path::to_path_buf))
+        .or_else(crate::tts::carpeta_de_la_aplicacion)
+}
+
 /// Salida temporal que se borra incluso si la tarea de síntesis es abortada.
 /// Solo se conserva después de que `rename` haya publicado el MP3 completo.
 struct TempOutput {
@@ -678,7 +689,10 @@ impl EdgeTtsSidecar {
                     executable = %executable.display(),
                     "el ejecutable del motor de voz desaparecio despues de resolverlo"
                 );
-                bail!("{}", crate::tts::SIN_MOTOR);
+                bail!(
+                    "{}",
+                    crate::tts::sin_motor(carpeta_del_motor(Some(executable)).as_deref())
+                );
             }
             Command::new(executable)
         } else {
@@ -687,7 +701,10 @@ impl EdgeTtsSidecar {
                     script = %self.config.script.display(),
                     "sin motor de voz: ni ejecutable congelado ni script de desarrollo"
                 );
-                bail!("{}", crate::tts::SIN_MOTOR);
+                bail!(
+                    "{}",
+                    crate::tts::sin_motor(carpeta_del_motor(None).as_deref())
+                );
             }
             let mut command = Command::new(&self.config.python);
             command.arg(&self.config.script);

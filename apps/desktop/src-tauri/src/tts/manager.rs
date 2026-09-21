@@ -251,7 +251,7 @@ impl Default for TtsSettings {
         Self {
             enabled: true,
             voice_es: voices::DEFAULT_VOICE.to_string(),
-            voice_en: "en-US-AriaNeural".to_string(),
+            voice_en: voices::DEFAULT_VOICE_EN.to_string(),
             say_author: true,
             chat_template: plantilla::CHAT_POR_DEFECTO.to_string(),
             gift_template: plantilla::REGALO_POR_DEFECTO.to_string(),
@@ -292,6 +292,22 @@ impl TtsSettings {
         if !traia_plantilla && !decia_autor {
             ajustes.chat_template = plantilla::CHAT_SOLO_MENSAJE.to_string();
         }
+
+        // Una voz de edge que no puede serlo se pone al dia **al leer el perfil**.
+        // Es lo que arregla una instalacion ya guardada con el codigo de Fish dentro
+        // de `voice_es`, sin migracion y sin que el streamer toque nada.
+        let es = voices::voz_de_edge(&ajustes.voice_es, voices::DEFAULT_VOICE);
+        let en = voices::voz_de_edge(&ajustes.voice_en, voices::DEFAULT_VOICE_EN);
+        if es != ajustes.voice_es.trim() || en != ajustes.voice_en.trim() {
+            tracing::warn!(
+                voice_es = %ajustes.voice_es,
+                voice_en = %ajustes.voice_en,
+                "el perfil traia una voz de edge que no es un ShortName; se pone la de fabrica"
+            );
+            ajustes.voice_es = es;
+            ajustes.voice_en = en;
+        }
+
         Ok(ajustes)
     }
 }
@@ -1042,7 +1058,22 @@ impl TtsManager {
             (settings.provider, settings.fish.reference_id.clone())
         };
         match provider {
-            VoiceProvider::Edge => voice_for(texto, voice_es, voice_en),
+            VoiceProvider::Edge => {
+                // Ultima guarda antes del sidecar: la interfaz deja escribir la voz a
+                // mano, asi que lo que no puede ser un ShortName de edge no se manda.
+                // Sin esto, edge-tts responde `ValueError: Invalid voice '8d2c17a9…'`
+                // y el streamer se queda sin voz por un ajuste mal guardado.
+                let es = voices::voz_de_edge(voice_es, voices::DEFAULT_VOICE);
+                let en = voices::voz_de_edge(voice_en, voices::DEFAULT_VOICE_EN);
+                if es != voice_es.trim() || en != voice_en.trim() {
+                    tracing::warn!(
+                        voice_es = %voice_es,
+                        voice_en = %voice_en,
+                        "una voz de edge guardada no es un ShortName: se lee con la de fabrica"
+                    );
+                }
+                voice_for(texto, &es, &en)
+            }
             VoiceProvider::Fish => reference_id,
         }
     }
@@ -3062,6 +3093,33 @@ mod tests {
         assert_eq!(viejo.provider, VoiceProvider::Edge);
         assert_eq!(viejo.fish.model, fish::MODELO_POR_DEFECTO);
         assert!(viejo.fish.reference_id.is_empty());
+    }
+
+    /// Un perfil guardado con un codigo de Fish en `voice_es` se pone al dia solo.
+    ///
+    /// Es el fallo real de la v0.4.0 en un equipo ajeno: la voz guardada desde el
+    /// catalogo lleva `fish-audio`, la interfaz la comparaba con `fish` y escribia su
+    /// codigo en «Voz en español». Con la voz de siempre puesta, el sidecar recibia
+    /// el codigo y respondia `ValueError: Invalid voice '8d2c…'`: el streamer se
+    /// quedaba sin voz y el perfil seguia roto aunque se arreglara la interfaz.
+    #[test]
+    fn un_perfil_con_un_codigo_de_fish_en_la_voz_de_edge_se_repara_al_leerlo() {
+        let guardado = r#"{
+            "voice_es": "8d2c17a9b26d4d83888ea67a1ee565b2",
+            "voice_en": "en-GB-SoniaNeural"
+        }"#;
+
+        let ajustes = TtsSettings::desde_json(guardado).expect("perfil");
+
+        assert_eq!(ajustes.voice_es, voices::DEFAULT_VOICE, "voz reparada");
+        assert_eq!(
+            ajustes.voice_en, "en-GB-SoniaNeural",
+            "la que si era una voz de edge no se toca"
+        );
+
+        // Y el texto se lee con una voz que edge-tts acepta: es lo que evita el
+        // `ValueError` del sidecar.
+        assert!(voices::es_shortname_de_edge(&ajustes.voice_es));
     }
 
     /// Regresion: la velocidad y el tono se quedaban en los ajustes del gestor y

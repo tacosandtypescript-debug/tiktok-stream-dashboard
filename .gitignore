@@ -15,6 +15,9 @@ dist/
 dist-ssr/
 *.local
 
+# ZIP de la release (lo arma scripts/empaquetar-release.ps1)
+dist-release/
+
 # Salidas de Tauri (un patron con barra ancla a la raiz: hace falta **/)
 **/src-tauri/target/
 **/src-tauri/gen/

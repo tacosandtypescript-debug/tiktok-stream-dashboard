@@ -32,6 +32,7 @@ import { useCatalogo } from "./useCatalogo";
 import {
   claveDeVoz,
   detalleDeGuardada,
+  esVozDeFish,
   estaGuardada,
   filtrarVoces,
   idiomaLegible,
@@ -194,7 +195,7 @@ function CuerpoBiblioteca({
    */
   useEffect(() => {
     setFresca(null);
-    if (detalle?.tipo !== "guardada" || detalle.voz.proveedor !== "fish-audio") return;
+    if (detalle?.tipo !== "guardada" || !esVozDeFish(detalle.voz.proveedor)) return;
     const referencia = detalle.voz.referencia;
     let vivo = true;
     void vocesApi
@@ -254,7 +255,7 @@ function CuerpoBiblioteca({
       pista: voz.referencia,
       onClick: () => void navigator.clipboard?.writeText(voz.referencia),
     },
-    ...(voz.proveedor === "fish-audio"
+    ...(esVozDeFish(voz.proveedor)
       ? [
           {
             etiqueta:
@@ -278,7 +279,7 @@ function CuerpoBiblioteca({
   ];
 
   const estaEnUso = (voz: TtsVozGuardada) =>
-    voz.proveedor === "fish-audio"
+    esVozDeFish(voz.proveedor)
       ? proveedor === "fish" && voz.referencia === referenciaEnUso
       : proveedor === "edge" &&
         voz.referencia === (voz.idioma === "en" ? edgeEnUso.en : edgeEnUso.es);
@@ -513,7 +514,7 @@ function CuerpoBiblioteca({
             guardada={detalle.tipo === "guardada"}
             onCerrar={() => setDetalle(null)}
             onGenerarPrueba={
-              detalle.tipo === "guardada" && detalle.voz.proveedor === "fish-audio"
+              detalle.tipo === "guardada" && esVozDeFish(detalle.voz.proveedor)
                 ? async () => {
                     const archivo = await vocesApi.probar(detalle.voz.referencia);
                     return urlPrueba(urlOverlay, archivo) ?? archivo;

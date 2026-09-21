@@ -40,6 +40,35 @@ impl Language {
 /// Voz por defecto: español neutro y femenino, la mas habitual en directo.
 pub const DEFAULT_VOICE: &str = "es-ES-ElviraNeural";
 
+/// La de ingles, por el mismo criterio. Estaba escrita a mano en los ajustes de
+/// fabrica; vive aqui para que la guarda de abajo pueda devolverla.
+pub const DEFAULT_VOICE_EN: &str = "en-US-AriaNeural";
+
+/// Si un texto puede ser el `ShortName` de una voz de edge-tts.
+///
+/// Los `ShortName` llevan **siempre** guiones (`es-ES-ElviraNeural`). Un codigo de
+/// voz de Fish Audio es un hex de 32 caracteres sin ninguno, y se colaba en
+/// `voice_es` cuando la interfaz no reconocia una voz guardada como de Fish: el
+/// sidecar recibia el codigo y edge-tts respondia
+/// `ValueError: Invalid voice '8d2c17a9…'`, que dejaba al streamer sin voz.
+///
+/// La regla mira **la forma y no el catalogo** a proposito: el catalogo son las
+/// voces curadas del desplegable y edge-tts tiene muchas mas, asi que exigir
+/// pertenencia romperia una voz escrita a mano que si funciona.
+pub fn es_shortname_de_edge(voz: &str) -> bool {
+    let voz = voz.trim();
+    !voz.is_empty() && voz.contains('-') && !voz.contains(char::is_whitespace)
+}
+
+/// La voz pedida si puede ser de edge-tts, y si no la de fabrica.
+pub fn voz_de_edge(voz: &str, fabrica: &str) -> String {
+    if es_shortname_de_edge(voz) {
+        voz.trim().to_string()
+    } else {
+        fabrica.to_string()
+    }
+}
+
 const CATALOG: &[(&str, &str, Language, Gender)] = &[
     // Espanol: Espana
     (
@@ -245,5 +274,37 @@ mod tests {
         assert_eq!(detect_language("gg wp"), Language::En);
         // Sin letras no hay nada que detectar: se cae al idioma por defecto.
         assert_eq!(detect_language("123 456"), Language::Es);
+    }
+
+    /// Un codigo de Fish no puede acabar en el sidecar de edge-tts.
+    ///
+    /// Es el fallo que dejo un equipo sin voz: la voz guardada desde el catalogo
+    /// lleva `fish-audio`, la interfaz la comparaba con `fish`, no la reconocia como
+    /// de Fish y escribia el codigo en `voice_es`. El sidecar respondia
+    /// `ValueError: Invalid voice '8d2c17a9b26d4d83888ea67a1ee565b2'`.
+    #[test]
+    fn un_codigo_de_fish_no_pasa_por_una_voz_de_edge() {
+        let codigo = "8d2c17a9b26d4d83888ea67a1ee565b2";
+        assert!(!es_shortname_de_edge(codigo));
+        assert_eq!(voz_de_edge(codigo, DEFAULT_VOICE), DEFAULT_VOICE);
+        assert_eq!(voz_de_edge(codigo, DEFAULT_VOICE_EN), DEFAULT_VOICE_EN);
+
+        // Lo que si es una voz de edge se respeta **aunque no este en el catalogo
+        // curado**: edge-tts tiene mas voces que el desplegable, y exigir
+        // pertenencia romperia una que funciona.
+        assert_eq!(
+            voz_de_edge("pt-BR-FranciscaNeural", DEFAULT_VOICE),
+            "pt-BR-FranciscaNeural"
+        );
+        assert_eq!(
+            voz_de_edge("  es-ES-AlvaroNeural  ", DEFAULT_VOICE),
+            "es-ES-AlvaroNeural"
+        );
+
+        // Y lo vacio, lo que lleva aire dentro o lo que no trae guion no cuela.
+        assert!(!es_shortname_de_edge(""));
+        assert!(!es_shortname_de_edge("   "));
+        assert!(!es_shortname_de_edge("es ES Elvira Neural"));
+        assert_eq!(voz_de_edge("", DEFAULT_VOICE), DEFAULT_VOICE);
     }
 }
