@@ -96,45 +96,50 @@
 
         // --- Tamano de las pelotas -------------------------------------------
         //
-        // El radio sale de la RAIZ del valor, asi que lo proporcional es el
-        // **area**, que es lo que el ojo compara. Quien tiene mas taps es el mas
-        // grande y las diferencias relativas salen de ahi: eso no se toca.
-
-        /**
-         * Escala global del conjunto: reduce el tamano de **todas** por igual.
-         *
-         * Multiplicar todos los radios por el mismo numero no cambia quien es mas
-         * grande ni cuanto —las proporciones entre usuarios son las mismas—, solo
-         * cambia cuanto ocupan. Se baja porque con muchos taps el nº1 se comia la
-         * franja: tapaba a las demas y no dejaba sitio para que la fisica corriera.
-         */
-        const ESCALA_PELOTAS = 0.8;
+        // El tamano es una **recompensa que se acumula**: sale de los taps que lleva
+        // cada persona, no de la comparacion con los demas. La cuenta esta en
+        // `repartirRadios`.
 
         /**
          * Radio minimo y maximo, en px.
          *
-         * El maximo son los 124,8 de antes por 0,8 —la misma escala— para que
-         * `radio / RADIO_MAX`, que es lo que gobierna el peso del movimiento, la
-         * masa relativa y la profundidad del pintado, siga valiendo exactamente lo
-         * mismo con las pelotas mas pequenas.
-         *
-         * El minimo baja de 30 a 26, y no mas: por debajo el aro se come la foto y
-         * la inicial deja de leerse. Un poco menos de diferencia de tamano entre el
-         * primero y el ultimo es preferible a una pelota que no se distingue.
+         * Los dos son el suelo y el techo de la interpolacion, y el minimo es tambien
+         * el suelo de legibilidad: por debajo de 26 px el aro se come la foto y la
+         * inicial deja de leerse. El maximo son los 124,8 que pedia la franja por 0,8
+         * —la escala global que se bajo cuando el nº1 se comia el lienzo— y es el
+         * tamano mas grande que cabe sin tapar a las demas.
          */
         const RADIO_MIN = 26;
         const RADIO_MAX = 100;
-        const AREA_FRACCION = 0.22;
+
+        /**
+         * Taps a los que una pelota llega a su tamano maximo.
+         *
+         * Es la cifra que gobierna el crecimiento entero: 0 taps es el minimo, 7.500 la
+         * mitad del recorrido y 15.000 el tope. Mas alla **no crece**, para que un
+         * directo largo no acabe con diez pelotas gigantes.
+         */
+        const TAPS_TOPE = 15000;
+
+        /**
+         * Tope de area del conjunto, como fraccion de la franja.
+         *
+         * Es una **red de seguridad**, no la curva: si las pelotas que piden tamano
+         * grande no caben juntas, se comprime lo que sobresale del minimo —nunca el
+         * minimo, que es la legibilidad—. Sale de los 0,22 de antes por la escala global
+         * de 0,8 al cuadrado (0,22 x 0,64 = 0,14), que es lo que ocupaba el conjunto
+         * cuando se bajo la escala y se vio que asi la fisica tenia sitio para correr.
+         */
+        const AREA_TOPE = 0.14;
         const TOPE = 12;
 
         /**
          * Radio a partir del cual una pelota lleva etiqueta (nombre y cifra).
          *
-         * Baja con la escala: con el umbral fijo en 52, al encoger el conjunto la
-         * misma persona que antes enseñaba su nombre dejaria de enseñarlo. Lo que
-         * tiene que cambiar con el tamano es el tamano, no la informacion.
+         * Son los 52 de antes por la misma escala de 0,8: lo que tiene que encoger con
+         * el tamano es el tamano, no la informacion.
          */
-        const RADIO_ETIQUETA = 52 * ESCALA_PELOTAS;
+        const RADIO_ETIQUETA = 42;
 
         // --- Movimiento ------------------------------------------------------
 
@@ -495,48 +500,42 @@
         // --- Reparto de radios -----------------------------------------------
 
         /**
-         * Reparte el area de la franja entre las pelotas segun su aportacion.
+         * Convierte los taps de cada persona en el tamano de su pelota.
          *
-         * Tres pasos, en el orden de las prioridades —legible, nº1 contenida,
-         * proporciones, aire—:
+         * Dos pasos, y el primero es el que manda:
          *
-         *   1. **La forma**: el radio va con la raiz del valor (`sqrt(v / max)`),
-         *      asi que lo proporcional es el area, que es lo que el ojo compara.
-         *      Esto **no** se toca: quien mas taps tiene sigue siendo el mas grande
-         *      y las diferencias relativas son las de siempre.
-         *   2. **El tamano global**: `ESCALA_PELOTAS` reduce el conjunto entero.
-         *      Multiplicar todos por lo mismo deja las proporciones intactas.
-         *   3. **Los topes**. El de arriba **no recorta a la nº1**: si se pasa de
-         *      `RADIO_MAX` se reduce el conjunto otra vez, para que la forma se
-         *      mantenga en vez de quedar una nº1 clavada con el resto sin encoger.
-         *      El de abajo levanta a las pequenas hasta el minimo legible y, si con
-         *      eso el area se pasa del presupuesto, comprime **lo que sobresale del
-         *      minimo**, que es lo unico que se puede comprimir sin volver a dejarlas
-         *      ilegibles.
+         *   1. **La curva, absoluta**: `progreso = taps / TAPS_TOPE`, saturado a 1. Con
+         *      0 taps la pelota esta en el minimo, a 7.500 exactamente a la mitad del
+         *      recorrido y a 15.000 en el maximo. De ahi para arriba ya no crece.
+         *   2. **El tope de area**, que es red de seguridad y no curva: si las que piden
+         *      tamano grande no caben juntas en la franja, se comprime lo que sobresale
+         *      del minimo —nunca el minimo— y el reparto se queda como estaba, solo mas
+         *      pequeno. Con una nº1 destacada y una cola corta no llega a entrar.
+         *
+         * Antes la curva era **relativa**: `sqrt(v / v_max)` de la tabla de cada vuelta.
+         * Aquello ponia a la nº1 llena siempre —con 40 taps o con 40.000— porque la
+         * escala se reajustaba sola en cada actualizacion, y el tamano acababa diciendo
+         * quien iba primero, no cuanto se habia tocado. Con la curva absoluta el tamano
+         * se acumula durante el directo, que es lo que se pidio: crecimiento lento,
+         * gradual, y con recorrido para una live larga.
+         *
+         * Lo que **no** cambia: el reparto sigue siendo monotono en taps (quien mas
+         * tiene nunca es mas pequeno) y el minimo sigue siendo el mismo suelo legible.
          */
         function repartirRadios(entradas) {
-          const maximo = entradas.reduce((tope, e) => Math.max(tope, Number(e.value) || 0), 0);
-          if (maximo <= 0) return new Map();
+          // 1. La curva: absoluta, saturada y sin escalones.
+          const progreso = entradas.map((e) =>
+            Math.max(0, Math.min(1, (Number(e.value) || 0) / TAPS_TOPE)),
+          );
+          const ideales = progreso.map((t) => RADIO_MIN + (RADIO_MAX - RADIO_MIN) * t);
 
-          const raices = entradas.map((e) => Math.sqrt((Number(e.value) || 0) / maximo));
-
-          // 1 y 2: la forma, con el tamano global.
-          const sumaCuadrados = raices.reduce((suma, r) => suma + r * r, 0) || 1;
-          const presupuesto = ZONA_ANCHO * ZONA_ALTO * AREA_FRACCION;
-          let k = Math.sqrt(presupuesto / (Math.PI * sumaCuadrados)) * ESCALA_PELOTAS;
-
-          // 3a: el tope de arriba, encogiendo el conjunto entero.
-          const mayor = Math.max(...raices) || 1;
-          if (k * mayor > RADIO_MAX) k = RADIO_MAX / mayor;
-
-          // 3b: el minimo legible.
-          const sobresale = raices.map((r) => Math.max(0, k * r - RADIO_MIN));
-
-          // 3c: si con el minimo el conjunto no cabe, se comprime lo que sobresale.
-          // El area con el factor `f` es un polinomio de segundo grado en `f`
-          // —`pi * (n*m^2 + 2*m*f*S1 + f^2*S2)`—, asi que el factor que la deja justo
-          // en el presupuesto sale de la raiz positiva de la ecuacion.
-          const n = raices.length;
+          // 2. El tope de area: se comprime lo que sobresale del minimo. El area con el
+          // factor `f` es un polinomio de segundo grado en `f` —`pi * (n*m^2 +
+          // 2*m*f*S1 + f^2*S2)`—, asi que el factor que la deja justo en el tope sale de
+          // la raiz positiva de la ecuacion.
+          const sobresale = ideales.map((r) => Math.max(0, r - RADIO_MIN));
+          const n = entradas.length;
+          const presupuesto = ZONA_ANCHO * ZONA_ALTO * AREA_TOPE;
           const sumaSobra = sobresale.reduce((suma, d) => suma + d, 0);
           const sumaSobra2 = sobresale.reduce((suma, d) => suma + d * d, 0);
           let factor = 1;
@@ -554,9 +553,6 @@
 
           const radios = new Map();
           entradas.forEach((e, i) => {
-            // El area se reparte por `sobresale`, que ya lleva la escala y el tope
-            // de arriba: la proporcion entre los que pasan del minimo es la misma
-            // que pide el reparto.
             radios.set(window.ritmo.clave(e, i), RADIO_MIN + sobresale[i] * factor);
           });
           return radios;
@@ -1475,6 +1471,10 @@
           // donde se ve si el minimo legible y el tope de arriba hacen su trabajo.
           { id: "parejos", ms: 7000, toque: 0.5, alEntrar: "parejos" },
           { id: "escalera", ms: 8000, toque: 0.3, alEntrar: "escalera" },
+          // Los puntos de referencia del encargo, uno por pelota, con el par 5.000 /
+          // 5.001 para poder comprobar que **un solo tap** cambia la escala. Sin taps de
+          // fondo: si los hubiera, las cifras se moverian y la tabla no se podria leer.
+          { id: "progresion", ms: 12000, toque: 0, alEntrar: "progresion" },
           { id: "tranquilo", ms: 6000, toque: 0 },
         ];
 
@@ -1545,18 +1545,25 @@
               sim.valores.set(id, id === jefe ? Math.round(valorSim(id) * 12) + 400 : Math.round(valorSim(id) * 0.2));
             }
           } else if (e.alEntrar === "parejos") {
-            // Todos con los mismos taps (dentro de un 8%): el reparto tiene que
-            // sacar diez pelotas del mismo tamano, sin que el minimo las aplaste.
-            const alto = Math.max(...sim.activos.map(valorSim));
+            // Todos rozando el tope de taps: es el caso en el que el tope de area tiene
+            // que entrar, porque diez pelotas al maximo no caben en la franja.
             for (const id of sim.activos) {
-              sim.valores.set(id, Math.round(alto * (0.92 + sim.azar() * 0.08)));
+              sim.valores.set(id, Math.round(TAPS_TOPE * (0.92 + sim.azar() * 0.08)));
             }
           } else if (e.alEntrar === "escalera") {
-            // Cada puesto con la mitad de taps que el anterior: el ultimo acaba con
-            // muy pocos, que es el caso del que casi no toca.
-            const alto = Math.max(...sim.activos.map(valorSim), 4000);
+            // Cada puesto con la mitad de taps que el anterior, desde el tope hacia
+            // abajo: se ve la curva entera (15.000, 7.500, 3.750…) de un vistazo.
+            const alto = Math.max(...sim.activos.map(valorSim), TAPS_TOPE);
             sim.activos.forEach((id, i) => {
               sim.valores.set(id, Math.max(20, Math.round(alto / Math.pow(2, i))));
+            });
+          } else if (e.alEntrar === "progresion") {
+            // Los valores de referencia del encargo —0, 350, 1.000, 3.000, 5.000,
+            // 7.500, 10.000, 12.500 y 15.000— mas el 5.001, que tiene que dar un tamano
+            // distinto del 5.000 aunque sea por milesimas.
+            const referencia = [15000, 12500, 10000, 7500, 5001, 5000, 3000, 1000, 350, 0];
+            sim.activos.forEach((id, i) => {
+              sim.valores.set(id, referencia[i] ?? 0);
             });
           }
           sim.ultimaRafaga = 0;
@@ -1566,8 +1573,12 @@
         }
 
         function arrancarSimulacion() {
+          // Los valores de partida van por la mitad del recorrido —entre 2.000 y 9.000
+          // taps, que son radios de 36 a 70— y no cerca de cero: con la curva absoluta,
+          // empezar en cientos de taps dejaria las diez pelotas en el minimo y no se
+          // podria juzgar ni el crecimiento ni los choques de una pelota grande.
           for (const id of sim.activos) {
-            sim.valores.set(id, Math.round(200 + sim.azar() * 1400));
+            sim.valores.set(id, Math.round(2000 + sim.azar() * 7000));
           }
           entrarEnEscenario(escenarioSim());
         }
