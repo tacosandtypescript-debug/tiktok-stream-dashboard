@@ -68,6 +68,19 @@ pub const VISTA_ALERTAS: &str = "alerts";
 const PAGINA_ALERTAS: &str = include_str!("web/alertas.html");
 const CLIENTE_ALERTAS: &str = include_str!("web/alertas.js");
 
+/// El contenedor del mensaje de las alertas, en cinco piezas.
+///
+/// Va aparte del cliente de alertas porque es **otro sistema**: los estilos, las
+/// animaciones del contenedor, las de sus letras y el pintor no se tocan entre si, y
+/// añadir un preset o una animacion nueva no obliga a abrir un fichero de mil lineas.
+/// Cada pieza se sirve por su cuenta, como `comun.css` y `anim.js`.
+const MENSAJE_CSS: &str = include_str!("web/mensaje/estilos.css");
+const MENSAJE_CONFIG: &str = include_str!("web/mensaje/config.js");
+const MENSAJE_PRESETS: &str = include_str!("web/mensaje/presets.js");
+const MENSAJE_ANIMACIONES: &str = include_str!("web/mensaje/animaciones.js");
+const MENSAJE_TEXTO: &str = include_str!("web/mensaje/texto.js");
+const MENSAJE_RENDERER: &str = include_str!("web/mensaje/renderer.js");
+
 /// Lo que se envia por el WebSocket.
 ///
 /// `state` es la foto completa (al conectar o al refrescar OBS) y `rankings` es
@@ -244,6 +257,13 @@ pub fn spawn(state: Arc<AppState>, config: &OverlayConfig) -> anyhow::Result<u16
                     .route("/comun.js", get(runtime_compartido))
                     .route("/anim.js", get(animaciones))
                     .route("/alertas.js", get(cliente_alertas))
+                    // El contenedor del mensaje: su hoja, sus catalogos y su pintor.
+                    .route("/mensaje/estilos.css", get(mensaje_css))
+                    .route("/mensaje/config.js", get(mensaje_config))
+                    .route("/mensaje/presets.js", get(mensaje_presets))
+                    .route("/mensaje/animaciones.js", get(mensaje_animaciones))
+                    .route("/mensaje/texto.js", get(mensaje_texto))
+                    .route("/mensaje/renderer.js", get(mensaje_renderer))
                     // Los medios de las alertas: lo que el streamer ha cargado,
                     // servido desde aqui para que OBS no dependa de rutas del disco.
                     .route("/media/{nombre}", get(media))
@@ -415,6 +435,38 @@ async fn cliente_alertas() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         CLIENTE_ALERTAS,
     )
+}
+
+/// Sirve una pieza del contenedor del mensaje, con su tipo.
+///
+/// Son seis ficheros con la misma forma —una hoja o un guion, embebidos en el binario—,
+/// asi que van por un solo camino en vez de por seis funciones identicas.
+fn pieza_del_mensaje(cuerpo: &'static str, tipo: &'static str) -> Response {
+    ([(header::CONTENT_TYPE, tipo)], cuerpo).into_response()
+}
+
+async fn mensaje_css() -> Response {
+    pieza_del_mensaje(MENSAJE_CSS, "text/css; charset=utf-8")
+}
+
+async fn mensaje_config() -> Response {
+    pieza_del_mensaje(MENSAJE_CONFIG, "text/javascript; charset=utf-8")
+}
+
+async fn mensaje_presets() -> Response {
+    pieza_del_mensaje(MENSAJE_PRESETS, "text/javascript; charset=utf-8")
+}
+
+async fn mensaje_animaciones() -> Response {
+    pieza_del_mensaje(MENSAJE_ANIMACIONES, "text/javascript; charset=utf-8")
+}
+
+async fn mensaje_texto() -> Response {
+    pieza_del_mensaje(MENSAJE_TEXTO, "text/javascript; charset=utf-8")
+}
+
+async fn mensaje_renderer() -> Response {
+    pieza_del_mensaje(MENSAJE_RENDERER, "text/javascript; charset=utf-8")
 }
 
 /// Sirve un medio del almacen de alertas.

@@ -488,6 +488,48 @@ Lo que se hizo, en tres capas:
 
 Lo que queda **fuera** a proposito: el **lector de voz** (lo que se lee del chat). No es un preview, y cortarlo porque alguien prueba un sonido seria parar el directo para configurarlo. Sigue encolando, que es lo suyo.
 
+## D25 · El contenedor del mensaje: un sistema aparte del aviso (2026-09-20)
+
+El bloque del texto —el «Alguien se suscribió (3 meses)»— tenía **un solo estilo**: fondo `--velo`, borde de un píxel, radio 12, relleno 26×14, letra de 40 px con sombra. Para darle quince estilos, veinte animaciones propias y diez animaciones de letra hacía falta algo más que añadir reglas: hacía falta que **no se mezclara** con las animaciones de la alerta.
+
+Esa es la decisión de fondo: **la alerta entera y su mensaje son dos sistemas**. La alerta ya tiene entrada, permanencia y salida —mueven la caja, con el medio y el texto dentro—; el mensaje tiene las suyas, que mueven solo su bloque y sus letras. Si compartieran catálogo, elegir «Abrir en horizontal» para el mensaje cambiaría cómo entra la alerta, que es justo lo que no puede pasar.
+
+| Pieza | Dónde vive | Qué es |
+|---|---|---|
+| El modelo | `alerts/mensaje.rs` | `MensajeAviso`: 34 campos, con sus catálogos y su saneado |
+| La configuración | `overlay/web/mensaje/config.js` | los mismos topes y catálogos, y el normalizado |
+| Los estilos | `overlay/web/mensaje/presets.js` | quince presets: lo que un número no puede decir |
+| Las animaciones | `overlay/web/mensaje/animaciones.js` | entrada y permanencia del contenedor |
+| Las del texto | `overlay/web/mensaje/texto.js` | las de las letras, y el troceado |
+| El pintor | `overlay/web/mensaje/renderer.js` | el único que toca el DOM del mensaje |
+
+**Un preset es una configuración, no un componente.** Lo que un puñado de números puede decir —el fondo, el borde, el radio, el relleno, la sombra, el resplandor, la letra— viaja en los ajustes, y **el editor escribe los valores sugeridos del preset al elegirlo**, igual que hace con los efectos de permanencia. En el overlay solo queda lo que no cabe en un campo: el degradado (dos colores en un `linear-gradient`), las decoraciones —la barra lateral, las puntas de la cinta, la línea del mínimo— y el ancho completo de la barra. Eso son tres `data-*` y una función, no quince componentes.
+
+**Las animaciones se lanzan con la API del navegador, no con `@keyframes` generados.** La permanencia de la alerta genera su hoja porque es un bucle y necesita repartir el ciclo; estas son de **una sola vez** y llevan su retardo, su duración y su ritmo en la propia llamada (`element.animate`). Y hay una invariante que sostiene todo: **la última fotograma de cada animación es el estado natural** —opacidad 1, sin transformación, sin recorte—, así que al terminar queda lo que dice la hoja de estilos y no un fotograma pegado.
+
+**El retardo es del mensaje, no de la alerta.** `retardo_ms` cuenta desde que la alerta ha entrado, y con él se monta la secuencia que se venía a buscar: entra la imagen, y 250 ms después se abre el mensaje con sus palabras saliendo una a una. Con la animación en «ninguna» el mensaje se queda oculto durante el retardo, porque si no el mando no haría nada.
+
+**El panel ocupa el sitio del editor, no un diálogo.** Son treinta mandos y el editor mide 351 px, así que van en tres pestañas —estilo, texto, animación— con los mandos desplazándose por dentro. Y va ahí y no en una ventana modal por lo mismo que la previa dejó de estar detrás de una pestaña (D20): **la previa tiene que seguir a la vista** mientras se cambia el estilo. Los cambios van al marco por `postMessage` —el mismo camino que el tamaño—, así que se ven en el aviso que ya está en pantalla sin volver a dispararlo; la animación solo se repite si la han cambiado, para que escribir en un campo no deje el mensaje saltando.
+
+**La previa del panel no inventa nada.** Sigue siendo el documento que carga OBS, con el mismo renderer: lo que se ve en el marco es lo que sale en antena. Si no hay ningún aviso en pantalla no hay nada que repintar, y se pulsa Probar —que es lo que ya hacía falta para ver cualquier otro ajuste—.
+
+Dos guardas para que las dos mitades no se separen, que es la forma de romperse que este proyecto persigue:
+
+- un test en `alerts/mensaje.rs` que **lee los ficheros del overlay** y compara los catálogos en los dos sentidos: un estilo que el motor acepte y el overlay no conozca saldría con el de fábrica, sin un error y sin que nada fallara;
+- `scripts/comprobar-mensaje.mjs`, que ejecuta los módulos del overlay en Node con un `window` de mentira y comprueba el normalizado, los planes de animación —incluida la invariante de la última fotograma—, el troceado del texto y los presets.
+
+**Lo que no se toca**: `ANIMACIONES`, `PERMANENCIAS` y `RITMOS` de la alerta, ni `prepararAnimacion`, ni la cola. El mensaje se engancha donde ya se pintaba el texto —al aplicar el aviso, al enseñar la caja y al limpiar— y en ningún otro sitio.
+
+### El estilo que volvía solo a «Default» (2026-09-20)
+
+El primer día de uso salió el fallo, y su causa no estaba en la interfaz: **el motor que respondía era anterior a este ajuste**. Al elegir «Neón», la interfaz mandaba los ajustes con el campo `mensaje` dentro; el motor viejo deserializaba su estructura —que no tiene ese campo—, lo **descartaba sin dar error** y devolvía la foto sin él. La interfaz, que rellena lo que falta con lo de fábrica para poder pintar, mostraba «Default» otra vez. Tres cosas se arreglaron a raíz de eso:
+
+- **El fallback deja de ser silencioso.** Cuando el motor no manda el campo, el panel lo dice arriba y en rojo, y explica qué hacer. Rellenar lo que falta sigue siendo necesario —una foto vieja no puede tumbar la pantalla—, pero *callarse* que falta es lo que convertía un motor viejo en un «fallo del panel» imposible de diagnosticar.
+- **Un estilo no reinicia lo que no es suyo.** `parcheDeEstilo` partía de los valores de fábrica **enteros**, así que elegir «Cristal» después de poner «Máquina de escribir» borraba la animación del texto, y cambiar de preset perdía el retardo. Ahora la caja entera parte de fábrica —un estilo es una forma completa, no una mezcla con el anterior—, la letra solo se toca en lo que el estilo pide de verdad, y **las animaciones no se tocan nunca**: tienen su pestaña.
+- **Una respuesta que llega tarde no pinta.** Las acciones de alertas no se serializaban: dos guardados seguidos podían resolverse al revés y la foto vieja pisaba la nueva, con el desplegable volviendo al valor anterior. Ahora se pinta solo la foto de la última acción **pedida** (y el «ocupado» lo quita esa misma).
+
+Y quedó una prueba que faltaba: `integration_flow` guarda un estilo, comprueba que vuelve en la foto, **reabre la aplicación** y comprueba que sigue ahí; y que probar una alerta sale con el estilo guardado **sin tocar** la configuración. Es la mitad «persistencia» del sistema, que hasta entonces solo estaba cubierta por el serde de los ajustes.
+
 ## Pendiente y sin resolver: el desplazamiento inicial de la pestana Overlays
 
 Medido: al abrir **Overlays**, su panel aparece desplazado 76 px, que es **exactamente su maximo** (982 de contenido, 906 de alto). O sea, abajo del todo, con la direccion que hay que copiar fuera de la vista.

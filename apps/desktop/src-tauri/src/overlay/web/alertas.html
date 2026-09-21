@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <title>Alertas · Overlay</title>
     <link rel="stylesheet" href="comun.css" />
+    <!-- El contenedor del mensaje tiene su propia hoja: su estilo, sus decoraciones y
+         las animaciones de sus letras son un sistema aparte del de la alerta entera, y
+         mezclarlos aqui haria que tocar un preset pudiera romper la entrada del aviso. -->
+    <link rel="stylesheet" href="mensaje/estilos.css" />
     <!-- Alertas: el aviso que sale en pantalla cuando alguien regala, sigue,
          comparte, se suscribe o suelta una rafaga de likes.
 
@@ -26,7 +30,12 @@
         align-items: center;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        /* El hueco entre el medio y su mensaje. Es del **mensaje**, y por eso lo escribe
+           su renderer cuando el streamer mueve la separacion; este 14 px es el valor de
+           fabrica y el que se ve si el renderer no llega a escribir nada.
+           Sin texto, el contenedor se esconde y un `gap` con un solo hijo no separa
+           nada: no hace falta cerrarlo a mano. */
+        gap: var(--mensaje-separacion, 14px);
         max-width: 80vw;
         /* El tamaño que le ha dado el streamer a este aviso, aplicado de una vez a
            todo lo que hay dentro: el medio **y** su texto.
@@ -146,36 +155,6 @@
         display: block;
       }
 
-      /* El texto lleva respaldo oscuro y sombra: va sobre video de cualquier color,
-         que es la leccion repetida del proyecto. */
-      .aviso-texto {
-        background: var(--velo);
-        border: 1px solid var(--borde);
-        border-radius: 12px;
-        color: var(--texto);
-        font-size: 40px;
-        font-weight: 800;
-        line-height: 1.15;
-        margin: 0;
-        max-width: min(calc(70vw / var(--escala, 1)), 100vw);
-        overflow-wrap: anywhere;
-        padding: 14px 26px;
-        text-align: center;
-        text-shadow: 0 3px 12px rgba(0, 0, 0, 0.95);
-      }
-
-      /* Sin texto, la caja es solo el medio y el hueco no debe separar nada. */
-      .aviso-texto:empty {
-        display: none;
-      }
-
-      /* Un aviso sin medio ni texto no se enseña, pero si queda uno vacio por lo
-         que sea, se ve el problema en vez de un cuadro en blanco. */
-      .aviso-texto.error {
-        border-color: var(--lider);
-        color: var(--lider);
-      }
-
       .aviso {
         bottom: 8px;
         position: fixed;
@@ -200,11 +179,28 @@
       <div class="aviso-caja" id="caja">
         <img class="aviso-medio" id="imagen" alt="" />
         <video class="aviso-medio" id="video" playsinline></video>
-        <p class="aviso-texto" id="texto"></p>
+        <!-- El contenedor del mensaje. Dentro van la capa del brillo —la franja de luz
+             que lo cruza, recortada a su forma— y el texto, que es lo unico que se
+             escribe desde `alertas.js`. -->
+        <div class="aviso-mensaje" id="mensaje" hidden>
+          <span class="aviso-mensaje-capa" aria-hidden="true">
+            <span class="aviso-mensaje-brillo" id="mensaje-brillo"></span>
+          </span>
+          <span class="aviso-mensaje-texto" id="texto"></span>
+        </div>
       </div>
     </div>
     <audio id="sonido"></audio>
     <p class="aviso" id="aviso">Conectando…</p>
+    <!-- El mensaje, en cinco piezas: la configuracion, los estilos, las animaciones del
+         contenedor, las del texto y el pintor. Van antes que `alertas.js` porque es el
+         quien las usa, y separadas porque son cinco cosas distintas: añadir un preset o
+         una animacion no toca las otras cuatro. -->
+    <script src="mensaje/config.js"></script>
+    <script src="mensaje/presets.js"></script>
+    <script src="mensaje/animaciones.js"></script>
+    <script src="mensaje/texto.js"></script>
+    <script src="mensaje/renderer.js"></script>
     <script src="alertas.js"></script>
   </body>
 </html>

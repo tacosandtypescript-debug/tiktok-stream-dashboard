@@ -20,7 +20,7 @@
 //!     mil no pueden sonar igual: son tres avisos —normal, grande y enorme— y cual
 //!     toca lo decide Rust por los diamantes, no esta pagina.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   TIPOS_AVISO,
@@ -28,10 +28,13 @@ import {
   type AjusteAviso,
   type AjustesAlertas,
   type ImportacionMedios,
+  type MensajeAviso,
   type SalidaAlertas,
   type TipoAviso,
 } from "../api";
 import { Card, Copiar, DialogoConfirmacion, Empty, VistaPrevia } from "../components";
+import { PanelMensaje, rotuloMensaje } from "../PanelMensaje";
+import { mensajeDe } from "../mensaje";
 import { usePreviewAudio } from "../previewAudio";
 import {
   ANIMACIONES,
@@ -246,6 +249,14 @@ export function Alertas({
    */
   const [elegido, setElegido] = useState<TipoAviso>(TIPOS_AVISO[0]);
   /**
+   * Si el panel abierto es el del **mensaje** en vez del editor del aviso.
+   *
+   * No es un diálogo a propósito: el panel ocupa el sitio del editor, así que la lista de
+   * avisos y —lo que importa— la **previa** siguen a la vista mientras se cambia el
+   * estilo. Un diálogo taparía justo lo que hay que mirar.
+   */
+  const [editandoMensaje, setEditandoMensaje] = useState(false);
+  /**
    * El coordinador del audio de prueba.
    *
    * De aquí sale **qué está sonando** —para pintar el botón que suena como
@@ -253,7 +264,6 @@ export function Alertas({
    * tarjeta toca un `<audio>`: piden, y el coordinador decide.
    */
   const preview = usePreviewAudio();
-
   const pedirBorrado = useCallback((nombre: string, disparador: HTMLButtonElement) => {
     disparadorBorrado.current = disparador;
     setMedioPendiente(nombre);
@@ -341,6 +351,20 @@ export function Alertas({
       });
     },
     [ajustes, onGuardar],
+  );
+
+  /**
+   * Un cambio del mensaje.
+   *
+   * Va entero —el objeto del mensaje completo— y no campo a campo: es lo que hace que
+   * elegir un estilo pueda traer de una vez su fondo, su radio y su sombra, y que el
+   * motor guarde **una** versión coherente en lugar de cinco a medias.
+   */
+  const cambiarMensaje = useCallback(
+    (parche: Partial<MensajeAviso>) => {
+      cambiarVarios(elegido, { mensaje: { ...mensajeDe(ajustes[elegido]), ...parche } });
+    },
+    [ajustes, cambiarVarios, elegido],
   );
 
   // Arrastrar un fichero a la ventana. Tauri da la **ruta**, que es justo lo que
@@ -475,6 +499,15 @@ export function Alertas({
   const probando = sonando?.origen === "previa-alerta" && sonando.id === elegido;
   /** La dirección que carga el marco de la previa: la de OBS, pero muda. */
   const urlPrevia = urlDeLaPrevia(url);
+  /**
+   * El mensaje del aviso elegido, **completo**.
+   *
+   * Se calcula una vez por foto y no en cada pintado: `mensajeDe` devuelve un objeto
+   * nuevo, y `VistaPrevia` manda un mensaje al marco cada vez que cambia el suyo. Con el
+   * objeto nuevo en cada pintado, la previa recibiría un aviso por cada repintado de la
+   * página sin que nadie hubiera tocado nada.
+   */
+  const mensajeElegido = useMemo(() => mensajeDe(ajustes[elegido]), [ajustes, elegido]);
 
   return (
     <div className="grid-panel alertas">
@@ -554,19 +587,34 @@ export function Alertas({
           </div>
         </Card>
 
-        <Aviso
-          /* `key` por aviso a proposito: el borrador del texto vive dentro de
-             `Aviso`, y sin remontar el componente el del aviso anterior seguiria
-             escrito en el campo del nuevo. */
-          key={elegido}
-          tipo={elegido}
-          ajuste={ajustes[elegido]}
-          busy={busy}
-          onCambiar={cambiar}
-          onCambiarVarios={cambiarVarios}
-          onOir={onOir}
-          sonando={suenaMedio(ajustes[elegido].sonido)}
-        />
+        {/* El editor del aviso **o** el del mensaje, en el mismo sitio.
+            El del mensaje ocupa esta columna y no una nueva: el ancho que pide un
+            formulario es el que ya tiene el editor, y así ni la lista de avisos ni la
+            previa se mueven de sitio al abrirlo. */}
+        {editandoMensaje ? (
+          <PanelMensaje
+            aviso={rotuloElegido}
+            ajuste={ajustes[elegido]}
+            busy={busy}
+            onCambiar={cambiarMensaje}
+            onCerrar={() => setEditandoMensaje(false)}
+          />
+        ) : (
+          <Aviso
+            /* `key` por aviso a proposito: el borrador del texto vive dentro de
+               `Aviso`, y sin remontar el componente el del aviso anterior seguiria
+               escrito en el campo del nuevo. */
+            key={elegido}
+            tipo={elegido}
+            ajuste={ajustes[elegido]}
+            busy={busy}
+            onCambiar={cambiar}
+            onCambiarVarios={cambiarVarios}
+            onOir={onOir}
+            sonando={suenaMedio(ajustes[elegido].sonido)}
+            onMensaje={() => setEditandoMensaje(true)}
+          />
+        )}
 
         {/* **El overlay de verdad**, no una maqueta: es el mismo documento que carga
             OBS, así que lo que se ve aquí es lo que sale en antena.
@@ -610,6 +658,10 @@ export function Alertas({
               etiqueta={rotuloElegido}
               nota={t.alertas.previaNota}
               escala={ajustes[elegido].escala}
+              /* El mensaje va a la previa **siempre**, no solo cuando su panel está
+                 abierto: así el aviso que se está viendo ya lleva el estilo que tiene
+                 puesto, en vez de estrenarlo al pulsar Probar. */
+              mensaje={mensajeElegido}
             />
           ) : (
             <Empty>{t.alertas.previaSinServidor}</Empty>
@@ -1024,6 +1076,7 @@ function Aviso({
   onCambiar,
   onCambiarVarios,
   onOir,
+  onMensaje,
 }: {
   tipo: TipoAviso;
   ajuste: AjusteAviso;
@@ -1033,6 +1086,8 @@ function Aviso({
   onCambiar: (tipo: TipoAviso, campo: keyof AjusteAviso, valor: AjusteAviso[keyof AjusteAviso]) => void;
   onCambiarVarios: (tipo: TipoAviso, parche: Partial<AjusteAviso>) => void;
   onOir: (nombre: string) => void;
+  /** Abre el panel del contenedor del mensaje. */
+  onMensaje: () => void;
 }) {
   const rotulo = t.alertas.tipos[tipo];
   // El mínimo vale para los tres tramos de regalo y para los likes: un follow o un
@@ -1060,7 +1115,22 @@ function Aviso({
     <Card title={rotulo?.nombre ?? tipo} nota={rotulo?.descripcion}>
 
       <div className="campo">
-        <label htmlFor={`texto-${tipo}`}>{t.alertas.texto}</label>
+        {/* El rótulo y el botón del mensaje, en la **misma línea**: el botón no cuesta
+            alto —la línea del rótulo ya estaba— y queda pegado a lo que formatea, que es
+            el texto de abajo. Y lleva el estilo puesto, así que se sabe cómo está el
+            mensaje sin abrir nada. */}
+        <div className="campo-cabeza">
+          <label htmlFor={`texto-${tipo}`}>{t.alertas.texto}</label>
+          <button
+            type="button"
+            className="ghost tiny"
+            disabled={busy}
+            title={t.mensaje.botonHint}
+            onClick={onMensaje}
+          >
+            {rotuloMensaje(mensajeDe(ajuste).estilo)}
+          </button>
+        </div>
         <input
           id={`texto-${tipo}`}
           value={texto}

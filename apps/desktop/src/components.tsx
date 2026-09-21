@@ -11,6 +11,7 @@ import type {
   FeedItem,
   FeedKind,
   GiftInfo,
+  MensajeAviso,
   RankingEntry,
   UserRef,
 } from "./api";
@@ -416,6 +417,7 @@ export function VistaPrevia({
   etiqueta,
   nota,
   escala,
+  mensaje,
 }: {
   /** Dirección del overlay, con su token. */
   url: string;
@@ -433,6 +435,15 @@ export function VistaPrevia({
    * tiene que verse **al momento**, sin volver a disparar el aviso.
    */
   escala?: number;
+  /**
+   * El contenedor del mensaje, si quien llama lo está editando.
+   *
+   * Se manda por el mismo camino que el tamaño y por el mismo motivo: cambiar un estilo
+   * del mensaje tiene que verse en el aviso que ya está en pantalla, sin volver a
+   * dispararlo. Lo que viaja es el objeto entero —no un parche— porque al otro lado se
+   * pinta de una vez y no hay que fusionar nada.
+   */
+  mensaje?: MensajeAviso;
 }) {
   const hueco = useRef<HTMLDivElement>(null);
   const marco = useRef<HTMLIFrameElement>(null);
@@ -479,6 +490,31 @@ export function VistaPrevia({
     }
     ventana.postMessage({ dash: "escala", escala }, destino);
   }, [escala, url, cargas]);
+
+  /**
+   * El mensaje, al documento que hay dentro.
+   *
+   * Mismo camino y mismo motivo que el tamaño: el marco es de otro origen y la única
+   * puerta es `postMessage`. Se manda el objeto entero —y no el campo que ha cambiado—
+   * porque al otro lado se pinta de una vez: un parche obligaría a fusionar en dos
+   * sitios, que es donde se cuelan los campos que nadie quería cambiar.
+   *
+   * Va también al terminar de cargar (`cargas`), porque un mensaje que llega antes de
+   * que el documento exista se pierde, y este ajusta **cómo se ve** el aviso.
+   */
+  useEffect(() => {
+    if (!mensaje) return;
+    const ventana = marco.current?.contentWindow;
+    if (!ventana) return;
+    let destino = "*";
+    try {
+      destino = new URL(url).origin;
+    } catch {
+      // Igual que arriba: una dirección rara solo deja el destino en `*`, y lo que
+      // viaja son ajustes de pintado.
+    }
+    ventana.postMessage({ dash: "mensaje", mensaje }, destino);
+  }, [mensaje, url, cargas]);
 
   return (
     <div className="previa-hueco" ref={hueco}>

@@ -1243,3 +1243,88 @@ fn el_borrado_de_un_comentario_deja_tombstone_en_la_base() {
     drop(base);
     db.finalizar();
 }
+
+// ---------------------------------------------------------------------------
+// A8 · El contenedor del mensaje: se guarda, sale en la prueba y sobrevive al reinicio
+// ---------------------------------------------------------------------------
+
+/// El estilo del mensaje se guarda y **vuelve** en la foto siguiente.
+///
+/// Es el camino que hace la interfaz al elegir un estilo en el desplegable: manda los
+/// ajustes, el motor los sanea y los guarda, y lo que devuelve es lo que se pinta. Si ese
+/// camino perdiera el campo, el desplegable volveria solo a «Default» y pareceria un fallo
+/// del panel —que es exactamente lo que pasaba cuando el motor que respondia era anterior a
+/// este ajuste—.
+#[test]
+fn el_estilo_del_mensaje_se_guarda_y_sobrevive_al_reinicio() {
+    let db = DbTemp::nueva("mensaje-estilo");
+
+    {
+        let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base");
+        let mut ajustes = estado.alertas();
+        assert_eq!(
+            ajustes.gift.mensaje.estilo, "default",
+            "de fabrica empieza en Default: es lo que pintaba el aviso antes de todo esto"
+        );
+
+        // Como si el streamer cambiara el desplegable a Neón y tocara dos mandos.
+        ajustes.gift.mensaje.estilo = "neon".to_string();
+        ajustes.gift.mensaje.tamano = 64;
+        ajustes.gift.mensaje.animacion_texto = "maquina".to_string();
+        estado.set_alertas(ajustes).expect("deberia guardar");
+
+        // Lo que devuelve el motor ya lo trae: es de donde lee el desplegable.
+        let foto = estado.snapshot();
+        assert_eq!(foto.alertas.gift.mensaje.estilo, "neon");
+        assert_eq!(foto.alertas.gift.mensaje.tamano, 64);
+        assert_eq!(foto.alertas.gift.mensaje.animacion_texto, "maquina");
+        assert_eq!(
+            foto.alertas.follow.mensaje.estilo, "default",
+            "el estilo es por tipo: Regalos no puede tocar Seguidores"
+        );
+        estado.shutdown();
+    }
+
+    // Reiniciar la aplicacion: misma base, mismo estilo.
+    let estado = AppState::open(db.path(), 0).expect("la base deberia reabrirse");
+    let guardado = estado.alertas();
+    assert_eq!(
+        guardado.gift.mensaje.estilo, "neon",
+        "reiniciar no puede devolver el estilo a Default"
+    );
+    assert_eq!(guardado.gift.mensaje.tamano, 64);
+    assert_eq!(guardado.gift.mensaje.animacion_texto, "maquina");
+    estado.shutdown();
+}
+
+/// La prueba **no toca** lo guardado, y el aviso sale con el estilo que hay puesto.
+///
+/// Es el boton de la previa: lee la configuracion, monta el aviso de mentira y lo encola. Si
+/// escribiera algo —o si el aviso saliera con lo de fabrica— el estilo elegido no se veria
+/// nunca en la previa, que es la mitad del sistema.
+#[test]
+fn probar_una_alerta_no_toca_lo_guardado_y_sale_con_su_estilo() {
+    let db = DbTemp::nueva("mensaje-prueba");
+    let estado = AppState::open(db.path(), 0).expect("el estado deberia abrir la base");
+
+    let mut ajustes = estado.alertas();
+    ajustes.gift.mensaje.estilo = "glass".to_string();
+    ajustes.gift.mensaje.animacion = "abrir_horizontal".to_string();
+    estado.set_alertas(ajustes).expect("deberia guardar");
+    let antes = estado.alertas();
+
+    let aviso = estado.probar_alerta(dashboard::alerts::TipoAviso::Gift);
+    assert_eq!(
+        aviso.mensaje.estilo, "glass",
+        "el aviso de prueba tiene que salir con el estilo guardado"
+    );
+    assert_eq!(aviso.mensaje.animacion, "abrir_horizontal");
+    assert!(aviso.prueba, "y sigue siendo un aviso de prueba");
+    assert_eq!(
+        estado.alertas(),
+        antes,
+        "probar es de solo lectura: no puede cambiar la configuracion"
+    );
+
+    estado.shutdown();
+}

@@ -903,6 +903,906 @@
       "sha256": "9ecf0a8357d439c8df41774d89c01f7d3debaac32d66412beafb6505b4b9f4f3"
     },
     {
+      "path": "audio/151-pacman-waeh-waeh.mp3",
+      "extension": "mp3",
+      "bytes": 69106,
+      "sha256": "ee58b37b922f75a10e815da737005436ebc528ec888be86767d4800937922f96"
+    },
+    {
+      "path": "audio/152-giorno-saturado.mp3",
+      "extension": "mp3",
+      "bytes": 267549,
+      "sha256": "9dcc4cdf4218d4f55cf3271b407b7cbb0eec04dd86b1d26eb60b5452b39a9e93"
+    },
+    {
+      "path": "audio/153-tokyo-shock.mp3",
+      "extension": "mp3",
+      "bytes": 47018,
+      "sha256": "e2e4cafa9173a2ed7993e9733f673e3c1e72d8b098260c180e99e48458f098e6"
+    },
+    {
+      "path": "audio/154-godzilla-showa-roar-normal1.mp3",
+      "extension": "mp3",
+      "bytes": 131899,
+      "sha256": "4716f2919e030a22730fa3c8915f7b7d628c117bec71765dd0060b736e07b2d6"
+    },
+    {
+      "path": "audio/155-showa-godzilla-roar.mp3",
+      "extension": "mp3",
+      "bytes": 50188,
+      "sha256": "c3321f9e2c14065d7a37f331aa313da1a852bc9cb0a90eb92d857c61e6929183"
+    },
+    {
+      "path": "audio/156-thriller-video.mp3",
+      "extension": "mp3",
+      "bytes": 109781,
+      "sha256": "6b8a8440416363d9b2350407dddf5b7c4b700372c44e5a22fe06e8d530ed67d2"
+    },
+    {
+      "path": "audio/157-zipper-man.mp3",
+      "extension": "mp3",
+      "bytes": 42174,
+      "sha256": "71a16bb63d015c8b628ca2a0bbc01098df033366bed69f9121e65905db7d1cd3"
+    },
+    {
+      "path": "audio/158-technicolor.mp3",
+      "extension": "mp3",
+      "bytes": 157416,
+      "sha256": "793b5173ede17078724d6ec322cd0f96ee07760a5f9c3d4672d4cd34212b804e"
+    },
+    {
+      "path": "audio/159-showa-lightning-v2.mp3",
+      "extension": "mp3",
+      "bytes": 121580,
+      "sha256": "02967cdd4df52e02f72d1a3b6ad014e5f196be271370b16b0dec0816bed4e6ca"
+    },
+    {
+      "path": "audio/160-showa-era-kaiju-fall-v2.mp3",
+      "extension": "mp3",
+      "bytes": 50156,
+      "sha256": "033a17919ffc458bd4b8cea659282ec3e017200e094431efceebd02ac5a1965c"
+    },
+    {
+      "path": "audio/161-showa-kajiu-fall.mp3",
+      "extension": "mp3",
+      "bytes": 62828,
+      "sha256": "464d086fb57d354aeb96613c80b2c2a2f39e225536abe79567a5fbd5ddffcb28"
+    },
+    {
+      "path": "audio/162-showa-explosion-v2.mp3",
+      "extension": "mp3",
+      "bytes": 46124,
+      "sha256": "cf06e3264c3c3259839a97555bf814b22a44d0108e689422ccac569b878c72c6"
+    },
+    {
+      "path": "audio/163-toho-showa-lightning-sfx.mp3",
+      "extension": "mp3",
+      "bytes": 76076,
+      "sha256": "bec8c89194c57afcb50d4bc61f4a51d6fc1b1c08e7d0cfbd6afa5a2745da2bbb"
+    },
+    {
+      "path": "audio/164-duolingo-bass.mp3",
+      "extension": "mp3",
+      "bytes": 27513,
+      "sha256": "30813d7761fe2b7ed81d85dca410859d5c632b58e340016138a513d88ac97cdc"
+    },
+    {
+      "path": "audio/165-duolingo-bass-boosted.mp3",
+      "extension": "mp3",
+      "bytes": 55389,
+      "sha256": "9aadb35f3b6b011c18899f28a607271bb6e69adb1e8284c4e662cf68275f68a4"
+    },
+    {
+      "path": "audio/166-susu-tatata.mp3",
+      "extension": "mp3",
+      "bytes": 128818,
+      "sha256": "ba873e1c750c7be78298883ef3d1d67b6d68f84d41b6af47a206cd8df0067722"
+    },
+    {
+      "path": "audio/167-susuta-alto.mp3",
+      "extension": "mp3",
+      "bytes": 58024,
+      "sha256": "3fd7597f4906244e6156f5da6703033a0cc27a71e4a66dcaf82dc6401cc45d5e"
+    },
+    {
+      "path": "audio/168-nostalgia-critic-bear.mp3",
+      "extension": "mp3",
+      "bytes": 77785,
+      "sha256": "2a83fc5037546d66b6aa7618a8f7c5672e26693e6de9c6d0271e7ce0167cd08e"
+    },
+    {
+      "path": "audio/169-rosette-scream.mp3",
+      "extension": "mp3",
+      "bytes": 52960,
+      "sha256": "e9f50b1915ac29eb60dd6e5227ffb898eb54fa436109d8b68e2b502978df03de"
+    },
+    {
+      "path": "audio/170-susuta.mp3",
+      "extension": "mp3",
+      "bytes": 57192,
+      "sha256": "ef87e445f0b3e8e169f1d24eba257b9c51636110755015a5886677fa9ca4a344"
+    },
+    {
+      "path": "audio/171-no-me-mires.mp3",
+      "extension": "mp3",
+      "bytes": 7876,
+      "sha256": "fb50d4938cc1105f9ceb5e2abdc1d4800200c650a10368213ea99069e954ff1f"
+    },
+    {
+      "path": "audio/172-um-milhao.mp3",
+      "extension": "mp3",
+      "bytes": 43815,
+      "sha256": "2693b483ebfeebcf91e576d4effd4b57522220bacc7832f09c7ced0e0ff3a306"
+    },
+    {
+      "path": "audio/173-oi-tudo-bem.mp3",
+      "extension": "mp3",
+      "bytes": 81013,
+      "sha256": "03fc8455908c96006b782f3b632d48403cfaf187c2adf8b2b704dd258da14d96"
+    },
+    {
+      "path": "audio/174-real-android-camera.mp3",
+      "extension": "mp3",
+      "bytes": 12150,
+      "sha256": "fbf75126429dd33c0abbfb78cd5bc8e2b8e91afd58db0ac92c411bee12957047"
+    },
+    {
+      "path": "audio/175-prishpreed-slop-butter-me-up.mp3",
+      "extension": "mp3",
+      "bytes": 85440,
+      "sha256": "0095b6293050a29393f775085b8bf9ec3edfafe6707ddedd983f11f48d0b0b3c"
+    },
+    {
+      "path": "audio/176-prishpreed-homemade-butter.mp3",
+      "extension": "mp3",
+      "bytes": 124800,
+      "sha256": "3415534d3423dad32b27975c2060195b021a1cb34fac568227ed707bb1e3ccf4"
+    },
+    {
+      "path": "audio/177-palmerenses-ces-tao-mais-calmos.mp3",
+      "extension": "mp3",
+      "bytes": 302666,
+      "sha256": "40145763ff943b61eb92865ec1faa83b75c1c51c2a312232af068bf231d55f33"
+    },
+    {
+      "path": "audio/178-epppppsteeeeeeeeiiiiinnnnn.mp3",
+      "extension": "mp3",
+      "bytes": 134400,
+      "sha256": "9584bd33ca6ff78583d42bef3b1bb555dcd5ba039fde3678e62473fa38b43657"
+    },
+    {
+      "path": "audio/179-prishpreed-big-boy.mp3",
+      "extension": "mp3",
+      "bytes": 88320,
+      "sha256": "75bdec59cff89c56ca906e3db57ca2e16c9405d1b524fec5a679585aedfbdeba"
+    },
+    {
+      "path": "audio/180-prishpreed-all-star-big-boy.mp3",
+      "extension": "mp3",
+      "bytes": 81600,
+      "sha256": "4837da8f849e82baabd442f41e84d286ac3b025bf28af4036457c928267f1d77"
+    },
+    {
+      "path": "audio/181-prishpreed-butter-boy-town.mp3",
+      "extension": "mp3",
+      "bytes": 88320,
+      "sha256": "02d0f2e3467c6b01bc74f611422891585c52600b80b1e086f9055e6ce5ad1025"
+    },
+    {
+      "path": "audio/182-open-da-noor-skylar-white.mp3",
+      "extension": "mp3",
+      "bytes": 105984,
+      "sha256": "da1ebd5827d8a62808047e725ab52caa50bad4dee16fd8af27689db1efffa6e2"
+    },
+    {
+      "path": "audio/183-thatl-do-it-for-ya.mp3",
+      "extension": "mp3",
+      "bytes": 88320,
+      "sha256": "d58379d591bc48f54fed72ea0f83b3c3d9a84931326b41264db2093cdd2ebda4"
+    },
+    {
+      "path": "audio/184-jimi-eastman.mp3",
+      "extension": "mp3",
+      "bytes": 141312,
+      "sha256": "665655a8ace8b6767a85547a6c3f9c73249dec670675046fdbc91959faf05e6b"
+    },
+    {
+      "path": "audio/185-eurka-thing.mp3",
+      "extension": "mp3",
+      "bytes": 9139,
+      "sha256": "a7ce9e5c26556273b034bd3bf94fc5e7d89b5c62530b343104ccbf6e1ce86690"
+    },
+    {
+      "path": "audio/186-nfi-d60lfr-air-brake.mp3",
+      "extension": "mp3",
+      "bytes": 9029,
+      "sha256": "b52c0108a277b116fb6093b828d5a8848341ce299bbf690dfc285215ec7494e5"
+    },
+    {
+      "path": "audio/187-applepay.mp3",
+      "extension": "mp3",
+      "bytes": 23240,
+      "sha256": "44425ec60c9694f7882f3d75ca166463c7ee4619284d32bfc878936878f90bdb"
+    },
+    {
+      "path": "audio/188-deg-deg-sussy.mp3",
+      "extension": "mp3",
+      "bytes": 280704,
+      "sha256": "31c5c2d92f3dd9058e7fc49b1daa076c45060176f9050697438c8d8b17a67805"
+    },
+    {
+      "path": "audio/189-what-a-good-boy.mp3",
+      "extension": "mp3",
+      "bytes": 32012,
+      "sha256": "c1507877c437b57f0d66baa9dd5dbd81e280662aa1ac8c5ba046b3361391dc57"
+    },
+    {
+      "path": "audio/190-bark-fart.mp3",
+      "extension": "mp3",
+      "bytes": 51347,
+      "sha256": "8c7a465a5c098ec3dea2f32ce041e584d582da6e278100760cd4e102f3f754be"
+    },
+    {
+      "path": "audio/191-romanceeeeeeeeeeeeee.mp3",
+      "extension": "mp3",
+      "bytes": 93933,
+      "sha256": "9c73d5f157df3caf5bf9ab92db24d52cc9d0e8bee9e3eece9081294af85ae102"
+    },
+    {
+      "path": "audio/192-dun-dun-dun-sound-effect-brass.mp3",
+      "extension": "mp3",
+      "bytes": 82590,
+      "sha256": "6cc67ae7ef0b4008bc14b62a4fc4fe016858f972a4c8f5e4de0fda15f55d5474"
+    },
+    {
+      "path": "audio/193-ive-got-this-faaaaaaaaahhhhh.mp3",
+      "extension": "mp3",
+      "bytes": 60528,
+      "sha256": "2b92f32524688c5f4985e780285f130020cf298dc10b57bbc614e743649cfe30"
+    },
+    {
+      "path": "audio/194-wrong-answer-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 19479,
+      "sha256": "d8655fbee9621edd59a7c05a76ea738a728d73eb177f0d2bfe8b2680792c1abc"
+    },
+    {
+      "path": "audio/195-weird-route-jingle.mp3",
+      "extension": "mp3",
+      "bytes": 50990,
+      "sha256": "8668970c406609f30239abcf677c4e9f3ffc8d5f9fea22da5cabe50c7a7f7875"
+    },
+    {
+      "path": "audio/196-mlg-airhorn.mp3",
+      "extension": "mp3",
+      "bytes": 48318,
+      "sha256": "95beb8827452fab91d38535bbfd359b5e59547e2f98a937cb01032d3dced930c"
+    },
+    {
+      "path": "audio/197-taco-bell-bong-sfx.mp3",
+      "extension": "mp3",
+      "bytes": 31599,
+      "sha256": "e403f313cf8f7e2c89bebd220b3a534b483818d4edb04488b8c4022d3667690a"
+    },
+    {
+      "path": "audio/198-fart-with-reverb.mp3",
+      "extension": "mp3",
+      "bytes": 52079,
+      "sha256": "99180785e8781d5210f64eb96871500db9210aeb5e132bbabf70da41ab7ee853"
+    },
+    {
+      "path": "audio/199-emotional-damage-meme.mp3",
+      "extension": "mp3",
+      "bytes": 54262,
+      "sha256": "e1668d57edc60539f3e218fbc51c5c97fbe5cb56d63b7b2c85608afbdecbf4d8"
+    },
+    {
+      "path": "audio/200-censor-beep-1.mp3",
+      "extension": "mp3",
+      "bytes": 2627,
+      "sha256": "025674ef67009a5bb709df2a512510effc55d82d3102230de61254ce0622e22d"
+    },
+    {
+      "path": "audio/201-sonido-sin-nombre.mp3",
+      "extension": "mp3",
+      "bytes": 16425,
+      "sha256": "46fcd18a23525b100878ea4b83ecc2aa25c9b51be95c8148146d4f22caa2de43"
+    },
+    {
+      "path": "audio/202-nut.mp3",
+      "extension": "mp3",
+      "bytes": 7903,
+      "sha256": "41e50b96e4f7b12621189564183c1bf901dfab952d84926d19ce88404aa36483"
+    },
+    {
+      "path": "audio/203-outro-song.mp3",
+      "extension": "mp3",
+      "bytes": 272161,
+      "sha256": "9fd9d57e86fe0804c66c0e9d8ff88025628d6756780f389907d68d91a7d354e0"
+    },
+    {
+      "path": "audio/204-smoke-detector-beep.mp3",
+      "extension": "mp3",
+      "bytes": 16602,
+      "sha256": "0c8c6095b6ae81aec9238c15a17072ff069449145b006934c52a46461a91664c"
+    },
+    {
+      "path": "audio/205-tindeck.mp3",
+      "extension": "mp3",
+      "bytes": 25771,
+      "sha256": "d94b976a59bf1b6fba0c00a7d5345143ba6d0e5cc4710d1c4126d9ae987702cb"
+    },
+    {
+      "path": "audio/206-crazy-realistic-knocking-sound-troll-twitch-streamers.mp3",
+      "extension": "mp3",
+      "bytes": 146984,
+      "sha256": "35d71809fa7452f333c16f77e18f0452b12310302750ee9f95a2eae7935113bf"
+    },
+    {
+      "path": "audio/207-discord-call-sound.mp3",
+      "extension": "mp3",
+      "bytes": 90625,
+      "sha256": "1dab60b407c5338a1eaf4df68f92bbaed3fc6160c77ba3b14ba6034d23e4a642"
+    },
+    {
+      "path": "audio/208-jixaw-metal-pipe-falling-sound.mp3",
+      "extension": "mp3",
+      "bytes": 51662,
+      "sha256": "cf1568639d5c99f8d576138c92e5e39fc8e0835c62418a2032edce2b459e2223"
+    },
+    {
+      "path": "audio/209-gunshotjbudden.mp3",
+      "extension": "mp3",
+      "bytes": 21150,
+      "sha256": "650d8016700250c65fd02ee4211b6d3fc3c2420b8c8384a430e8ca3aa923af0d"
+    },
+    {
+      "path": "audio/210-are-you-out-of-your-mind-greenscreen-change-quality-and-end-wont-cut-off.mp3",
+      "extension": "mp3",
+      "bytes": 47575,
+      "sha256": "2822c32535be2755aea0241783df54924a850b1aca34b3b3bc7dfa5fef89ac10"
+    },
+    {
+      "path": "audio/211-homer-lets-the-barts-out.mp3",
+      "extension": "mp3",
+      "bytes": 125835,
+      "sha256": "db8e98c1161957740b9368f191cd5e4246cbf9abed9f0b4f4094c8ddd47c293c"
+    },
+    {
+      "path": "audio/212-oh-my-god-meme.mp3",
+      "extension": "mp3",
+      "bytes": 27002,
+      "sha256": "a7644c29ba16e100b3d57d171539691e302545ca098ff18c77cc8748178ae0df"
+    },
+    {
+      "path": "audio/213-lack-of-a-father-figure.mp3",
+      "extension": "mp3",
+      "bytes": 302441,
+      "sha256": "2f2ec68547998e73f9f4e9ccfb0c95048157bb5cb72c7211ab20432195a0e8d4"
+    },
+    {
+      "path": "audio/214-my-mommy-said-no-more-skibidi-toilet.mp3",
+      "extension": "mp3",
+      "bytes": 234962,
+      "sha256": "a078afad0c53e96db933945297c601819c8c879480551586d73edadcc61a1581"
+    },
+    {
+      "path": "audio/215-sad-meow-song.mp3",
+      "extension": "mp3",
+      "bytes": 151580,
+      "sha256": "ae48f9c83bb6e2feb14c364229b095945eb486e74311d04a25d62ff20e786720"
+    },
+    {
+      "path": "audio/216-67.mp3",
+      "extension": "mp3",
+      "bytes": 62208,
+      "sha256": "c54e3df2572af80fe1e2ec39ddd1a607a1bc3afde5a21d3c1efb8e3eb23a0aa6"
+    },
+    {
+      "path": "audio/217-bark-fart-sound.mp3",
+      "extension": "mp3",
+      "bytes": 33642,
+      "sha256": "3e658aea7235512ad32dcfc4cd8b0ed3790ad72bafc52cb219c884c6ec50ee9d"
+    },
+    {
+      "path": "audio/218-run-vine-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 132734,
+      "sha256": "5af9fb1ebeca0a3e00b6cf4d1a88446923339e441914cbbc151706e89cbe616c"
+    },
+    {
+      "path": "audio/219-du-bist-gut-genug-ringtone.mp3",
+      "extension": "mp3",
+      "bytes": 220934,
+      "sha256": "66dcc140e2e95cb0310bb42598a96a42db78ac71d5237881fb3b2e04c1ce520a"
+    },
+    {
+      "path": "audio/220-explosion-meme.mp3",
+      "extension": "mp3",
+      "bytes": 25290,
+      "sha256": "96aa22b7ec2330da0b1904f639b89dc8b46c008b8de5c2019c56b3b422938022"
+    },
+    {
+      "path": "audio/221-fartmeme.mp3",
+      "extension": "mp3",
+      "bytes": 25748,
+      "sha256": "27b8725370b7783d99812541d3a496092000b24d60943465dd9185197d61b390"
+    },
+    {
+      "path": "audio/222-spiderman-polyester-edit.mp3",
+      "extension": "mp3",
+      "bytes": 234055,
+      "sha256": "5beaaca4c4f93f970883dea89e20eebae5700f0e656c97f7520046285fc0b1b7"
+    },
+    {
+      "path": "audio/223-what-bottom-text-meme-sanctuary-guardian-sound-effect-hd.mp3",
+      "extension": "mp3",
+      "bytes": 144959,
+      "sha256": "b77604ffbbddf636e166969f69f4c1a092f9c9094010ad08b952725929c90d12"
+    },
+    {
+      "path": "audio/224-lizard-button.mp3",
+      "extension": "mp3",
+      "bytes": 30940,
+      "sha256": "16d860dd1e9c686930ac2c1bb1fad67f5b9704f40269c1894698573d70356d81"
+    },
+    {
+      "path": "audio/225-anime-wow-sound-effect-mp3cut.mp3",
+      "extension": "mp3",
+      "bytes": 68055,
+      "sha256": "2b1f6b1826eb4cfb3891ab382886a4f3ea29a4898f19738be5367c4411255a16"
+    },
+    {
+      "path": "audio/226-are-baap-re-yaad-aya.mp3",
+      "extension": "mp3",
+      "bytes": 28568,
+      "sha256": "c69626c217bf452e4b62295fb4b637bf656752c1955c715c5a246ad5793ebafd"
+    },
+    {
+      "path": "audio/227-musica-elevador-short.mp3",
+      "extension": "mp3",
+      "bytes": 171743,
+      "sha256": "54c6f69f230de7f8a50aa54b6f4633ff5a72174bc7d18daad59aaee0def4156d"
+    },
+    {
+      "path": "audio/228-cat-iphone-ringtone.mp3",
+      "extension": "mp3",
+      "bytes": 226578,
+      "sha256": "4f0894665f3326895dc4f507a1c2afefb158c78979e4e6bf7d7133d9039ed10e"
+    },
+    {
+      "path": "audio/229-nuclear-diarrhea.mp3",
+      "extension": "mp3",
+      "bytes": 144111,
+      "sha256": "7c494026b5c549269636bef97b1112c75ac0f35c4f1154826736d494b56bfc1f"
+    },
+    {
+      "path": "audio/230-rip-my-granny-loud-asf.mp3",
+      "extension": "mp3",
+      "bytes": 136400,
+      "sha256": "2227dacc253a31c1ccf5921357319fbaf2ca580b04be9e211ddccc3b1362cd38"
+    },
+    {
+      "path": "audio/231-a-few-moments-later-sponge-bob-sfx-fun.mp3",
+      "extension": "mp3",
+      "bytes": 32894,
+      "sha256": "d38814f846f7f23db9fd3a135d659dc8c6aac89a1ef6f83d01d7da52823db335"
+    },
+    {
+      "path": "audio/232-galaxy-meme.mp3",
+      "extension": "mp3",
+      "bytes": 303744,
+      "sha256": "b9e048effb299ef06b38218ce02db4065575e78008f99de9020e23ed525dd704"
+    },
+    {
+      "path": "audio/233-heavenly-music-gaming-sound-effect-hd-mp3cut.mp3",
+      "extension": "mp3",
+      "bytes": 188908,
+      "sha256": "31dd50753e2a61707d09b000d4a2ad029467f0e267774cd84bede65489dc0f15"
+    },
+    {
+      "path": "audio/234-daddys-home.mp3",
+      "extension": "mp3",
+      "bytes": 166706,
+      "sha256": "13b953182fdbae638522543570f8491cfa1794d4fed9cdebec9999d38285b1af"
+    },
+    {
+      "path": "audio/235-zvuk-fotoapparata.mp3",
+      "extension": "mp3",
+      "bytes": 16134,
+      "sha256": "836f5e0cc45cdfb1f01f31feb3aadf5e834ac15dec44ab2dd9004ebcd7d7da8c"
+    },
+    {
+      "path": "audio/236-awkward-cricket-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 71817,
+      "sha256": "b703d6f8c9b9979660bd05f4c779903eebb9624725dd5660d81938c646ca85be"
+    },
+    {
+      "path": "audio/237-crack-the-whip.mp3",
+      "extension": "mp3",
+      "bytes": 18643,
+      "sha256": "73f5bf287424f051f6551846026d5a3008fc825c368d64c99e9eb322ec4b0ca7"
+    },
+    {
+      "path": "audio/238-sonido-sin-nombre-2.mp3",
+      "extension": "mp3",
+      "bytes": 75436,
+      "sha256": "77deafd61e20e4bd9b97f64bc0138072ddf179821501bf6024be0c275ea5cdb7"
+    },
+    {
+      "path": "audio/239-getfromytcom-the-angriest-scamme-1.mp3",
+      "extension": "mp3",
+      "bytes": 78296,
+      "sha256": "04ab0bb566b0d07a11c7ac93642e07e36205288fca729b555729bf93fd6d909c"
+    },
+    {
+      "path": "audio/240-funny.mp3",
+      "extension": "mp3",
+      "bytes": 41658,
+      "sha256": "7beb1f5b51c45a6f4eaaba4014df776fc72d4c81cfca289437476eeb7b11d1b6"
+    },
+    {
+      "path": "audio/241-mommy-asmr.mp3",
+      "extension": "mp3",
+      "bytes": 276651,
+      "sha256": "84f964c02ad4f9002721055b3cbc9035ade84c934c3f661506c266aca19950ea"
+    },
+    {
+      "path": "audio/242-german-song.mp3",
+      "extension": "mp3",
+      "bytes": 203996,
+      "sha256": "daf042cc15d97e64059d83c67d4efca749a878d1cb4ee82247b32e3553f8809a"
+    },
+    {
+      "path": "audio/243-oi-oi-oe-oi-a-eye-eye.mp3",
+      "extension": "mp3",
+      "bytes": 156095,
+      "sha256": "9db0438ac8ae7db72ee1233099b19e425b166c1aa47e36690f3df3181d1ae2ca"
+    },
+    {
+      "path": "audio/244-09037.mp3",
+      "extension": "mp3",
+      "bytes": 22477,
+      "sha256": "dbe1ca70c2918b810c8cf9b86f820fd8a01779f83b71770c621c72f98ecf8a9f"
+    },
+    {
+      "path": "audio/245-fbi-open-up.mp3",
+      "extension": "mp3",
+      "bytes": 113534,
+      "sha256": "cd7d9f2fa02b785d3eff81affdd56ea1ce16a3192a702ebd98c3265d8b024453"
+    },
+    {
+      "path": "audio/246-gta-san-andreas-ah-shit-here-we-go-again.mp3",
+      "extension": "mp3",
+      "bytes": 50919,
+      "sha256": "fecd19fb0ab749f5bdf4188cc9c8560847ce07edaf0397d4aca41c9fd138280b"
+    },
+    {
+      "path": "audio/247-expedientes-secretos-x-musica22.mp3",
+      "extension": "mp3",
+      "bytes": 238530,
+      "sha256": "6069da4e36044b8d12e84562332c5cfd3223266250fd5a6faa430bf93e149cc9"
+    },
+    {
+      "path": "audio/248-yooooooooooooooooooooooooo.mp3",
+      "extension": "mp3",
+      "bytes": 42080,
+      "sha256": "2f355d5f315d88bdc972cb11bf63103ab702b51d008bbb8a24fb22c525ee91dc"
+    },
+    {
+      "path": "audio/249-minecraft-train-whistle-cave-sound.mp3",
+      "extension": "mp3",
+      "bytes": 59278,
+      "sha256": "491afc9117197da3a525315f56afd2a447f4023e9ba079385d2b215951bb1d92"
+    },
+    {
+      "path": "audio/250-lslm-lykm-b-d-hy-lwl.mp3",
+      "extension": "mp3",
+      "bytes": 87741,
+      "sha256": "8a517facf2e538ce3066330d79edfdb3707be444d43989cb529d418eb6812619"
+    },
+    {
+      "path": "audio/251-talking-bennnn-noo.mp3",
+      "extension": "mp3",
+      "bytes": 19990,
+      "sha256": "73276213f9be915a124e5f1ba641f8163eb6383d612b3f7dea8687f77805f2ef"
+    },
+    {
+      "path": "audio/252-nahi-nahi-saluke-yaha-kuchh-to-gadbad-hai.mp3",
+      "extension": "mp3",
+      "bytes": 42048,
+      "sha256": "e3041801b94fd56545567fcd55fb0774e9ff6669fc0358c6de9ca423fd8c2f12"
+    },
+    {
+      "path": "audio/253-boxing-bell.mp3",
+      "extension": "mp3",
+      "bytes": 132746,
+      "sha256": "53dd8361b7963335bc1ebbca8a48c66ffecd78a464c4ea317fe3fff4a82a092f"
+    },
+    {
+      "path": "audio/254-youtube-subscribe-and-like-bell-sound.mp3",
+      "extension": "mp3",
+      "bytes": 147467,
+      "sha256": "a424401ae43da58473c31292c6e08337e8a194bd1495195f45e6892c4229c537"
+    },
+    {
+      "path": "audio/255-switch-sound.mp3",
+      "extension": "mp3",
+      "bytes": 10657,
+      "sha256": "0268e2f613ad26f7ae9a0e316f8ba51d57ab1a761b43c29b7d590e2907d4b3b6"
+    },
+    {
+      "path": "audio/256-gta-san-andreas-abertura-oficial.mp3",
+      "extension": "mp3",
+      "bytes": 161306,
+      "sha256": "f139c87906e0084a37838a80ba2160f4dd0396543c45b83fcf4ff0bb84641f17"
+    },
+    {
+      "path": "audio/257-t-t.mp3",
+      "extension": "mp3",
+      "bytes": 38679,
+      "sha256": "19722b33ee4b7b94f1f484d943ef5136d978d3401ce81c4905eaf0a7d3f4d91e"
+    },
+    {
+      "path": "audio/258-naruto-sad-music-instant.mp3",
+      "extension": "mp3",
+      "bytes": 266098,
+      "sha256": "34ca6f6a07a71191991ed9dcd6426a5e4354848c8337245dbef6663cacf39ea5"
+    },
+    {
+      "path": "audio/259-tmpbxydyrz3.mp3",
+      "extension": "mp3",
+      "bytes": 243851,
+      "sha256": "49329c9741487454211d48c280f989fe1bca7791231d6057cfe05375732dc57d"
+    },
+    {
+      "path": "audio/260-camera.mp3",
+      "extension": "mp3",
+      "bytes": 45694,
+      "sha256": "f5ca9aa61c4160ad5797d1a2bf528339117eb3f7d9aba3d51ddd0b9a0da62ee3"
+    },
+    {
+      "path": "audio/261-3-2-1-go-green-screen-footage-2xoehcl8evq.mp3",
+      "extension": "mp3",
+      "bytes": 95029,
+      "sha256": "86237c04fcc6aa356bb9d4c12f03a2cfe3a3a58ec951d1dd963b06a8d9cede52"
+    },
+    {
+      "path": "audio/262-call-me-a-good-boy.mp3",
+      "extension": "mp3",
+      "bytes": 263808,
+      "sha256": "dbbd239b22d92d4d2425c2a866490db2a02066615af32a45c75a56304de0625d"
+    },
+    {
+      "path": "audio/263-mm-clocktower-bell.mp3",
+      "extension": "mp3",
+      "bytes": 42649,
+      "sha256": "d02f6a28bf21f430bd097d67447d8264d9dd9e45140d46cfc0d4d9e58dc49ba6"
+    },
+    {
+      "path": "audio/264-are-you-serious-right-neow-bro.mp3",
+      "extension": "mp3",
+      "bytes": 24906,
+      "sha256": "1ea902dc39b70326f53e51438a1b06505aebe49165c3890f2f248d9075ebf5fe"
+    },
+    {
+      "path": "audio/265-oh-my-god-bro-ah-hell-nah.mp3",
+      "extension": "mp3",
+      "bytes": 53805,
+      "sha256": "8e54a2be85affdb152f19104c32cac108f64f8d422a952dc1ba1a7e0f5dd489b"
+    },
+    {
+      "path": "audio/266-baby-tajin.mp3",
+      "extension": "mp3",
+      "bytes": 29388,
+      "sha256": "1ea98800f2390d2a223b44684fe40dda009fe10ea84b8c22d9c85e4772078031"
+    },
+    {
+      "path": "audio/267-shocking.mp3",
+      "extension": "mp3",
+      "bytes": 39216,
+      "sha256": "5000ebb6d46998854f491ac5bbf3acee87399d6dd39c9ae8ca01d36aca7e6698"
+    },
+    {
+      "path": "audio/268-is-ka-karan-narendar-modi.mp3",
+      "extension": "mp3",
+      "bytes": 52662,
+      "sha256": "8b8ae06f509679bb73c9243c34284962e6f4d480d3b93d194308f6d3f6029bad"
+    },
+    {
+      "path": "audio/269-oh-pwincess-where-are-you.mp3",
+      "extension": "mp3",
+      "bytes": 302782,
+      "sha256": "6015eb590831bf19d4fe18ea2b3c04ffad3e4771fa2785d5abdb025ae5496f99"
+    },
+    {
+      "path": "audio/270-mario-1-up.mp3",
+      "extension": "mp3",
+      "bytes": 16587,
+      "sha256": "79f598ef8032f3897831eec23e1cf4beab0ed546af3f4fb22beb3e26a32477f6"
+    },
+    {
+      "path": "audio/271-verity-greeting.mp3",
+      "extension": "mp3",
+      "bytes": 123291,
+      "sha256": "b95af758fbd3e5c8ebb6f6c193e90d097e480fced1bc7c745547b4e0971464ff"
+    },
+    {
+      "path": "audio/272-core-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 18318,
+      "sha256": "0ead4ef1b101bccd7bbe4c760ea8b485d7fd22132c8a793058c5e872c2470073"
+    },
+    {
+      "path": "audio/273-i-just-hit-the-jackpot.mp3",
+      "extension": "mp3",
+      "bytes": 272654,
+      "sha256": "f307c6d68f8f5eb9478da73c447d87306952aeb585ce318334e9bd457d03ec5d"
+    },
+    {
+      "path": "audio/274-le-fart-de-simon.mp3",
+      "extension": "mp3",
+      "bytes": 126058,
+      "sha256": "728ead446a59b75b7632cd16e82f077b4123d950bc9b018f4fc9e881d92bdb45"
+    },
+    {
+      "path": "audio/275-let-her-go.mp3",
+      "extension": "mp3",
+      "bytes": 215963,
+      "sha256": "16a8c43d7e4d56b63ef13e72a1a6f38f2fad6bdda9b8201f3ecd0730ddcab4e9"
+    },
+    {
+      "path": "audio/276-i-farted-and-a-poopy-almost-slipped-out.mp3",
+      "extension": "mp3",
+      "bytes": 150393,
+      "sha256": "653ebb721ff9124eff21dbb575ec2337f803e2ac4d055311cd4fbe6f590a648f"
+    },
+    {
+      "path": "audio/277-auughhh.mp3",
+      "extension": "mp3",
+      "bytes": 152390,
+      "sha256": "f7e10daae9e1106d78d5e56b64c1a65941736d97d7dc00fc6e618127f119cd80"
+    },
+    {
+      "path": "audio/278-tung-tung-sahur.mp3",
+      "extension": "mp3",
+      "bytes": 96547,
+      "sha256": "a4f956da90cbeec188be182425a018d96ef9aa25b7377395812d6411ff077f37"
+    },
+    {
+      "path": "audio/279-let-me-know.mp3",
+      "extension": "mp3",
+      "bytes": 236205,
+      "sha256": "d79312c225f3d72e0f13936d2bacdd64f7c76fc773df2404c85a6f8641f52c73"
+    },
+    {
+      "path": "audio/280-nya.mp3",
+      "extension": "mp3",
+      "bytes": 160458,
+      "sha256": "ea54ee6b47871f597db464805236803878e29b1d9c270a8d1422ffef27850020"
+    },
+    {
+      "path": "audio/281-oh-no-no-no-tik-tok-song-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 292861,
+      "sha256": "4218457474baaaa9fd7cc55b905872d3398ff40263202e856717a539b85facb0"
+    },
+    {
+      "path": "audio/282-hold-up-tiktok.mp3",
+      "extension": "mp3",
+      "bytes": 186146,
+      "sha256": "0724997914a0119e52b857b7cd8ec53b32ef1551d4d1b13480d46b850fd5ae6d"
+    },
+    {
+      "path": "audio/283-we-do-not-care.mp3",
+      "extension": "mp3",
+      "bytes": 204937,
+      "sha256": "1d46deff0cc7866a13de99eb348b6ebab1d1184fd17139f0216d052db62a5e06"
+    },
+    {
+      "path": "audio/284-scary-tiktok-music.mp3",
+      "extension": "mp3",
+      "bytes": 161688,
+      "sha256": "3f11b400ce39dc8a26c29dd3434c384a9950d3876c7efad8eaca9066d8735b97"
+    },
+    {
+      "path": "audio/285-i-cant-do-nathan.mp3",
+      "extension": "mp3",
+      "bytes": 182167,
+      "sha256": "e4936254fa066e930d1137e69324bd2a52c79fa8d0a18e9bbf6b2884b8da1769"
+    },
+    {
+      "path": "audio/286-pum-impacto.mp3",
+      "extension": "mp3",
+      "bytes": 51755,
+      "sha256": "098afe7824e6a576868da7c520b324310bde008d18b25f99d90c424dd86d8b24"
+    },
+    {
+      "path": "audio/287-white-tee-rizz.mp3",
+      "extension": "mp3",
+      "bytes": 245374,
+      "sha256": "85c4e21c9f7d668caa79cd51fd20d3919f38233c0eb7d5140b8d5dd7f524f5e7"
+    },
+    {
+      "path": "audio/288-tu-tu-tu-du-max-verstappen.mp3",
+      "extension": "mp3",
+      "bytes": 184457,
+      "sha256": "27402d71ae0f93e7f5d9e465fdbb3a63159ea1170abaabe3e719911791e12b7e"
+    },
+    {
+      "path": "audio/289-y2mate-mp3cut.mp3",
+      "extension": "mp3",
+      "bytes": 94386,
+      "sha256": "59d2740f56174800d83d82c3d201b5b57825d8cd9fa3e86406e2266ff6c106d8"
+    },
+    {
+      "path": "audio/290-social-credit-music.mp3",
+      "extension": "mp3",
+      "bytes": 331276,
+      "sha256": "49554304a035aeda6cc52ed2fa88b874b2c7868bc372b025a60a843007836fff"
+    },
+    {
+      "path": "audio/291-mamaduh-diablo-selos.mp3",
+      "extension": "mp3",
+      "bytes": 16181,
+      "sha256": "395fd9846a626d13bee7b52bbdbdbdfbbd8fb2447e8ecd7ba5b46e8c5bd8b6e2"
+    },
+    {
+      "path": "audio/292-bye-bye-mewing.mp3",
+      "extension": "mp3",
+      "bytes": 257042,
+      "sha256": "e06f4ab7bb70c6b4ebf59cd401281015a5dcb846d3d94ee008a1494372ae6e6f"
+    },
+    {
+      "path": "audio/293-papp-bark-fart-remix.mp3",
+      "extension": "mp3",
+      "bytes": 221111,
+      "sha256": "9ce18e0ef25912277562fd86a559b7ec5626382dce6f2e92ae6ef96197cb575b"
+    },
+    {
+      "path": "audio/294-galaxy-brain-meme.mp3",
+      "extension": "mp3",
+      "bytes": 303597,
+      "sha256": "7a5107882f2cf96a761083429f1b52fd7584472155c46d10ccfd47ecc52791ee"
+    },
+    {
+      "path": "audio/295-jmsn-love-me-grok-song.mp3",
+      "extension": "mp3",
+      "bytes": 224069,
+      "sha256": "066ff38bc845ff6ff3909a3f38eb4958c911c65e2de44bfc7fe817532c1a287e"
+    },
+    {
+      "path": "audio/296-hell-nah-dog.mp3",
+      "extension": "mp3",
+      "bytes": 14360,
+      "sha256": "caf84d85046a19af0ee658285e8e851d253f46bbcb86122f1cbcba6647bb2314"
+    },
+    {
+      "path": "audio/297-skeleton-with-shield.mp3",
+      "extension": "mp3",
+      "bytes": 142452,
+      "sha256": "5533991adb78c244229e7d8c644420a172e76356d3d4e69285fe23751f4eaae2"
+    },
+    {
+      "path": "audio/298-hell-naw-dog.mp3",
+      "extension": "mp3",
+      "bytes": 17572,
+      "sha256": "4ba677d8a11bf4ff2913a2e722ff23653594e4e83d2d78f8e15a83c3c4a8a769"
+    },
+    {
+      "path": "audio/299-tik-tok-dramatic-music.mp3",
+      "extension": "mp3",
+      "bytes": 203090,
+      "sha256": "06b00c6db810b0d37cf8927abbe5cb42213fccfdfa1525d7e1a8e2a2d054cbb1"
+    },
+    {
+      "path": "audio/300-deltarune-jarona.mp3",
+      "extension": "mp3",
+      "bytes": 21531,
+      "sha256": "4594b744f9223423c97a4d2d3869cae441390399b84c98b2d3d881366fba4ce3"
+    },
+    {
       "path": "audio/campana-brillante.wav",
       "extension": "wav",
       "bytes": 68840,
@@ -1315,12 +2215,186 @@
       "extension": "webp",
       "bytes": 21500,
       "sha256": "6e729f0148e701824a7fa1db36f7d5ede7b7ea8bcb43c0a61d83bb1d78f0bde1"
+    },
+    {
+      "path": "imagenes/063-sticker.webp",
+      "extension": "webp",
+      "bytes": 130274,
+      "sha256": "ff24eb6668745877ae3a0482e8680ff1f285e74546cdb38c7a2789373d272a6d"
+    },
+    {
+      "path": "imagenes/064-sticker.webp",
+      "extension": "webp",
+      "bytes": 152764,
+      "sha256": "f4bfd616f61949d1c9be5c6babdb364f564a41c25d574252ad04f7b444fcb9aa"
+    },
+    {
+      "path": "imagenes/065-sticker.webp",
+      "extension": "webp",
+      "bytes": 1786,
+      "sha256": "a7da3512215f99116cd1cd52692b0379512ed9eb6c9aac2d77c6738267d825f0"
+    },
+    {
+      "path": "imagenes/066-sticker.webp",
+      "extension": "webp",
+      "bytes": 340084,
+      "sha256": "b89ae45d0d60e94ac15def812bebf1c363ed577964b85fb782fa71e120b5a76c"
+    },
+    {
+      "path": "imagenes/067-sticker.webp",
+      "extension": "webp",
+      "bytes": 9448,
+      "sha256": "d65804f3e2224d3f497cfd9a25ceac0c21086a91b0ddf656fda74efca27b4f7f"
+    },
+    {
+      "path": "imagenes/068-sticker.webp",
+      "extension": "webp",
+      "bytes": 834524,
+      "sha256": "ed2a8cd254359d631612ffc3af97f5aeb7f28c295fd9383da0fddca4c93d3b72"
+    },
+    {
+      "path": "imagenes/069-sticker.webp",
+      "extension": "webp",
+      "bytes": 16068,
+      "sha256": "b639cef3202fdea8b7c43c91970ea8269236246e13af37c21c64d52bcccdd82c"
+    },
+    {
+      "path": "imagenes/070-sticker.webp",
+      "extension": "webp",
+      "bytes": 1456,
+      "sha256": "be781a68809bcd2ac53f90d65eb5017e616f0e5da6e0b215330ac8c298c67c33"
+    },
+    {
+      "path": "imagenes/071-sticker.webp",
+      "extension": "webp",
+      "bytes": 6264,
+      "sha256": "9a4b3b13dbcca2990afe50431ecf9f9b32f74d92a33f32f6dc7102618b48db8d"
+    },
+    {
+      "path": "imagenes/072-sticker.webp",
+      "extension": "webp",
+      "bytes": 25286,
+      "sha256": "72c3bb7938390e2b8f9406c554a72e4a550d417b35ef0ea0dc24a1a7be31dc77"
+    },
+    {
+      "path": "imagenes/073-sticker.webp",
+      "extension": "webp",
+      "bytes": 13860,
+      "sha256": "cb691d68422991c5fb738f5c0a997b4998e7487484bcb433f349f319fd92b0a0"
+    },
+    {
+      "path": "imagenes/074-sticker.webp",
+      "extension": "webp",
+      "bytes": 363490,
+      "sha256": "ffac5d37ec0d18bc88d5a9d04caa458977e39112f123243a59c3b9d1c0f6bce0"
+    },
+    {
+      "path": "imagenes/075-sticker.webp",
+      "extension": "webp",
+      "bytes": 5312,
+      "sha256": "3510a906eae814dea6cac25a695bc961d85378a193fd79660e276f9f02ac5414"
+    },
+    {
+      "path": "imagenes/076-sticker.webp",
+      "extension": "webp",
+      "bytes": 36274,
+      "sha256": "5ed95b8ccdd48223baa13d9aaac6c600c4bcc015296c9caf927d294123da0ce5"
+    },
+    {
+      "path": "imagenes/077-sticker.webp",
+      "extension": "webp",
+      "bytes": 489910,
+      "sha256": "92cb1206deb2160d0fddd397bf5db782cccc7171b36a359ce315835f72cacaba"
+    },
+    {
+      "path": "imagenes/078-sticker.webp",
+      "extension": "webp",
+      "bytes": 174438,
+      "sha256": "54fe1546c4b4fdc9ae4739845bf39e9ff76a661fdf1596794424a192a1393b8f"
+    },
+    {
+      "path": "imagenes/079-sticker.webp",
+      "extension": "webp",
+      "bytes": 7126,
+      "sha256": "1fb87b80e3f3b711e6c4787f43a7d117888f410694f232c43ba4f5edb7a23a5a"
+    },
+    {
+      "path": "imagenes/080-sticker.webp",
+      "extension": "webp",
+      "bytes": 106472,
+      "sha256": "90b5c083c5b01cff16b42d03f3b3888336cacaf9e4880e2446fc8cbaefc316bf"
+    },
+    {
+      "path": "imagenes/081-sticker.webp",
+      "extension": "webp",
+      "bytes": 2924,
+      "sha256": "b4ced6057800482a474b9b71942690b1dd87cfde5c2b2961ceb2206a19b75bd6"
+    },
+    {
+      "path": "imagenes/082-sticker.webp",
+      "extension": "webp",
+      "bytes": 220482,
+      "sha256": "586dd39d5626563f1391d43ff9b50e25e7333d4b1db25a6a59cb8f711902aa59"
+    },
+    {
+      "path": "imagenes/083-sticker.webp",
+      "extension": "webp",
+      "bytes": 35728,
+      "sha256": "2a0c8dcb377f631b4a09046f80c6948a6a2d1b1c89aab01116f3647b38464d04"
+    },
+    {
+      "path": "imagenes/084-sticker.webp",
+      "extension": "webp",
+      "bytes": 199290,
+      "sha256": "4af1d7ef5ca561b48349e55300cec84c749a80657459f0f01a4dce8f35244fca"
+    },
+    {
+      "path": "imagenes/085-sticker.webp",
+      "extension": "webp",
+      "bytes": 38528,
+      "sha256": "63e7c0a01f756b66f3323f1324299ffedb39e66b894ceacc5d79c4b668e16bd4"
+    },
+    {
+      "path": "imagenes/086-sticker.webp",
+      "extension": "webp",
+      "bytes": 5776,
+      "sha256": "7ccfcea613999e2bc6152f91150ceb033e4800c313b29468ee96df40556437c9"
+    },
+    {
+      "path": "imagenes/087-sticker.webp",
+      "extension": "webp",
+      "bytes": 4402,
+      "sha256": "6899aeb8acc90e932a6254199def083c74e8865ffa3155905f369daa0d7b5274"
+    },
+    {
+      "path": "imagenes/088-sticker.webp",
+      "extension": "webp",
+      "bytes": 390252,
+      "sha256": "3a0d0dfbad83e4806a1b11a660c0eafb5fd36518c619ea37d464f65edfa086a2"
+    },
+    {
+      "path": "imagenes/089-sticker.webp",
+      "extension": "webp",
+      "bytes": 31548,
+      "sha256": "807ec489437cd20e86b2aebe5cd96fbceb9feae316c41d22ae72cd1a457af311"
+    },
+    {
+      "path": "imagenes/090-sticker.webp",
+      "extension": "webp",
+      "bytes": 1816430,
+      "sha256": "75c18688db9aa0a31b45c619e1dc5ad169ed855f5b8c43860c6abdedfb50b54f"
+    },
+    {
+      "path": "imagenes/091-sticker.webp",
+      "extension": "webp",
+      "bytes": 14178,
+      "sha256": "fe65e7e28b3cc8c2509c1f48014854bdfa2ffcfd1606073fa69e3096962d017e"
     }
   ],
   "counts": {
-    "bytes": 28542532,
-    "mp3": 150,
+    "bytes": 50402251,
+    "mp3": 300,
     "wav": 7,
-    "webp": 62
+    "webp": 91
   }
 }

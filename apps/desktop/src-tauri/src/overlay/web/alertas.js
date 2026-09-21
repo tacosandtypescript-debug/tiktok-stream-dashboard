@@ -14,6 +14,12 @@
  *      aviso tuviera audio: para saber si una alerta suena habia que mirar dos
  *      campos, y el mismo video sonaba o no segun lo que tuviera el otro. Una
  *      regla, un sitio.
+ *
+ * Aqui vive **la alerta entera**: su entrada, su permanencia y su salida. El
+ * **contenedor del mensaje** —el bloque del texto, con su estilo y sus animaciones— es
+ * otro sistema, en `mensaje/`: esto lo pinta y le pide que se anime, y no sabe como.
+ * Separarlos es lo que permite cambiar un preset del mensaje sin tocar como entra el
+ * aviso, que es justo lo que no se puede romper.
  */
 (() => {
   const parametros = new URLSearchParams(location.search);
@@ -85,7 +91,18 @@
    */
   window.addEventListener("message", (evento) => {
     const dato = evento.data;
-    if (!dato || dato.dash !== "escala") return;
+    if (!dato || typeof dato !== "object") return;
+
+    // El **mensaje**, cambiado en vivo desde el editor: es el mismo camino que el
+    // tamaño, pero para los ajustes del contenedor. El renderer aplica el estilo al
+    // momento y solo repite la animacion si la han cambiado, para que mover un mando no
+    // deje el mensaje saltando.
+    if (dato.dash === "mensaje") {
+      window.DashMensaje?.previa(dato.mensaje);
+      return;
+    }
+
+    if (dato.dash !== "escala") return;
     const valor = Number(dato.escala);
     if (!Number.isFinite(valor)) return;
     caja.style.setProperty("--escala", String(Math.min(2, Math.max(0.25, valor))));
@@ -570,6 +587,10 @@
     video.removeAttribute("src");
     sonido.pause();
     sonido.removeAttribute("src");
+    // El mensaje se para antes de vaciar la caja: deja el texto de una pieza —las
+    // animaciones por letra lo trocean— y cancela lo que estuviera corriendo, para que
+    // el aviso siguiente no herede ni una caja suelta ni un temporizador.
+    window.DashMensaje?.parar();
     texto.textContent = "";
     texto.classList.remove("error");
     imagen.removeAttribute("src");
@@ -627,6 +648,15 @@
 
     if (textoDelAviso.trim()) texto.textContent = textoDelAviso;
 
+    // El contenedor del mensaje: **primero el estilo**, antes de que se vea nada. Si se
+    // pintara despues, el primer fotograma del aviso saldria con el estilo del anterior,
+    // y eso se ve como un parpadeo del fondo y de la letra.
+    //
+    // La animacion del mensaje se lanza mas abajo, cuando la caja ya es visible: su
+    // retardo cuenta desde que la alerta ha entrado, que es lo que deja entrar primero
+    // la imagen y despues el texto.
+    window.DashMensaje?.aplicar(aviso.mensaje);
+
     if (audio && !enPrevia) {
       sonido.src = urlDeMedio(audio);
       sonido.volume = volumen;
@@ -647,6 +677,15 @@
       return;
     }
     caja.classList.add("visible");
+
+    // La entrada del **mensaje**, con su propio retardo, su duracion y su ritmo. Va
+    // despues de enseñar la caja porque su reloj empieza aqui: el retardo del mensaje se
+    // cuenta desde que la alerta ha entrado, no desde que llego el aviso.
+    //
+    // Y es otra animacion, no esta: la alerta mueve la caja entera y el mensaje mueve su
+    // bloque. Por eso el mensaje puede entrar deslizando mientras la alerta ya esta
+    // quieta, que es la secuencia que se viene a montar.
+    window.DashMensaje?.entrar(aviso.mensaje);
 
     // La permanencia arranca **cuando termina la entrada**, no antes: si empezara a la
     // vez, el temblor del efecto se comeria la entrada y no se veria ninguna de las dos.

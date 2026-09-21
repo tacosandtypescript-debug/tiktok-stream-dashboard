@@ -261,6 +261,21 @@ pantalla con más hueco que contenido. Ese hueco salía de donde no sobraba.
   tamaño—. Se guarda **una sola**, la última pulsada. Cubre además un caso que no es un
   fallo: OBS apaga el Browser Source cuando su escena no se ve, así que al cambiar a la
   escena de las alertas la prueba aparece.
+- **El mensaje es un sistema aparte, con su panel en el sitio del editor.** El bloque del
+  texto tiene quince estilos, sus propias animaciones de entrada y de permanencia, y otras
+  tantas para las letras —independientes de las de la alerta entera—, así que no cabía en el
+  editor: el botón que lo abre está pegado al campo del texto —donde está la cosa— y el
+  panel ocupa **la columna del editor**, no un diálogo, para que la previa siga a la vista.
+  Dentro va en tres pestañas —Estilo, Texto, Animación— porque treinta mandos de una tirada
+  no caben en 351 px; los mandos, además, se desplazan por dentro como la lista de medios.
+  Cada estilo enseña **solo los mandos que usa**: una cápsula no tiene resplandor que
+  ajustar. Y lo que se cambia se ve **al momento** en la previa, sin volver a disparar el
+  aviso, igual que el mando del tamaño. Elegir un estilo **no reinicia lo que no es suyo**:
+  la caja entera vuelve a sus valores y se queda con los del estilo —es una forma, no una
+  mezcla con la anterior—, pero la letra solo se toca en lo que ese estilo pide y las
+  animaciones no se tocan nunca. Y si el motor que responde es anterior a este ajuste, el
+  panel lo dice arriba en rojo: sin ese aviso, elegir un estilo y verlo volver solo a
+  «Default» parece un fallo del panel.
 - El audio separa **Oír**, **Poner** y **Borrar** para que probar un fichero no lo
   asigne por accidente. Los nombres largos se truncan visualmente, pero conservan
   `title` y nombre accesible.

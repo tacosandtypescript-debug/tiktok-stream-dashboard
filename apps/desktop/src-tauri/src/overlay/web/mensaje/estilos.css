@@ -1,0 +1,225 @@
+/* El contenedor del mensaje de una alerta: el bloque donde va el texto.
+ *
+ * Esto es **solo del mensaje**. La caja del aviso —la que entra, permanece y sale— tiene
+ * su hoja en `alertas.html`, y sus animaciones las lleva `alertas.js`. Aqui no se toca
+ * nada de eso.
+ *
+ * Todo se pinta con **variables de CSS** que escribe `mensaje/renderer.js` a partir de
+ * los ajustes. No hay una clase por estilo: con quince estilos y sus combinaciones, eso
+ * seria una hoja que crece con cada preset nuevo y un `classList` que hay que acertar.
+ * Los `[data-*]` que si aparecen son **ganchos**, no estilos: marcan lo que no cabe en un
+ * numero —una decoracion, un ancho completo— y la forma la pone esta hoja.
+ *
+ * Los valores de fabrica estan escritos **tambien aqui**, repetidos de `config.js`: si el
+ * renderer no llegara a escribir nada, el mensaje tiene que seguir saliendo como salia
+ * antes de que todo esto existiera.
+ */
+.aviso-mensaje {
+  --mensaje-fondo: rgba(11, 13, 18, 0.88);
+  --mensaje-borde: #232936;
+  --mensaje-borde-grosor: 1px;
+  --mensaje-radio: 12px;
+  --mensaje-pad-h: 26px;
+  --mensaje-pad-v: 14px;
+  /* Las tres sombras son **listas validas** aunque no haya nada que pintar: `none` no se
+     puede mezclar con otras sombras en la misma declaracion, y con `none` un preset que
+     enciende la letra apagaria la sombra del texto y al reves. */
+  --mensaje-sombra: 0 0 0 transparent;
+  --mensaje-glow: 0 0 0 transparent;
+  --mensaje-glow-color: #25f4ee;
+  --mensaje-glow-radio: 0px;
+  --mensaje-ancho: 70vw;
+  --mensaje-alto-min: 0px;
+  --mensaje-blur: 0px;
+  --mensaje-deco: 6px;
+
+  --mensaje-fuente: "Segoe UI", system-ui, "Segoe UI Symbol", "Segoe UI Emoji",
+    "Cambria Math", "Noto Sans Symbols 2", "Noto Sans Math", sans-serif;
+  --mensaje-tamano: 40px;
+  --mensaje-peso: 800;
+  --mensaje-color: #e8eaf0;
+  --mensaje-alineacion: center;
+  --mensaje-espaciado: 0px;
+  --mensaje-interlineado: 115%;
+  --mensaje-contorno: 0px;
+  --mensaje-contorno-color: #000000;
+  --mensaje-sombra-texto: 0 3px 12px rgba(0, 0, 0, 0.95);
+  --mensaje-texto-glow: 0 0 0 transparent;
+
+  align-items: center;
+  background: var(--mensaje-fondo);
+  border: var(--mensaje-borde-grosor) solid var(--mensaje-borde);
+  border-radius: var(--mensaje-radio);
+  box-shadow: var(--mensaje-glow), var(--mensaje-sombra);
+  -webkit-backdrop-filter: blur(var(--mensaje-blur));
+  backdrop-filter: blur(var(--mensaje-blur));
+  display: flex;
+  justify-content: center;
+  /* El ancho va **dividido por la escala**: la caja del aviso lleva `zoom`, que
+     multiplica, y sin dividir un aviso al 200 % mediria el doble de lienzo. */
+  max-width: min(calc(var(--mensaje-ancho) / var(--escala, 1)), 100vw);
+  min-height: var(--mensaje-alto-min);
+  padding: var(--mensaje-pad-v) var(--mensaje-pad-h);
+  /* La barra lateral y las puntas de la cinta se cuelgan de aqui. */
+  position: relative;
+}
+
+/* Con `hidden` no se enseña. Hace falta decirlo porque `.aviso-mensaje` tiene `display`,
+   y una regla de autor gana al `display: none` que el navegador le pone a `[hidden]`. */
+.aviso-mensaje[hidden] {
+  display: none;
+}
+
+.aviso-mensaje-texto {
+  color: var(--mensaje-color);
+  font-family: var(--mensaje-fuente);
+  font-size: var(--mensaje-tamano);
+  font-weight: var(--mensaje-peso);
+  letter-spacing: var(--mensaje-espaciado);
+  line-height: var(--mensaje-interlineado);
+  margin: 0;
+  /* Un apodo de TikTok puede ser larguisimo y sin espacios: sin esto se sale del aviso. */
+  overflow-wrap: anywhere;
+  /* El contorno se pinta **debajo** del relleno: al reves, una letra con contorno grueso
+     se queda solo con el contorno. */
+  paint-order: stroke fill;
+  position: relative;
+  text-align: var(--mensaje-alineacion);
+  text-shadow: var(--mensaje-sombra-texto), var(--mensaje-texto-glow);
+  -webkit-text-stroke: var(--mensaje-contorno) var(--mensaje-contorno-color);
+  width: 100%;
+  z-index: 1;
+}
+
+/* Sin texto no hay nada que enseñar; el hueco lo cierra el renderer. */
+.aviso-mensaje-texto:empty {
+  display: none;
+}
+
+/* El aviso de un fallo al pintar, como en el resto de la aplicacion. */
+.aviso-mensaje-texto.error {
+  color: var(--lider);
+}
+
+/* --- Los trozos de las animaciones de texto ---------------------------------
+ *
+ * Las animaciones por palabra y por letra parten el texto en cajas, y una caja no se
+ * mueve si es `inline`: `transform` no le hace nada. De ahi el `inline-block`.
+ *
+ * Y de ahi tambien el `max-width` con `overflow-wrap`: con cada letra en una caja, una
+ * palabra de sesenta letras ya no se partiria sola. La palabra es la que cede, no el
+ * aviso. */
+.mensaje-palabra,
+.mensaje-letra {
+  display: inline-block;
+}
+
+.mensaje-palabra {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* --- Las decoraciones -------------------------------------------------------- */
+
+/* Acento lateral: una barra pegada al borde de la izquierda. El relleno de ese lado
+   crece con ella para que el texto no se le eche encima. */
+.aviso-mensaje[data-deco="lateral"] {
+  --mensaje-deco: 6px;
+  padding-left: calc(var(--mensaje-pad-h) + var(--mensaje-deco) + 6px);
+}
+
+.aviso-mensaje[data-deco="lateral"]::before {
+  background: var(--mensaje-glow-color);
+  border-radius: var(--mensaje-radio) 0 0 var(--mensaje-radio);
+  content: "";
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: var(--mensaje-deco);
+}
+
+/* Cinta: las dos puntas dobladas por detras, que es lo que la lee como cinta y no como
+   tarjeta. Van fuera del borde, asi que la caja no puede llevar `overflow: hidden`. */
+.aviso-mensaje[data-deco="cinta"]::before,
+.aviso-mensaje[data-deco="cinta"]::after {
+  background: var(--mensaje-borde);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 55%, 0 100%);
+  content: "";
+  filter: brightness(0.75);
+  height: 12px;
+  position: absolute;
+  top: 100%;
+  width: 26px;
+}
+
+.aviso-mensaje[data-deco="cinta"]::before {
+  left: 0;
+}
+
+.aviso-mensaje[data-deco="cinta"]::after {
+  right: 0;
+}
+
+/* Minimo: una linea de acento debajo del texto, dentro del relleno. */
+.aviso-mensaje[data-deco="linea"] {
+  --mensaje-deco: 3px;
+}
+
+.aviso-mensaje[data-deco="linea"]::after {
+  background: var(--mensaje-glow-color);
+  border-radius: 999px;
+  bottom: 0;
+  content: "";
+  height: var(--mensaje-deco);
+  left: var(--mensaje-pad-h);
+  position: absolute;
+  right: var(--mensaje-pad-h);
+}
+
+/* --- Lo que no cabe en un numero --------------------------------------------- */
+
+/* Barra inferior: ocupa el lienzo entero. El padre es una columna centrada, asi que una
+   caja mas ancha que el se sale por los dos lados por igual, que es justo lo que se
+   busca. */
+.aviso-mensaje[data-ancho="completo"] {
+  max-width: none;
+  width: min(calc(100vw / var(--escala, 1)), 100vw);
+}
+
+/* Neón: el borde y la letra se encienden con el color del resplandor. La sombra del
+   texto **no se pisa**: se suma, con la variable del brillo. */
+.aviso-mensaje[data-estilo="neon"] {
+  border-color: var(--mensaje-glow-color);
+}
+
+.aviso-mensaje[data-estilo="neon"] .aviso-mensaje-texto {
+  -webkit-text-stroke: max(1px, var(--mensaje-contorno)) var(--mensaje-glow-color);
+  --mensaje-texto-glow: 0 0 6px var(--mensaje-glow-color), 0 0 20px var(--mensaje-glow-color);
+}
+
+/* --- La franja del brillo -----------------------------------------------------
+ *
+ * Va en una capa que recorta —para que la franja no se salga del mensaje— y dentro la
+ * franja, que se mueve con `transform`. La capa es lo que permite recortar sin ponerle
+ * `overflow: hidden` al contenedor: eso cortaria las puntas de la cinta del estilo de
+ * al lado. */
+.aviso-mensaje-capa {
+  border-radius: inherit;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+}
+
+.aviso-mensaje-brillo {
+  background: linear-gradient(
+    100deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 66%
+  );
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}

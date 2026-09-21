@@ -3302,6 +3302,136 @@ video.medio-mini {
   margin-top: var(--sp-1);
 }
 
+/* --- El panel del contenedor del mensaje -----------------------------------
+ *
+ * Ocupa el sitio del editor del aviso, asi que hereda su ancho y su alto. Dentro, tres
+ * piezas fijas —el estilo, la pista y las tres pestañas— y una que se desplaza: los
+ * mandos. Con treinta mandos de golpe habria que desplazarse para encontrarlos todos; en
+ * tres pestañas cada una cabe entera.
+ *
+ * La lista que crece se desplaza **ella**, nunca la pagina: es la misma regla que la
+ * biblioteca de medios y el chat de Inicio. */
+.mensaje-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+}
+
+.mensaje-fila {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mensaje-estilo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mensaje-pista {
+  margin: 0;
+}
+
+/* El motor no conoce estos ajustes. Va en rojo y arriba del todo del panel: es lo primero
+   que hay que leer, porque explica por qué el estilo no se queda. */
+.mensaje-aviso {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  padding: var(--sp-2);
+}
+
+/* Las tres pestañas. Es un subrayado y no un boton: lo que se elige es **que se ve**,
+   y un boton con fondo competiria con los mandos de abajo. */
+.mensaje-grupos {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-1);
+}
+
+.mensaje-grupo {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.mensaje-grupo.activo {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.mensaje-mandos {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Los mandos, en rejilla: se reparten el ancho y envuelven solos. El minimo de 150 px
+   es lo que deja el rotulo y su campo en la misma linea. */
+.mensaje-rejilla {
+  display: grid;
+  gap: var(--sp-2) var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.mensaje-animaciones {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.mensaje-mando {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.mensaje-numero {
+  flex: 0 0 auto;
+  width: 74px;
+}
+
+/* La muestra de color, sin el relleno del campo: con el, el cuadro de color se queda en
+   nada y no se ve que color es. */
+.mensaje-color {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 1px;
+  width: 46px;
+}
+
+.mensaje-ayuda {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* El rotulo de un campo con un boton al lado: el del mensaje, en la fila del texto. */
+.campo-cabeza {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: space-between;
+}
+
 /* La consola: los avisos, el editor y **la previa**, en tres columnas.
  *
  * La previa vivia detras de una pestaña —«Medios | Previa»— en la tercera columna, y

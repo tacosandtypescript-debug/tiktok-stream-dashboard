@@ -10,6 +10,7 @@ import {
   type GiftEventView,
   type GiftTypeSummary,
   type Metrics,
+  type MensajeAviso,
   type Perfil,
   type RankingEntry,
   type Snapshot,
@@ -97,6 +98,50 @@ const EMPTY_TOTALS: Totals = {
 };
 
 /**
+ * El contenedor del mensaje mientras el motor no ha dicho nada.
+ *
+ * Espeja `MensajeAviso::de_fabrica()` de Rust: el mismo fondo, el mismo borde y la misma
+ * letra que el aviso pintaba antes de que esto existiera. Se escribe una vez y los siete
+ * avisos la comparten, igual que arriba.
+ */
+const MENSAJE_VACIO: MensajeAviso = {
+  estilo: "default",
+  fondo: "#0b0d12",
+  fondo_2: "#25f4ee",
+  fondo_opacidad: 88,
+  borde_color: "#232936",
+  borde_grosor: 1,
+  radio: 12,
+  padding_h: 26,
+  padding_v: 14,
+  sombra: 0,
+  blur: 0,
+  glow: 0,
+  glow_color: "#25f4ee",
+  ancho_vw: 70,
+  altura_minima: 0,
+  separacion: 14,
+  fuente: "sistema",
+  tamano: 40,
+  peso: 800,
+  color: "#e8eaf0",
+  alineacion: "centro",
+  espaciado: 0,
+  interlineado: 115,
+  contorno: 0,
+  contorno_color: "#000000",
+  sombra_texto: 12,
+  animacion: "ninguna",
+  animacion_idle: "ninguna",
+  animacion_texto: "ninguna",
+  retardo_ms: 0,
+  duracion_ms: 450,
+  ciclo_ms: 2200,
+  intensidad: 60,
+  ritmo: "auto",
+};
+
+/**
  * La animación de un aviso que todavía no ha dicho nada el motor.
  *
  * Espeja los valores de fábrica de `AjusteAviso::default` en Rust. Se escribe **una
@@ -117,6 +162,7 @@ const ANIMACION_VACIA = {
   idle_color: "#25f4ee",
   idle_blur: 12,
   idle_modo: "pulso",
+  mensaje: MENSAJE_VACIO,
 } as const;
 
 /**
@@ -838,16 +884,36 @@ export function App() {
    * dependencia de un `useEffect` que registra el arrastre de ficheros, y una
    * función nueva por render volvería a registrar el oyente cada vez.
    */
+  /**
+   * El número de la última acción de alertas **pedida**.
+   *
+   * Las respuestas pueden llegar desordenadas —dos guardados seguidos y el primero más
+   * lento—, y la foto de una petición vieja pisaría la nueva: el desplegable del estilo
+   * volvería solo al valor de antes, que es exactamente el síntoma que se persigue. Se pinta
+   * la foto de la última acción pedida, y solo esa.
+   */
+  const alertasPeticion = useRef(0);
+
   const accionAlertas = useCallback(
     (accion: () => Promise<Snapshot>) => {
+      const mia = (alertasPeticion.current += 1);
       setAlertasBusy(true);
       return accion()
         .then((next) => {
+          // Una respuesta que llega tarde no pinta nada: lo que hay en pantalla es más
+          // nuevo que ella.
+          if (mia !== alertasPeticion.current) return;
           applySnapshot(next);
           setError(null);
         })
-        .catch((cause: unknown) => setError(String(cause)))
-        .finally(() => setAlertasBusy(false));
+        .catch((cause: unknown) => {
+          if (mia !== alertasPeticion.current) return;
+          setError(String(cause));
+        })
+        .finally(() => {
+          // Y el «ocupado» lo quita la última, no la que llegue tarde.
+          if (mia === alertasPeticion.current) setAlertasBusy(false);
+        });
     },
     [applySnapshot],
   );
@@ -870,14 +936,19 @@ export function App() {
    */
   const importarMediosRutas = useCallback(
     async (rutas: string[]) => {
+      const mia = (alertasPeticion.current += 1);
       setAlertasBusy(true);
       try {
         const resultado = await api.importarMediosAlerta(rutas);
-        applySnapshot(resultado.snapshot);
-        setError(null);
+        // Mismo criterio que en `accionAlertas`: la foto de una importación que llega
+        // tarde no puede pisar lo que se acaba de cambiar.
+        if (mia === alertasPeticion.current) {
+          applySnapshot(resultado.snapshot);
+          setError(null);
+        }
         return resultado;
       } finally {
-        setAlertasBusy(false);
+        if (mia === alertasPeticion.current) setAlertasBusy(false);
       }
     },
     [applySnapshot],

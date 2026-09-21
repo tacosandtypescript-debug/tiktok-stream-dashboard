@@ -29,6 +29,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::event::UserRef;
 
+pub mod mensaje;
+
+use mensaje::MensajeAviso;
+
 /// Avisos que se guardan sin entregar. Mas alla de esto, lo viejo se descarta:
 /// una ristra de alertas de hace diez minutos no la quiere nadie.
 pub const TOPE_PENDIENTES: usize = 20;
@@ -250,6 +254,17 @@ pub struct AjusteAviso {
     /// El modo del efecto, para los que tienen mas de uno. Ver `MODOS_PERMANENCIA`.
     #[serde(default = "permanencia_modo_de_fabrica")]
     pub idle_modo: String,
+    /// El **contenedor del mensaje**: el bloque donde va el texto, con su estilo, sus
+    /// animaciones y las de sus letras.
+    ///
+    /// Va anidado y no suelto aqui porque son casi treinta campos. Es de **este tipo de
+    /// aviso** y no uno global: una suscripcion puede querer una capsula discreta y el
+    /// tramo enorme una cinta que ocupe el ancho, igual que el texto o el tamaño.
+    ///
+    /// `#[serde(default)]`: los ajustes guardados antes de que existiera cargan con el
+    /// contenedor de fabrica, que pinta exactamente lo que se pintaba antes.
+    #[serde(default)]
+    pub mensaje: MensajeAviso,
 }
 
 /// Lo que hace la alerta **mientras esta visible**, despues de entrar y antes de salir.
@@ -597,6 +612,7 @@ impl Default for AjusteAviso {
             idle_color: permanencia_color_de_fabrica(),
             idle_blur: permanencia_blur_de_fabrica(),
             idle_modo: permanencia_modo_de_fabrica(),
+            mensaje: MensajeAviso::de_fabrica(),
         }
     }
 }
@@ -750,6 +766,10 @@ impl AjustesAlertas {
             if !medios.iter().any(|nombre| nombre == &ajuste.sonido) {
                 ajuste.sonido.clear();
             }
+            // El contenedor del mensaje, con sus catalogos y sus topes. Se sanea aqui y
+            // no al pintarlo: lo que se guarda tiene que ser ya algo valido, porque el
+            // overlay corre en otro proceso y no puede rechazar nada.
+            ajuste.mensaje.sanear();
         }
 
         // El monitor de esta maquina. El dispositivo no se valida aqui: si el
@@ -913,6 +933,13 @@ pub struct Aviso {
     pub idle_blur: u32,
     #[serde(default = "permanencia_modo_de_fabrica")]
     pub idle_modo: String,
+    /// El contenedor del mensaje, tal y como estaba cuando paso el aviso.
+    ///
+    /// Viaja con el aviso por lo mismo que las animaciones: entre que el motor lo encola
+    /// y el overlay lo saca, el streamer puede haber cambiado el estilo, y el aviso tiene
+    /// que salir con el que tenia puesto.
+    #[serde(default)]
+    pub mensaje: MensajeAviso,
 }
 
 impl Aviso {
@@ -941,6 +968,7 @@ impl Aviso {
             idle_color: ajuste.idle_color.clone(),
             idle_blur: ajuste.idle_blur,
             idle_modo: ajuste.idle_modo.clone(),
+            mensaje: ajuste.mensaje.clone(),
         }
     }
 

@@ -476,6 +476,47 @@ export const t = {
     salidaMuda: (motivo: string) => `Sin sonido: ${motivo}`,
     salidaNoDisponible: (nombre: string) => `${nombre} (no disponible)`,
   },
+  /*
+   * El contenedor del mensaje: el bloque donde va el texto.
+   *
+   * Es su propia sección y no un trozo de `alertas` porque es su propio sistema —estilos,
+   * animaciones del contenedor y animaciones de la letra—, y porque sus rótulos salen del
+   * catálogo de `mensaje.ts`, no de la página.
+   */
+  mensaje: {
+    title: "Mensaje",
+    volver: "Volver al aviso",
+    /** El botón que abre el panel, con el estilo puesto: se ve sin abrirlo. */
+    boton: (estilo: string) => `Mensaje · ${estilo}`,
+    botonHint:
+      "El estilo y las animaciones del bloque del texto. Lo que cambies se ve en la previa mientras el aviso está en pantalla.",
+    estilo: "Estilo del mensaje",
+    estiloHint:
+      "Cada estilo trae su forma, sus colores y sus animaciones de partida. Los mandos de al lado empiezan en los suyos, y a partir de ahí mandan los tuyos.",
+    grupoEstilo: "Estilo",
+    grupoTexto: "Texto",
+    grupoAnimacion: "Animación",
+    animacionMensaje: "Cómo aparece",
+    animacionMensajeHint:
+      "Cómo entra el bloque del mensaje. Es independiente de cómo entra la alerta entera: la alerta puede estar ya quieta y el mensaje aparecer después.",
+    animacionTexto: "Cómo aparece el texto",
+    animacionTextoHint:
+      "Va aparte de la del bloque: se pueden combinar. Un bloque que se abre a los lados con las palabras saliendo una a una son dos cosas, no una.",
+    permanencia: "Mientras está en pantalla",
+    permanenciaHint:
+      "Lo que hace el mensaje mientras el aviso sigue en pantalla. Son más suaves que los de la alerta a propósito: la alerta ya se está moviendo.",
+    ritmo: "Ritmo",
+    ritmoHint: "Con qué curva entra. «Automático» deja la que traiga la animación.",
+    secuencia:
+      "Por ejemplo: la alerta entra, a los 0,25 s se abre el mensaje y las palabras salen una a una.",
+    /*
+     * Cuando el motor que responde es anterior a este ajuste. No es un aviso de adorno: sin
+     * el, elegir un estilo y verlo volver solo a «Default» parece un fallo del panel, y lo
+     * que pasa es que el motor no guarda el campo.
+     */
+    sinMotor:
+      "El motor que responde ahora mismo es anterior a estos ajustes, así que no guarda el estilo del mensaje: elige lo que quieras, pero volverá a «Default» y la previa saldrá con el bloque de siempre. Reinicia la aplicación —o el panel— para que sea el motor nuevo.",
+  },
   tts: {
     title: "Lectura del chat en voz alta",
     /* Dos vistas dentro de la misma pestaña. La pagina no cabe entera —los diez

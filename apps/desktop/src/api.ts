@@ -386,6 +386,76 @@ export interface AjusteAviso {
   idle_color: string;
   idle_blur: number;
   idle_modo: string;
+  /**
+   * El **contenedor del mensaje**: el bloque del texto, con su estilo y sus animaciones.
+   *
+   * Va aparte del resto porque es otro sistema: lo de arriba mueve la alerta entera y
+   * esto mueve solo su mensaje. Ver `mensaje.ts` para los catálogos y los mandos.
+   */
+  mensaje: MensajeAviso;
+}
+
+/**
+ * El contenedor del mensaje de una alerta.
+ *
+ * Los nombres y los topes son los de `alerts/mensaje.rs`, que es quien sanea de verdad:
+ * aquí solo se declaran para poder editarlos.
+ */
+export interface MensajeAviso {
+  /** El preset visual. Identificador del catálogo de `mensaje.ts`. */
+  estilo: string;
+  /** Color del fondo, `#rrggbb`. */
+  fondo: string;
+  /** El segundo color: solo lo usa el degradado. */
+  fondo_2: string;
+  /** Cuánto tapa el fondo, en tanto por ciento. */
+  fondo_opacidad: number;
+  borde_color: string;
+  borde_grosor: number;
+  radio: number;
+  padding_h: number;
+  padding_v: number;
+  /** Cuánta sombra proyecta la caja, en tanto por ciento. */
+  sombra: number;
+  /** Lo que se difumina lo de detrás, en píxeles. */
+  blur: number;
+  /** El resplandor de fuera, en píxeles. */
+  glow: number;
+  glow_color: string;
+  /** El ancho máximo, en tanto por ciento del lienzo. */
+  ancho_vw: number;
+  altura_minima: number;
+  /** El hueco con el medio de arriba, en píxeles. */
+  separacion: number;
+  fuente: string;
+  tamano: number;
+  peso: number;
+  color: string;
+  alineacion: string;
+  /** El espacio entre letras, en **décimas** de píxel. */
+  espaciado: number;
+  /** El alto de línea, en tanto por ciento. */
+  interlineado: number;
+  /** El grosor del contorno de la letra, en décimas de píxel. */
+  contorno: number;
+  contorno_color: string;
+  /** Lo que se difumina la sombra de la letra, en píxeles. */
+  sombra_texto: number;
+  /** Cómo aparece el contenedor. */
+  animacion: string;
+  /** Qué hace mientras está en pantalla. */
+  animacion_idle: string;
+  /** Cómo aparecen las letras. Va aparte de la del contenedor. */
+  animacion_texto: string;
+  /** Cuánto espera el mensaje desde que entra la alerta, en milisegundos. */
+  retardo_ms: number;
+  duracion_ms: number;
+  /** Lo que dura un ciclo de la animación de permanencia. */
+  ciclo_ms: number;
+  /** Cuánto se mueve, cuánto crece o cuánto brilla, en tanto por ciento. */
+  intensidad: number;
+  /** El ritmo de la entrada. `auto` deja el que traiga la animación. */
+  ritmo: string;
 }
 
 /**
