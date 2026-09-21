@@ -1164,6 +1164,32 @@ async function principal() {
       );
     }
 
+    // ---------------------------------------------------------- tabla: sin solapes
+    // El nombre y su etiqueta de variante tienen que caber antes del estado de la fila.
+    // Se mide con los nombres más largos posibles: cuarenta participantes con mote largo.
+    const tablaSolapes = await cdp.evaluar(`(() => {
+      PROTOTIPO.participantes(40);
+      PROTOTIPO.simular(7.4);
+      PROTOTIPO.pausar();
+      // Se estiran los nombres de los diez primeros para forzar el caso malo.
+      PROTOTIPO.sim.trompos.slice(0, 10).forEach((t, i) => {
+        t.participante.nombre = "María de los Ángeles Fernández " + (i + 1);
+      });
+      PROTOTIPO.dibujar();
+      const filas = PROTOTIPO.clasificacion();
+      return {
+        filas: filas.length,
+        solapes: filas.filter((f) => f.solapa).length,
+        holguraMinima: Math.min(...filas.map((f) => f.inicioEstado - f.finNombre)),
+        ejemplo: filas[0],
+      };
+    })()`);
+    comprobar(
+      "La tabla no solapa el nombre con el estado, ni con nombres largos y 40 participantes",
+      tablaSolapes.solapes === 0 && tablaSolapes.holguraMinima >= 4,
+      `${tablaSolapes.filas} filas medidas · ${tablaSolapes.solapes} solapes · holgura mínima ${tablaSolapes.holguraMinima} px entre el nombre y el estado (ejemplo: «${tablaSolapes.ejemplo?.nombre?.slice(0, 22)}…» termina en ${tablaSolapes.ejemplo?.finNombre} y el estado empieza en ${tablaSolapes.ejemplo?.inicioEstado})`,
+    );
+
     // ---------------------------------------------------------- regalos (orden 05)
     console.log("\nRegalos: configuración, recompensas, cola y persistencia");
     await cdp.evaluar("PROTOTIPO.participantes(10); PROTOTIPO.simular(7.4); PROTOTIPO.pausar()");

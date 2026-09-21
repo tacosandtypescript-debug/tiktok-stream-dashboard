@@ -167,6 +167,8 @@ window.PROTOTIPO = {
   quitar: (id) => sim.quitarParticipante(id),
   editar: (id, cambios) => sim.editarParticipante(id, cambios),
   identidades: () => sim.identidades(),
+  /** Diagnóstico de la tabla: solapes entre el nombre y el estado de cada fila. */
+  clasificacion: () => (sim.clasificacion.diagnostico ?? []).map((d) => ({ ...d })),
   fotos: () => sim.fotos.estado(),
   poderes: () => sim.poderes.estado(sim),
   poderesCatalogo: () => PODERES,

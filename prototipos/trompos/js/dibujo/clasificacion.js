@@ -53,6 +53,8 @@ export class Clasificacion {
     const c = p.clasificacion;
     const filas = entradas.slice(0, c.filas);
     const anchoNombre = c.anchoNombre ?? 236;
+    // Diagnóstico para el banco: nombres que se acercan al estado de su fila.
+    this.diagnostico = [];
     ctx.save();
     ctx.textBaseline = "middle";
 
@@ -133,7 +135,8 @@ export class Clasificacion {
       }
       x += radio * 2 + 10;
 
-      // --- estado, a la derecha de la línea de arriba
+      // --- el estado se mide ANTES de escribir el nombre: su hueco se reserva, que es
+      // lo que evita que el nombre (o la etiqueta de variante) se le eche encima.
       ctx.textAlign = "right";
       ctx.font = "800 14px system-ui, 'Segoe UI', sans-serif";
       const colorEstado =
@@ -144,26 +147,41 @@ export class Clasificacion {
             : e.estado === "KO"
               ? "#7a7a90"
               : "rgba(200,210,230,0.8)";
+      const anchoEstado = ctx.measureText(e.estado).width;
       ctx.fillStyle = colorEstado;
       ctx.fillText(e.estado, c.x + c.ancho - 12, linea1);
 
-      // --- nombre (acortado al ancho de la mitad izquierda)
+      // --- nombre y variante dentro del hueco que queda libre
+      const yEstado = c.x + c.ancho - 12 - anchoEstado;
+      const espacio = yEstado - 10 - x;
       ctx.textAlign = "left";
       ctx.font = `${primero ? 800 : 700} 19px system-ui, 'Segoe UI', sans-serif`;
       ctx.fillStyle = e.estado === "KO" ? "rgba(232,240,255,0.45)" : "#ffffff";
-      const nombre = acortarTexto(ctx, e.nombre, anchoNombre);
+      // Si hay variante se aparta su hueco (28 px) antes de acortar el nombre: así los
+      // dos caben y ninguno pisa el estado.
+      const huecoVariante = e.variante > 0 ? 28 : 0;
+      const nombre = acortarTexto(ctx, e.nombre, Math.max(40, Math.min(anchoNombre, espacio - huecoVariante)));
+      const anchoDibujado = ctx.measureText(nombre).width;
       ctx.fillText(nombre, x, linea1 + 1);
-      if (e.variante > 0) {
-        const ancho = ctx.measureText(nombre).width;
+      let finNombre = x + anchoDibujado;
+      if (e.variante > 0 && anchoDibujado + 6 + 16 <= espacio) {
         ctx.font = "700 13px system-ui, 'Segoe UI', sans-serif";
         ctx.fillStyle = conAlfa(e.acento, 0.9);
-        ctx.fillText(`v${e.variante + 1}`, x + ancho + 6, linea1 + 2);
+        ctx.fillText(`v${e.variante + 1}`, x + anchoDibujado + 6, linea1 + 2);
+        finNombre = x + anchoDibujado + 6 + ctx.measureText(`v${e.variante + 1}`).width;
       }
+      // Diagnóstico para el banco: cuánto se acercan el nombre y el estado.
+      this.diagnostico.push({
+        nombre: e.nombre,
+        finNombre: Math.round(finNombre),
+        inicioEstado: Math.round(yEstado),
+        solapa: finNombre > yEstado - 4,
+      });
 
       // --- barra de vida y porcentaje (línea de abajo)
       const pct = limitar(e.vidaPct, 0, 1);
       const xBarra = x;
-      const anchoBarra = c.ancho - (xBarra - c.x) - 62;
+      const anchoBarra = Math.max(40, c.ancho - (xBarra - c.x) - 62);
       ctx.fillStyle = "rgba(10,9,18,0.85)";
       caminoRedondeado(ctx, xBarra, linea2 - 5, anchoBarra, 11, 6);
       ctx.fill();
