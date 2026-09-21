@@ -1,0 +1,1043 @@
+/* Estilos del taller.
+   El lienzo no lleva ni un fondo aquí: sigue transparente. Lo que se pinta es el
+   marco que hay detrás (cuadros, negro, blanco o magenta), justamente para poder
+   comprobar que la transparencia es real. */
+
+:root {
+  --fondo: #0d0d12;
+  --panel: #16161f;
+  --panel-2: #1d1d29;
+  --borde: #2b2b3a;
+  --texto: #e8e8f0;
+  --tenue: #9a9ab0;
+  --acento: #7fd7ff;
+  --ok: #4ade80;
+  --alerta: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font: 15px/1.45 system-ui, "Segoe UI", sans-serif;
+}
+
+body {
+  padding: 0 0 24px;
+}
+
+/* ---------------------------------------------------------------- barra */
+
+.barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--borde);
+  background: linear-gradient(180deg, #14141d, #0f0f16);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.barra h1 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: 0.2px;
+}
+
+.barra p {
+  margin: 3px 0 0;
+  color: var(--tenue);
+  font-size: 13px;
+  max-width: 900px;
+}
+
+.barra-estado {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pildora {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #33415a;
+  background: #10202b;
+  color: var(--acento);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-decoration: none;
+}
+
+.pildora.suave {
+  background: var(--panel-2);
+  border-color: var(--borde);
+  color: var(--tenue);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.pildora b {
+  color: var(--texto);
+}
+
+/* ---------------------------------------------------------------- taller */
+
+.taller {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  gap: 18px;
+  padding: 18px 20px 0;
+  align-items: start;
+}
+
+.columna-arena {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* La lámina de diseños va sola: una columna, centrada. */
+.lamina-taller {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.marco {
+  position: sticky;
+  /* Se queda pegado arriba al bajar a mirar la tabla: así se ve la pelea y el
+     marcador a la vez, que es justo lo que hay que revisar. */
+  top: 78px;
+  z-index: 2;
+  /* El lienzo es vertical (1080x1920): se le da todo el alto que quepa para poder
+     revisarlo sin acercarse a la pantalla. */
+  height: min(76vh, 980px);
+  aspect-ratio: 1080 / 1920;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--borde);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 45%);
+}
+
+.marco[data-fondo="cuadros"] {
+  background-color: #1a1a22;
+  background-image:
+    linear-gradient(45deg, #262633 25%, transparent 25%, transparent 75%, #262633 75%),
+    linear-gradient(45deg, #262633 25%, transparent 25%, transparent 75%, #262633 75%);
+  background-size: 32px 32px;
+  background-position: 0 0, 16px 16px;
+}
+
+.marco[data-fondo="negro"] {
+  background: #000;
+}
+
+.marco[data-fondo="blanco"] {
+  background: #fff;
+}
+
+.marco[data-fondo="magenta"] {
+  background: #ff00d4;
+}
+
+.marco canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Ni un fondo aquí: el lienzo tiene que quedar transparente. */
+  background: transparent;
+}
+
+.pie-arena {
+  margin: 0;
+  max-width: 640px;
+  color: var(--tenue);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- tarjetas */
+
+.tarjeta {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.tarjeta h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+}
+
+.tarjeta-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.tarjeta-cabeza h2 {
+  margin: 0;
+}
+
+.nota {
+  margin: 6px 0 0;
+  color: var(--tenue);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------- controles */
+
+.botones {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+/* Cuatro botones para 10, 20, 30 y 40 participantes. */
+.botones.botones-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.botones-4 button[data-activo="1"] {
+  background: #16323f;
+  border-color: #3f7f9c;
+  color: var(--acento);
+  box-shadow: inset 0 0 0 1px rgb(127 215 255 / 35%);
+}
+
+/* ---------------------------------------------------------------- conexión tiktok */
+
+.estado-conexion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--panel-2);
+  font-size: 12.5px;
+}
+
+.estado-conexion b {
+  color: var(--texto);
+}
+
+.estado-conexion i {
+  font-style: normal;
+  color: var(--tenue);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.estado-conexion .luz {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #9aa4b2;
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 6%);
+}
+
+.estado-conexion[data-estado="conectado"] .luz {
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80;
+}
+.estado-conexion[data-estado="conectando"] .luz,
+.estado-conexion[data-estado="reconectando"] .luz {
+  background: #ffcc44;
+  box-shadow: 0 0 8px #ffcc44;
+}
+.estado-conexion[data-estado="error"] .luz {
+  background: #ff5a3c;
+  box-shadow: 0 0 8px #ff5a3c;
+}
+
+.tabla-usuarios {
+  margin: 8px 0;
+  display: grid;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.tabla-usuarios .fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 74px 62px;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.tabla-usuarios .fila b {
+  color: var(--texto);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabla-usuarios .fila i {
+  font-style: normal;
+  color: var(--tenue);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabla-usuarios .fila .dentro {
+  color: var(--ok);
+}
+.tabla-usuarios .fila .espera {
+  color: #ffcc44;
+  font-weight: 700;
+}
+.tabla-usuarios .fila .eliminado {
+  color: #ff5a3c;
+}
+
+#botonesEscenarios {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+#botonesEscenarios button {
+  padding: 5px 7px;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- regalos */
+
+.tabla-regalos {
+  margin: 10px 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/*
+ * Cada regalo ocupa dos líneas: arriba lo que se mira de un vistazo (activo, nombre,
+ * cantidad, recompensa y vida) y abajo el detalle (poder, objetivo, enfriamiento,
+ * acumulación). Con el panel de 430 px, diez columnas de verdad obligarían a letra
+ * diminuta o a recortar campos; así se leen los diez.
+ */
+.tabla-regalos .fila-regalo {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.tabla-regalos .fila-regalo[data-activo="0"] {
+  opacity: 0.48;
+}
+
+.tabla-regalos .fila-regalo input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  grid-row: span 2;
+}
+
+.tabla-regalos .detalle {
+  min-width: 0;
+}
+
+.tabla-regalos .linea {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.tabla-regalos .linea b {
+  color: var(--texto);
+  font-weight: 700;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabla-regalos .linea i {
+  font-style: normal;
+  color: var(--tenue);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tabla-regalos .pastilla {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgb(255 255 255 / 8%);
+  color: var(--texto);
+  white-space: nowrap;
+}
+
+.tabla-regalos .mini {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.tabla-regalos .confirmar {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tabla-regalos .confirmar b {
+  color: var(--texto);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabla-regalos .confirmar .si {
+  border-color: #7f3a3a;
+  color: #ffb4b4;
+}
+
+.form-regalo {
+  margin: 8px 0;
+  padding: 9px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.form-regalo .campos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.progresos {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+.progresos .fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.historial {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 11.5px;
+}
+
+.historial .evento {
+  border-left: 3px solid var(--tenue);
+  padding: 4px 8px;
+  border-radius: 0 6px 6px 0;
+  background: var(--panel-2);
+  line-height: 1.35;
+}
+
+.historial .evento b {
+  color: var(--texto);
+}
+
+.historial .evento .meta {
+  color: var(--tenue);
+  font-size: 10.5px;
+}
+
+.historial .evento[data-estado="aplicado"] {
+  border-left-color: var(--ok);
+}
+.historial .evento[data-estado="rechazado"] {
+  border-left-color: #b4553f;
+}
+.historial .evento[data-estado="en cola"] {
+  border-left-color: #d8a13a;
+}
+.historial .evento[data-estado="acumulando"] {
+  border-left-color: #63b4ff;
+}
+
+.form-regalo .interruptor {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+
+/* ---------------------------------------------------------------- poderes */
+
+.poderes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.poderes button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.poderes button .icono {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  background: var(--poder, #7fd7ff);
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 10%);
+}
+
+.poderes button[data-activo="1"] {
+  border-color: #6b8a4b;
+  background: #1d2a17;
+}
+
+.poderes button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.poderes-lista {
+  margin-top: 8px;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.poderes-lista .fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px 62px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.poderes-lista .fila b {
+  color: var(--texto);
+  font-weight: 700;
+}
+
+.poderes-lista .fila i {
+  font-style: normal;
+  color: var(--tenue);
+}
+
+.poderes-lista .estado-cargando {
+  color: #fbbf24;
+}
+.poderes-lista .estado-activo {
+  color: var(--ok);
+}
+.poderes-lista .estado-finalizando {
+  color: #a78bfa;
+}
+.poderes-lista .estado-enfriando {
+  color: var(--tenue);
+}
+
+#outAudio[data-estado="listo"] {
+  color: var(--ok);
+}
+
+#outAudio[data-estado="esperando"] {
+  color: #fbbf24;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--texto);
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #262635;
+  border-color: #3b3b52;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button[data-activo="1"] {
+  background: #2a2135;
+  border-color: #6b4b8a;
+  color: #ffd9a8;
+}
+
+button.mini {
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+
+.campos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--tenue);
+}
+
+.campo.ancho {
+  grid-column: 1 / -1;
+}
+
+.campo b {
+  color: var(--acento);
+}
+
+.fila {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+input[type="number"],
+select,
+input[type="text"] {
+  font: inherit;
+  font-size: 13px;
+  color: var(--texto);
+  background: #0f0f16;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--acento);
+}
+
+.casillas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.casillas label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--texto);
+}
+
+.avanzado {
+  margin-top: 10px;
+}
+
+.avisos {
+  margin-top: 10px;
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--acento);
+  min-height: 18px;
+}
+
+/* ---------------------------------------------------------------- lecturas */
+
+.lecturas {
+  margin: 8px 0 0;
+  display: grid;
+  gap: 4px;
+}
+
+.lecturas > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #23232f;
+}
+
+.lecturas dt {
+  color: var(--tenue);
+  font-size: 12.5px;
+}
+
+.lecturas dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.lecturas dd[data-alerta="1"] {
+  color: var(--alerta);
+}
+
+/* ---------------------------------------------------------------- diseños */
+
+.disenos {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.diseno {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+
+.muestra {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 70%);
+  background: radial-gradient(circle at 35% 30%, var(--c2), var(--c1) 62%, var(--c3));
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 18%);
+}
+
+.diseno .datos {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.diseno .datos b {
+  font-size: 13.5px;
+}
+
+.diseno .datos i {
+  color: var(--tenue);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.diseno .cifras {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.diseno .cifras em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--tenue);
+}
+
+/* ---------------------------------------------------------------- tabla */
+
+.marcador {
+  padding: 12px 14px 14px;
+}
+
+.progreso {
+  width: 160px;
+  height: 6px;
+  border-radius: 999px;
+  background: #23232f;
+  overflow: hidden;
+}
+
+.progreso i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #4ade80, #7fd7ff);
+  transition: width 0.2s linear;
+}
+
+.tabla {
+  display: grid;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabla-cabecera,
+.tabla-fila {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 190px 92px 56px;
+  align-items: center;
+  gap: 10px;
+}
+
+.tabla-cabecera {
+  color: var(--tenue);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 0 8px 4px;
+}
+
+.tabla-fila {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+}
+
+.tabla-fila .pos {
+  color: var(--tenue);
+  font-weight: 700;
+}
+
+.tabla-fila .quien {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Foto del participante: máscara circular, recorte centrado y borde de su color.
+   Si la imagen no carga, queda la inicial sobre el color (nunca un hueco roto). */
+.tabla-fila .foto {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--color, #444);
+  border: 2px solid var(--color, #666);
+}
+
+.tabla-fila .foto img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.tabla-fila .foto img[data-fallo] {
+  display: none;
+}
+
+.tabla-fila .foto .inicial {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 60%);
+}
+
+/* ---------------------------------------------------------------- identidad */
+
+.identidad {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 10px 0;
+}
+
+.identidad .vista {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 3px solid var(--color, #7fd7ff);
+  background-color: var(--color, #223);
+  background-size: cover;
+  background-position: center;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 70%);
+}
+
+.identidad .vista::after {
+  content: attr(data-inicial);
+}
+
+.identidad .campos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.identidad .campos .campo.ancho {
+  grid-column: 1 / -1;
+}
+
+.tabla-fila .vida {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tabla-fila .vida .num {
+  width: 52px;
+  text-align: right;
+  font-size: 13px;
+}
+
+.tabla-fila .barra {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: #12121a;
+  overflow: hidden;
+}
+
+.tabla-fila .barra u {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+}
+
+.tabla-fila .estado {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--tenue);
+}
+
+.tabla-fila .estado[data-estado="LÍDER"] {
+  color: #ffd76a;
+}
+
+.tabla-fila .estado[data-estado="DÉBIL"] {
+  color: var(--alerta);
+}
+
+.tabla-fila .estado[data-estado="KO"] {
+  color: #7a7a90;
+}
+
+.tabla-fila .kos {
+  text-align: right;
+  color: #ffd76a;
+  font-weight: 700;
+}
+
+.tabla-fila.es-lider {
+  border-color: #7a5a1e;
+  background: #221d10;
+}
+
+.tabla-fila.es-ko {
+  opacity: 0.5;
+}
+
+.lista-tecnica {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--tenue);
+  font-size: 12.5px;
+  display: grid;
+  gap: 6px;
+}
+
+.lista-tecnica b {
+  color: var(--texto);
+}
+
+/* ---------------------------------------------------------------- modo limpio (OBS) */
+
+body.limpio {
+  background: transparent;
+  padding: 0;
+}
+
+body.limpio .barra,
+body.limpio .columna-panel,
+body.limpio .pie-arena,
+body.limpio .marcador {
+  display: none;
+}
+
+body.limpio .taller {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  gap: 0;
+}
+
+body.limpio .marco {
+  height: 100vh;
+  aspect-ratio: auto;
+  width: min(100vw, calc(100vh * 1080 / 1920));
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------- pantallas estrechas */
+
+@media (max-width: 1180px) {
+  .taller {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .marco {
+    height: min(66vh, 760px);
+  }
+}

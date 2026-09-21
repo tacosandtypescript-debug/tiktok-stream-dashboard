@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Identidades · arena de trompos</title>
+    <link rel="stylesheet" href="./css/prototipo.css" />
+    <style>
+      /* Página de revisión: lo único que importa es la lámina, grande y centrada. */
+      .lamina-marco {
+        height: min(92vh, 1200px);
+        aspect-ratio: 1080 / 1920;
+      }
+      .lamina-pie {
+        max-width: 780px;
+      }
+      .enlaces {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="barra">
+      <div class="barra-titulo">
+        <h1>Identidades</h1>
+        <p>
+          Los mismos participantes de la arena, con la cara grande: medallón del núcleo, color
+          identificador y variante del diseño. Es la lámina para juzgar si una cara se reconoce.
+        </p>
+      </div>
+      <div class="barra-estado enlaces">
+        <a class="pildora" href="./identidad.html?participantes=10">10</a>
+        <a class="pildora" href="./identidad.html?participantes=20">20</a>
+        <a class="pildora" href="./identidad.html?participantes=30">30</a>
+        <a class="pildora" href="./identidad.html?participantes=40">40</a>
+        <a class="pildora" href="./index.html">Volver al taller</a>
+      </div>
+    </header>
+
+    <main class="taller lamina-taller">
+      <section class="columna-arena">
+        <div class="marco lamina-marco" data-fondo="negro">
+          <canvas id="lamina" width="1080" height="1920" aria-label="Lámina de identidades"></canvas>
+        </div>
+        <p class="pie-arena lamina-pie">
+          El medallón es la foto del participante recortada en círculo, con el aro de su color; si la
+          foto falta o falla, se ve su inicial sobre ese mismo color. Debajo de cada uno: su nombre, su
+          diseño (con la variante, si el modelo está repetido) y de dónde sale la foto.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./js/lamina-identidad.js"></script>
+  </body>
+</html>

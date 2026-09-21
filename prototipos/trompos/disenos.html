@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Los diez diseños · arena de trompos</title>
+    <link rel="stylesheet" href="./css/prototipo.css" />
+    <style>
+      /* Página de revisión: lo único que importa es la lámina, grande y centrada. */
+      .lamina-marco {
+        height: min(92vh, 1200px);
+        aspect-ratio: 1080 / 1920;
+      }
+      .lamina-pie {
+        max-width: 760px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="barra">
+      <div class="barra-titulo">
+        <h1>Los diez diseños</h1>
+        <p>
+          Lámina de revisión: los diez trompos a la vez, con la geometría escrita y el aspecto a vida
+          alta, media y baja. Nada se mueve aquí.
+        </p>
+      </div>
+      <div class="barra-estado">
+        <a class="pildora" href="./index.html">Volver al taller</a>
+      </div>
+    </header>
+
+    <main class="taller lamina-taller">
+      <section class="columna-arena">
+        <div class="marco lamina-marco" data-fondo="negro">
+          <canvas id="lamina" width="1080" height="1920" aria-label="Lámina de los diez diseños"></canvas>
+        </div>
+        <p class="pie-arena lamina-pie">
+          Cada línea de geometría sale del propio diseño: número y forma de palas, lados y estilo del
+          anillo, patrón y núcleo. Cambiar de diseño cambia la silueta, no sólo el color.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./js/lamina.js"></script>
+  </body>
+</html>

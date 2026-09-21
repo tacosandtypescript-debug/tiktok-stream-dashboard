@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Arena de trompos · prototipo visual y físico</title>
+    <link rel="stylesheet" href="./css/prototipo.css" />
+  </head>
+  <body>
+    <header class="barra">
+      <div class="barra-titulo">
+        <h1>Arena de trompos</h1>
+        <p>
+          Prototipo aislado · lienzo <b>1080 × 1920</b> con fondo transparente · física propia en Canvas 2D ·
+          sin TikTok, sin regalos y sin tocar la aplicación
+        </p>
+      </div>
+      <div class="barra-estado">
+        <span class="pildora" id="outFase">ESPERA</span>
+        <span class="pildora suave">ronda <b id="outRonda">1</b></span>
+        <span class="pildora suave">vivos <b id="outVivos">10 / 10</b></span>
+        <span class="pildora suave"><b id="outFps">0</b> fps</span>
+      </div>
+    </header>
+
+    <main class="taller">
+      <section class="columna-arena">
+        <div class="marco" id="marco" data-fondo="cuadros">
+          <canvas id="lienzo" width="1080" height="1920" aria-label="Arena de trompos"></canvas>
+        </div>
+        <p class="pie-arena">
+          El tablero de cuadros es del navegador, no del lienzo: sirve para ver que el fondo sigue
+          transparente. Arriba está la clasificación y abajo los carteles; los trompos rebotan entre
+          las dos franjas.
+        </p>
+
+        <section class="tarjeta marcador">
+          <div class="tarjeta-cabeza">
+            <h2>Tabla completa (fuera del lienzo)</h2>
+            <div class="progreso"><i id="barraProgreso"></i></div>
+          </div>
+          <div id="tabla" class="tabla"></div>
+        </section>
+      </section>
+
+      <aside class="columna-panel">
+        <section class="tarjeta">
+          <h2>Participantes</h2>
+          <p class="nota">
+            Cambiar el número cambia el radio, la escala de los efectos y el modo de las etiquetas, y
+            vuelve a montar la ronda con la misma semilla.
+          </p>
+          <div class="botones botones-4" id="grupoParticipantes">
+            <button type="button" data-participantes="10">10</button>
+            <button type="button" data-participantes="20">20</button>
+            <button type="button" data-participantes="30">30</button>
+            <button type="button" data-participantes="40">40</button>
+          </div>
+          <p class="nota">
+            Escala de los trompos <b id="outEscala">0,50</b> · radio <b id="outRadio">42 px</b> · efectos
+            <b id="outEscalaEfectos">1,00</b> ×
+          </p>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Controles de desarrollo</h2>
+          <p class="nota">Sólo para probar el prototipo: no forman parte del overlay.</p>
+          <div class="botones">
+            <button id="btnReiniciar" type="button">Reiniciar</button>
+            <button id="btnPausa" type="button" data-activo="0">Pausar</button>
+            <button id="btnImpacto" type="button">Crear impacto</button>
+            <button id="btnAnadir" type="button">Añadir participante</button>
+            <button id="btnRonda" type="button">Reiniciar ronda</button>
+            <button id="btnSiguiente" type="button">Ronda siguiente</button>
+          </div>
+
+          <div class="campos">
+            <label class="campo ancho">
+              <span>Semilla</span>
+              <span class="fila">
+                <input id="inSemilla" type="number" step="1" min="0" />
+                <button id="btnSemilla" type="button" class="mini">Aleatoria</button>
+              </span>
+            </label>
+            <label class="campo ancho">
+              <span>Velocidad de simulación <b id="outVelocidad">1×</b></span>
+              <input id="inVelocidad" type="range" min="0.25" max="4" step="0.25" value="1" />
+            </label>
+            <label class="campo">
+              <span>Fondo</span>
+              <select id="selFondo">
+                <option value="cuadros">Cuadros</option>
+                <option value="negro">Negro</option>
+                <option value="blanco">Blanco</option>
+                <option value="magenta">Magenta</option>
+              </select>
+            </label>
+            <label class="campo">
+              <span>Calidad</span>
+              <select id="selCalidad">
+                <option value="1">Completa</option>
+                <option value="0.6">Ligera</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="avanzado">
+            <label class="campo ancho">
+              <span>Simular sin esperar</span>
+              <span class="fila">
+                <input id="inSimular" type="number" value="30" min="1" max="400" step="5" />
+                <button id="btnSimular" type="button" class="mini">segundos</button>
+                <button id="btnHastaFinal" type="button" class="mini">Hasta el final</button>
+              </span>
+            </label>
+          </div>
+
+          <div class="casillas">
+            <label><input id="chkNombres" type="checkbox" checked /> Nombres</label>
+            <label><input id="chkTabla" type="checkbox" checked /> Tabla en el lienzo</label>
+            <label><input id="chkParticulas" type="checkbox" checked /> Partículas</label>
+            <label><input id="chkHitboxes" type="checkbox" /> Hitboxes y límites</label>
+            <label><input id="chkOrbitas" type="checkbox" checked /> Anillos</label>
+            <label><input id="chkRastro" type="checkbox" checked /> Rastro</label>
+            <label><input id="chkDepura" type="checkbox" /> Datos en el lienzo</label>
+          </div>
+
+          <div class="avisos" id="outAviso"></div>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Identidad</h2>
+          <p class="nota">
+            Cada trompo representa a una persona: nombre, foto (o inicial de respaldo) y color propio. Los
+            datos son simulados, pero la foto se carga con un <code>&lt;img&gt;</code> de verdad desde
+            <code>fotos/</code>, así que se puede probar qué pasa si falta o si falla.
+          </p>
+          <div class="identidad">
+            <div class="vista" id="vistaIdentidad"></div>
+            <div class="campos">
+              <label class="campo ancho">
+                <span>Participante</span>
+                <select id="selParticipante"></select>
+              </label>
+              <label class="campo ancho">
+                <span>Nombre</span>
+                <input id="inNombre" type="text" maxlength="60" />
+              </label>
+              <label class="campo ancho">
+                <span>Foto</span>
+                <select id="selFoto"></select>
+              </label>
+              <label class="campo">
+                <span>Diseño</span>
+                <select id="selDiseno"></select>
+              </label>
+              <label class="campo">
+                <span>Variante</span>
+                <select id="selVariante">
+                  <option value="0">Original</option>
+                  <option value="1">Variante 2</option>
+                  <option value="2">Variante 3</option>
+                  <option value="3">Variante 4</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="botones">
+            <button id="btnGuardarIdentidad" type="button">Guardar identidad</button>
+            <button id="btnQuitar" type="button">Quitar participante</button>
+            <button id="btnRestaurarIdentidad" type="button">Restaurar plantilla</button>
+          </div>
+          <p class="nota">Pruebas de fallback, con el participante elegido:</p>
+          <div class="botones">
+            <button id="btnNombreLargo" type="button" class="mini">Nombre largo</button>
+            <button id="btnDuplicarNombre" type="button" class="mini">Nombre repetido</button>
+            <button id="btnFotoRota" type="button" class="mini">Foto que falta</button>
+            <button id="btnSinFoto" type="button" class="mini">Sin foto</button>
+            <button id="btnFotoPanoramica" type="button" class="mini">Foto panorámica</button>
+          </div>
+          <p class="nota" id="outFotos">0 pedidas · 0 cargadas · 0 con fallo</p>
+        </section>
+
+        <section class="tarjeta" id="seccionTikTok">
+          <h2>Conexión TikTok</h2>
+          <p class="nota">
+            El prototipo <b>escucha el bus de eventos del motor</b> (el mismo que alimenta los
+            overlays). No abre ninguna conexión con TikTok, no pide credenciales y no envía
+            nada: sólo recibe los regalos que el motor ya está publicando.
+          </p>
+          <div class="estado-conexion" id="estadoConexion">
+            <span class="luz" id="luzConexion"></span>
+            <b id="outConexionEstado">Desconectado</b>
+            <i id="outConexionDetalle">—</i>
+          </div>
+          <div class="botones">
+            <button id="btnConectarTikTok" type="button">Conectar al bus</button>
+            <button id="btnConectarPuente" type="button">Escuchar puente del servidor</button>
+            <button id="btnDesconectarTikTok" type="button">Desconectar</button>
+          </div>
+          <div class="campos">
+            <label>Modo<select id="selModoTikTok">
+              <option value="simulado">Simulado (sin conexión)</option>
+              <option value="real">Real (bus del motor)</option>
+            </select></label>
+            <label class="interruptor"><input id="chkSilenciarTikTok" type="checkbox" /> Silenciar eventos de prueba</label>
+          </div>
+          <dl class="lecturas">
+            <div><dt>Procesados</dt><dd id="outTikTokProcesados">0</dd></div>
+            <div><dt>Duplicados ignorados</dt><dd id="outTikTokDuplicados">0</dd></div>
+            <div><dt>Regalos desconocidos</dt><dd id="outTikTokDesconocidos">0</dd></div>
+            <div><dt>Sin usuario</dt><dd id="outTikTokSinUsuario">0</dd></div>
+            <div><dt>Reconexiones</dt><dd id="outTikTokReconexiones">0</dd></div>
+            <div><dt>Rachas abiertas</dt><dd id="outTikTokRachas">0</dd></div>
+          </dl>
+          <p class="nota" id="outTikTokUltimo">todavía no ha llegado ningún evento</p>
+
+          <h3>Eventos de prueba</h3>
+          <p class="nota">
+            Pasan por el <b>mismo normalizador y la misma lógica</b> que los reales: no hay una
+            ruta de prueba que se salte el juego.
+          </p>
+          <div class="botones" id="botonesEscenarios"></div>
+          <div class="botones">
+            <button id="btnGuardarUsuarios" type="button">Guardar identidades</button>
+            <button id="btnPromoverEspera" type="button">Promover de la cola</button>
+            <button id="btnLimpiarTikTok" type="button">Limpiar historial de regalos</button>
+            <button id="btnReiniciarRonda" type="button">Reiniciar la ronda</button>
+          </div>
+
+          <h3>Espectadores reconocidos</h3>
+          <p class="nota" id="outUsuariosResumen">—</p>
+          <div class="tabla-usuarios" id="tablaUsuarios"></div>
+
+          <h3>Regalos sin configurar</h3>
+          <div class="tabla-usuarios" id="tablaDesconocidos"></div>
+
+          <h3>Registro técnico</h3>
+          <div class="historial" id="registroTikTok"></div>
+        </section>
+
+        <section class="tarjeta" id="seccionRegalos">
+          <h2>Regalos</h2>
+          <p class="nota">
+            Cada fila es un regalo: cuántas unidades hacen falta, qué recompensa da (vida, poder,
+            las dos o un evento) y a quién apunta. El poder se lanza <b>desde el trompo del
+            donador</b>, sea cual sea su diseño. La configuración se guarda en
+            <code>datos/regalos.json</code>.
+          </p>
+          <div class="tabla-regalos" id="tablaRegalos"></div>
+          <div class="botones">
+            <button id="btnAnadirRegalo" type="button">+ Añadir regalo</button>
+            <button id="btnGuardarRegalos" type="button">Guardar</button>
+            <button id="btnExportarRegalos" type="button">Exportar</button>
+            <button id="btnImportarRegalos" type="button">Importar</button>
+            <button id="btnRestaurarRegalos" type="button">Restaurar ejemplos</button>
+          </div>
+          <input type="file" id="archivoRegalos" accept="application/json,.json" hidden />
+
+          <div class="form-regalo" id="formRegalo" hidden>
+            <div class="campos">
+              <label>Regalo<input id="fRegalo" type="text" maxlength="40" /></label>
+              <label>Identificador<input id="fRegaloId" type="text" maxlength="24" /></label>
+              <label>Cantidad<input id="fCantidad" type="number" min="1" max="999" /></label>
+              <label>Recompensa<select id="fRecompensa"></select></label>
+              <label>Vida<input id="fVida" type="number" min="0" max="99999" step="50" /></label>
+              <label>Poder<select id="fPoder"></select></label>
+              <label>Objetivo<select id="fObjetivo"></select></label>
+              <label>Enfriamiento (s)<input id="fEnfriamiento" type="number" min="0" max="600" step="0.5" /></label>
+              <label>Acumulación<select id="fAcumulacion"></select></label>
+              <label class="interruptor"><input id="fActivo" type="checkbox" /> Activo</label>
+            </div>
+            <p class="nota" id="outFormRegalo">—</p>
+            <div class="botones">
+              <button id="btnGuardarFila" type="button">Guardar fila</button>
+              <button id="btnCancelarFila" type="button">Cancelar</button>
+            </div>
+          </div>
+
+          <div class="campos">
+            <label>Si el poder está enfriando<select id="selEspera"></select></label>
+            <label>Excedente<select id="selExcedente"></select></label>
+          </div>
+          <p class="nota" id="outRegalosEstado">—</p>
+
+          <h3>Enviar regalo simulado</h3>
+          <div class="campos">
+            <label>Participante<select id="selDonador"></select></label>
+            <label>Regalo<select id="selRegalo"></select></label>
+            <label>Cantidad<input id="inCantidad" type="number" min="1" max="99" value="1" /></label>
+          </div>
+          <div class="botones">
+            <button id="btnEnviarRegalo" type="button">Enviar regalo</button>
+            <button id="btnRepetirRegalo" type="button">Repetir</button>
+            <button id="btnRafagaRegalos" type="button">×5 rápido</button>
+            <button id="btnLimpiarHistorial" type="button">Limpiar historial</button>
+          </div>
+          <dl class="lecturas">
+            <div><dt>Enviados</dt><dd id="outRegalosEnviados">0</dd></div>
+            <div><dt>Aplicados</dt><dd id="outRegalosAplicados">0</dd></div>
+            <div><dt>Rechazados</dt><dd id="outRegalosRechazados">0</dd></div>
+            <div><dt>En cola</dt><dd id="outRegalosCola">0</dd></div>
+            <div><dt>Vida dada</dt><dd id="outRegalosVida">0</dd></div>
+            <div><dt>Daño de regalos</dt><dd id="outRegalosDanio">0</dd></div>
+          </dl>
+          <div class="progresos" id="progresosRegalos"></div>
+          <div class="historial" id="historialRegalos"></div>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Poderes</h2>
+          <p class="nota">
+            <b>Diez poderes de ataque</b>, uno por diseño. <b>Los puede usar cualquiera</b>: cada
+            botón lanza ese poder en el participante elegido en «Identidad» (y si ese lo tiene
+            enfriando, en el primero que pueda). Cada poder lleva su propio enfriamiento.
+          </p>
+          <div class="poderes" id="listaPoderes"></div>
+          <div class="botones">
+            <button id="btnDemo" type="button" data-activo="0">Demostración automática</button>
+            <button id="btnPoderLider" type="button">Poder del líder</button>
+            <button id="btnPoderesListos" type="button">Reiniciar enfriamientos</button>
+          </div>
+          <p class="nota">
+            Teclado: <b>Mayús + 1…0</b> lanza cada poder en el elegido · <b>z</b> el del líder ·
+            <b>x</b> la demostración. Estados <b>cargando → activo → finalizando → enfriando</b>.
+          </p>
+          <dl class="lecturas">
+            <div><dt>Activaciones</dt><dd id="outActivaciones">0</dd></div>
+            <div><dt>Daño de poderes</dt><dd id="outDanioPoderes">0</dd></div>
+            <div><dt>Bajas por poder</dt><dd id="outBajasPoder">0</dd></div>
+            <div><dt>En curso</dt><dd id="outEnCurso">0</dd></div>
+          </dl>
+          <div class="poderes-lista" id="estadoPoderes"></div>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Sonido</h2>
+          <p class="nota">
+            Efectos sintetizados con WebAudio: no hay ni un archivo de sonido. El navegador no deja
+            sonar nada hasta que tocas la página, así que el audio se desbloquea con el primer clic o
+            tecla.
+          </p>
+          <div class="casillas">
+            <label><input id="chkSonido" type="checkbox" checked /> Sonido</label>
+            <label class="campo">
+              <span>Volumen <b id="outVolumen">60 %</b></span>
+              <input id="inVolumen" type="range" min="0" max="1" step="0.05" value="0.6" />
+            </label>
+          </div>
+          <div class="botones">
+            <button id="btnProbarSonidos" type="button" class="mini">Probar los ocho sonidos</button>
+            <button id="btnSilenciar" type="button" class="mini">Silenciar</button>
+          </div>
+          <p class="nota" id="outAudio">audio sin desbloquear · toca la página</p>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Lecturas</h2>
+          <dl class="lecturas">
+            <div><dt>Tiempo de batalla</dt><dd id="outTiempo">0,0 s</dd></div>
+            <div><dt>Choques</dt><dd id="outChoques">0</dd></div>
+            <div><dt>Presión de daño</dt><dd id="outPresion">1,00×</dd></div>
+            <div><dt>Partículas</dt><dd id="outParticulas">0 + 0 ondas</dd></div>
+            <div><dt>Velocidad media</dt><dd id="outVelocidadMedia">0 px/s</dd></div>
+            <div><dt>Peor solape</dt><dd id="outSolape">0 px</dd></div>
+            <div><dt>Pegados al borde</dt><dd id="outBorde">0</dd></div>
+            <div><dt>Ganador</dt><dd id="outGanador">—</dd></div>
+            <div><dt>Semilla en curso</dt><dd id="outSemillaActual">—</dd></div>
+            <div><dt>Energía de la arena</dt><dd id="outEnergia">0</dd></div>
+            <div><dt>Fuera de la arena</dt><dd id="outFuera" data-alerta="0">ninguno</dd></div>
+            <div><dt>Saltos de límite</dt><dd id="outSaltos">0</dd></div>
+            <div><dt>Sonidos</dt><dd id="outSonidos">0</dd></div>
+          </dl>
+          <p class="nota">
+            «Saltos de límite» tiene que quedarse en 0 y «peor solape» por debajo de medio radio: si
+            sube, hay amontonamiento.
+          </p>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Los diez diseños</h2>
+          <ol class="disenos" id="listaDisenos"></ol>
+          <p class="nota">
+            Cada muestra es el color real del diseño. Todos se dibujan por código con arcos, polígonos,
+            degradados y transparencias: no hay ni un sprite.
+          </p>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Cómo se mueve</h2>
+          <ul class="lista-tecnica">
+            <li><b>Paso fijo</b> de 1/120 s con acumulador: la batalla no depende de los fps.</li>
+            <li><b>Empuje de crucero</b> y un roce suave para que la pelea no se apague.</li>
+            <li><b>Choque:</b> separar por masa inversa → impulso con restitución → daño → onda, chispas y número.</li>
+            <li><b>Daño</b> = (mínimo + exceso de velocidad × escala) × ataque ÷ defensa × √masa.</li>
+            <li><b>Protección</b> de 0,17 s por trompo: un amontonamiento no cuenta como cinco choques.</li>
+            <li><b>Presión</b> de tiempo: el daño sube y la ronda siempre termina con un ganador.</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./js/principal.js"></script>
+  </body>
+</html>
