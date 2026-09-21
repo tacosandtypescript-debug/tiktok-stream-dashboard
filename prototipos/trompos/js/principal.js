@@ -247,6 +247,27 @@ window.PROTOTIPO = {
       cobertura: cobertura(ctx, ancho, alto, 8),
       fondoDelLienzo: getComputedStyle(lienzo).backgroundColor,
       arena,
+      // Geometría de los dos bloques de la franja superior (orden de layout): el banco
+      // comprueba que cada uno ocupa su mitad y que los dos caben por encima de la arena.
+      clasificacion: {
+        x: PARAMETROS.clasificacion.x,
+        y: PARAMETROS.clasificacion.y,
+        ancho: PARAMETROS.clasificacion.ancho,
+        alto:
+          PARAMETROS.clasificacion.altoCabecera +
+          6 +
+          PARAMETROS.clasificacion.filas * (PARAMETROS.clasificacion.altoFila + PARAMETROS.clasificacion.separacionFilas) +
+          PARAMETROS.clasificacion.altoResumen,
+      },
+      carteles: {
+        x: PARAMETROS.carteles.x,
+        y: PARAMETROS.carteles.y,
+        ancho: PARAMETROS.carteles.ancho,
+        alto:
+          PARAMETROS.carteles.altoCabecera +
+          6 +
+          PARAMETROS.carteles.maxEliminaciones * (PARAMETROS.carteles.altoPlato + PARAMETROS.carteles.separacion),
+      },
       escala: {
         trompos: Number(escalaTrompos(PARAMETROS).toFixed(3)),
         efectos: Number(escalaEfectos(PARAMETROS).toFixed(3)),

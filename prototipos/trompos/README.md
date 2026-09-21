@@ -20,6 +20,7 @@ datos, ni configuración, ni API nueva.
 | **04** | Diez poderes **de ataque** (uno por diseño) que **puede usar cualquiera**, con carga, activación, efecto y finalización, enfriamiento por poder, límites físicos, sonidos propios, panel de pruebas y demostración reproducible |
 | **05** | **Configuración de regalos**: tabla editable (regalo, cantidad, recompensa, vida, poder, objetivo, enfriamiento, activo), motor de recompensas sobre el donador, cola cuando el poder está enfriando, acumulación con excedente, historial de eventos, panel de regalos simulados y persistencia en `datos/regalos.json` |
 | **06** | **Regalos reales de TikTok**: puente con el bus de eventos del motor, evento normalizado, identidad por `userId`, idempotencia, rachas, cola de espera con el cupo de 40, reconexión sin duplicar y taller de conexión |
+| **Layout** | **Franja superior a mitades**: la clasificación ocupa la mitad izquierda y los carteles de eliminación la mitad derecha; la franja inferior queda libre para los trompos (la arena pasa de 928×1432 a **928×1638**, +14 %) |
 
 ---
 

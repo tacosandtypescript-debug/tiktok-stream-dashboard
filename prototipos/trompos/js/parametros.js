@@ -18,7 +18,10 @@ export const PARAMETROS = {
     // que ni la tabla ni los carteles tapan la pelea.
     margenLados: 76,
     margenArriba: 258, // debajo de la tabla de clasificación
-    margenAbajo: 230, // encima de los carteles de eliminación
+    // La franja inferior queda **libre** desde la orden de layout: las eliminaciones
+    // se han movido arriba, así que aquí sólo queda un margen mínimo de seguridad para
+    // que ningún trompo roce el borde del lienzo.
+    margenAbajo: 24,
   },
 
   // ---------------------------------------------------------------- tiempo
@@ -151,6 +154,19 @@ export const PARAMETROS = {
     ],
   },
 
+  // Carteles de eliminación: mitad derecha de la franja superior (orden de layout).
+  // Van apilados desde arriba, el más reciente primero, y el último se desvanece.
+  carteles: {
+    x: 560,
+    y: 16,
+    ancho: 486,
+    altoCabecera: 22,
+    altoPlato: 78,
+    separacion: 10,
+    maxEliminaciones: 2,
+    radioMedallon: 20,
+  },
+
   // ---------------------------------------------------------------- vida
   vida: {
     inicial: 1800,
@@ -212,19 +228,27 @@ export const PARAMETROS = {
   },
 
   // ---------------------------------------------------------------- clasificación
+  // La franja superior se reparte **a mitades** (orden de layout): la clasificación
+  // ocupa la izquierda y los carteles de eliminación la derecha, con 40 px de aire
+  // entre las dos. Toda la franja inferior queda libre para los trompos.
   clasificacion: {
     x: 34,
     y: 16,
-    ancho: 1012,
+    ancho: 486,
     // Cabecera fina con el título, la ronda y el total de participantes.
     altoCabecera: 22,
     // Cinco filas de 36 px más la línea de resumen tienen que caber por encima de
     // `lienzo.margenArriba` (258): 22 + 5·(36+3) + 22 = 239 px.
     altoFila: 36,
     separacionFilas: 3,
-    altoResumen: 22,
+    // La línea de «+N participantes más»: 18 px para que el bloque entero (22 de
+    // cabecera + 6 + cinco filas + esta línea = 241) quepa en la franja de 258.
+    altoResumen: 18,
     // Cuántas filas se enseñan enteras; el resto se resume en una línea.
     filas: 5,
+    // Ancho máximo del nombre antes de acortarlo: en media franja no cabe entero, y el
+    // completo sigue estando en los datos y en la ficha.
+    anchoNombre: 236,
     // Con la vida muy baja el nombre se apaga, pero sigue estando.
     brilloMinimo: 0.5,
   },

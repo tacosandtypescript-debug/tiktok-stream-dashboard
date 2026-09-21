@@ -4,12 +4,14 @@
 // La orden lo pide explícitamente («el mensaje no debe detener la simulación»), así
 // que aquí no hay ni una pausa: sólo una lista con tiempos.
 //
-// Dónde va cada cosa (orden 02, zonas reservadas):
-//   * **eliminaciones**: franja inferior, apiladas desde abajo y como mucho dos, para
-//     que con cuarenta participantes no llenen la pantalla;
-//   * **avisos cortos** (nuevo líder): franja superior, pegados al borde de la arena,
-//     donde no estorban a las eliminaciones;
-//   * el cartel de **victoria** (en `capas.js`) ocupa el centro de la franja inferior.
+// Dónde va cada cosa (orden de layout):
+//   * **eliminaciones**: **mitad derecha de la franja superior**, apiladas desde arriba
+//     (la más reciente primero) y como mucho dos, para que con cuarenta participantes no
+//     se apilen sin leerse. Comparten franja con la clasificación, que ocupa la mitad
+//     izquierda: así **toda la franja inferior queda libre** para los trompos;
+//   * **avisos cortos** (nuevo líder, poderes): justo debajo de la franja superior, en el
+//     centro, donde se leen y no tapan ninguno de los dos bloques;
+//   * el cartel de **victoria** (en `capas.js`) cierra la ronda con su propio margen.
 //
 // Animación: entrada rápida (0,16 s, escala + deslizamiento), permanencia breve y
 // salida gradual (0,5 s, se desvanece hacia arriba).
@@ -20,6 +22,18 @@ const ENTRADA = 0.16;
 const PERMANENCIA = 1.5;
 const SALIDA = 0.5;
 const MAXIMOS = 3;
+
+/** Geometría de la zona de carteles, por si el motor no pasa parámetros. */
+const ZONA_POR_DEFECTO = {
+  x: 560,
+  y: 16,
+  ancho: 486,
+  altoCabecera: 22,
+  altoPlato: 78,
+  separacion: 10,
+  maxEliminaciones: 2,
+  radioMedallon: 20,
+};
 
 export class Mensajes {
   constructor() {
@@ -78,37 +92,53 @@ export class Mensajes {
   }
 
   /**
-   * @param opciones.margenArriba  borde superior de la arena (los avisos van ahí)
+   * @param opciones.margenArriba  borde superior de la arena (los avisos van justo ahí)
+   * @param opciones.carteles      zona de las eliminaciones (mitad derecha de arriba)
    * @param opciones.maxEliminaciones cuántos carteles de eliminación caben
    */
   dibujar(ctx, ancho, alto, opciones = {}) {
     if (!this.lista.length) return;
     const margenArriba = opciones.margenArriba ?? 258;
-    const maxEliminaciones = opciones.maxEliminaciones ?? 2;
+    const z = { ...ZONA_POR_DEFECTO, ...(opciones.carteles ?? {}) };
+    const maxEliminaciones = opciones.maxEliminaciones ?? z.maxEliminaciones;
     const fotos = opciones.fotos ?? null;
 
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // --- eliminaciones: desde abajo hacia arriba, la más reciente la primera
+    // --- eliminaciones: en la mitad derecha de la franja superior, de arriba abajo
     const eliminaciones = this.lista.filter((m) => m.tipo === "eliminacion").slice(-maxEliminaciones);
-    let y = alto - 52;
+    if (eliminaciones.length) {
+      // Cabecera de la zona, hermana de la de la clasificación: los dos bloques quedan
+      // alineados y se ve de un vistazo dónde está cada cosa.
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.font = "800 18px system-ui, 'Segoe UI', sans-serif";
+      ctx.fillStyle = "rgba(232,240,255,0.85)";
+      ctx.fillText("ELIMINACIONES", z.x + 6, z.y + z.altoCabecera / 2);
+      ctx.textAlign = "right";
+      ctx.font = "600 16px system-ui, 'Segoe UI', sans-serif";
+      ctx.fillStyle = "rgba(154,154,176,0.95)";
+      ctx.fillText(`${eliminaciones.length}`, z.x + z.ancho - 6, z.y + z.altoCabecera / 2);
+      ctx.restore();
+    }
+
+    let y = z.y + z.altoCabecera + 6 + z.altoPlato / 2;
     for (let i = eliminaciones.length - 1; i >= 0; i -= 1) {
       const m = eliminaciones[i];
       const { alfa, escala, subida } = this.faseDe(m);
       if (alfa <= 0.01) continue;
-      const tieneIdentidad = Boolean(m.identidad);
-      const anchoTexto = Math.min(ancho * 0.86, 250 + m.texto.length * 24 + (tieneIdentidad ? 76 : 0));
-      const altoPlato = m.subtexto ? 104 : 84;
+      const anchoTexto = z.ancho;
+      const altoPlato = z.altoPlato;
 
       ctx.save();
       ctx.globalAlpha = alfa;
-      ctx.translate(ancho / 2, y + subida);
+      ctx.translate(z.x + anchoTexto / 2, y + subida);
       ctx.scale(escala, escala);
 
       ctx.fillStyle = "rgba(6,5,14,0.8)";
-      caminoRedondeado(ctx, -anchoTexto / 2, -altoPlato / 2, anchoTexto, altoPlato, 16);
+      caminoRedondeado(ctx, -anchoTexto / 2, -altoPlato / 2, anchoTexto, altoPlato, 14);
       ctx.fill();
       ctx.strokeStyle = conAlfa(m.identidad?.color ?? m.color, 0.9);
       ctx.lineWidth = 3;
@@ -116,40 +146,40 @@ export class Mensajes {
 
       // Barra de color del protagonista a la izquierda.
       ctx.fillStyle = m.identidad?.color ?? m.color;
-      caminoRedondeado(ctx, -anchoTexto / 2 + 8, -altoPlato / 2 + 10, 8, altoPlato - 20, 4);
+      caminoRedondeado(ctx, -anchoTexto / 2 + 8, -altoPlato / 2 + 10, 7, altoPlato - 20, 4);
       ctx.fill();
 
-      // Medallón con la cara del protagonista, para que el cartel diga quién es y no
-      // sólo cómo se llama (orden 03).
-      let desplazamiento = 0;
+      // Medallón con la cara del protagonista (orden 03): el cartel dice quién es y no
+      // sólo cómo se llama. Si no hay foto, la inicial sobre su color.
+      let xTexto = -anchoTexto / 2 + 26;
       if (m.identidad && fotos) {
-        const radio = 28;
-        const xMedallon = -anchoTexto / 2 + 30 + radio;
-        fotos.medallon(ctx, xMedallon, 0, radio, {
+        const radio = z.radioMedallon;
+        fotos.medallon(ctx, xTexto + radio, 0, radio, {
           foto: m.identidad.foto,
           inicial: m.identidad.inicial,
           color: m.identidad.color,
           grosor: 3,
         });
-        desplazamiento = radio * 2 + 12;
+        xTexto += radio * 2 + 12;
       }
 
+      const disponible = anchoTexto / 2 - 16 - (xTexto + anchoTexto / 2);
+      ctx.textAlign = "left";
       ctx.fillStyle = "#ffffff";
-      ctx.font = "800 40px system-ui, 'Segoe UI', sans-serif";
-      const texto = acortarTexto(ctx, m.texto, anchoTexto - 40 - desplazamiento);
-      ctx.fillText(texto, desplazamiento / 2, m.subtexto ? -14 : 0);
+      ctx.font = "800 26px system-ui, 'Segoe UI', sans-serif";
+      ctx.fillText(acortarTexto(ctx, m.texto, Math.max(80, disponible)), xTexto, m.subtexto ? -13 : 0);
       if (m.subtexto) {
         ctx.fillStyle = conAlfa(m.identidad?.color ?? m.color, 0.95);
-        ctx.font = "600 24px system-ui, 'Segoe UI', sans-serif";
-        ctx.fillText(acortarTexto(ctx, m.subtexto, anchoTexto - 40 - desplazamiento), desplazamiento / 2, 26);
+        ctx.font = "600 17px system-ui, 'Segoe UI', sans-serif";
+        ctx.fillText(acortarTexto(ctx, m.subtexto, Math.max(80, disponible)), xTexto, 17);
       }
       ctx.restore();
-      y -= altoPlato + 16;
+      y += altoPlato + z.separacion;
     }
 
-    // --- avisos cortos: arriba, pegados al borde de la arena
+    // --- avisos cortos: debajo de la franja superior, centrados
     const avisos = this.lista.filter((m) => m.tipo !== "eliminacion");
-    let yAviso = margenArriba + 34;
+    let yAviso = margenArriba + 30;
     for (const m of avisos) {
       const { alfa, escala } = this.faseDe(m);
       if (alfa <= 0.01) continue;
@@ -157,28 +187,28 @@ export class Mensajes {
       ctx.globalAlpha = alfa * 0.95;
       ctx.translate(ancho / 2, yAviso);
       ctx.scale(escala, escala);
-      ctx.font = "700 30px system-ui, 'Segoe UI', sans-serif";
-      const anchoTexto = ctx.measureText(m.texto).width + 56 + (m.identidad && fotos ? 56 : 0);
+      ctx.font = "700 28px system-ui, 'Segoe UI', sans-serif";
+      const anchoTexto = ctx.measureText(m.texto).width + 52 + (m.identidad && fotos ? 52 : 0);
       ctx.fillStyle = "rgba(6,5,14,0.75)";
-      caminoRedondeado(ctx, -anchoTexto / 2, -26, anchoTexto, 52, 26);
+      caminoRedondeado(ctx, -anchoTexto / 2, -24, anchoTexto, 48, 24);
       ctx.fill();
       ctx.strokeStyle = conAlfa(m.identidad?.color ?? m.color, 0.8);
       ctx.lineWidth = 2;
       ctx.stroke();
       let centro = 0;
       if (m.identidad && fotos) {
-        fotos.medallon(ctx, -anchoTexto / 2 + 30, 0, 19, {
+        fotos.medallon(ctx, -anchoTexto / 2 + 28, 0, 18, {
           foto: m.identidad.foto,
           inicial: m.identidad.inicial,
           color: m.identidad.color,
           grosor: 2,
         });
-        centro = 28;
+        centro = 26;
       }
       ctx.fillStyle = conAlfa(m.identidad?.color ?? m.color, 1);
       ctx.fillText(m.texto, centro, 1);
       ctx.restore();
-      yAviso += 60;
+      yAviso += 56;
     }
     ctx.restore();
   }

@@ -302,9 +302,19 @@ async function principal() {
       med.fondoDelLienzo,
     );
     comprobar(
-      "Hay tres zonas reservadas: tabla arriba, arena en medio, mensajes abajo",
-      med.arena.yMin === 258 && med.arena.yMax === 1920 - 230 && med.arena.xMin === 76,
-      `arena de ${med.arena.ancho}×${med.arena.alto} px (y ${med.arena.yMin}–${med.arena.yMax})`,
+      "La franja superior se reparte a mitades y la inferior queda libre para los trompos",
+      med.arena.yMin === 258 &&
+        med.arena.yMax === 1920 - 24 &&
+        med.arena.xMin === 76 &&
+        med.arena.alto >= 1600 &&
+        med.clasificacion.ancho === 486 &&
+        med.carteles.ancho === 486 &&
+        med.clasificacion.x + med.clasificacion.ancho < med.carteles.x &&
+        med.carteles.x + med.carteles.ancho <= med.arena.xMax + 42 &&
+        med.clasificacion.y + med.clasificacion.alto <= med.arena.yMin &&
+        med.carteles.y + med.carteles.alto <= med.arena.yMin,
+      `arena de ${med.arena.ancho}×${med.arena.alto} px (y ${med.arena.yMin}–${med.arena.yMax}, margen inferior ${1920 - med.arena.yMax} px) · ` +
+        `clasificación en x ${med.clasificacion.x}–${med.clasificacion.x + med.clasificacion.ancho} y eliminaciones en x ${med.carteles.x}–${med.carteles.x + med.carteles.ancho}`,
     );
 
     // ---------------------------------------------------------- escalas

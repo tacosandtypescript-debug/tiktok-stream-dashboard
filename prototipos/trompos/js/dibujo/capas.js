@@ -100,7 +100,9 @@ export function dibujarCuenta(ctx, p, valor, resto, esArranque) {
 /** Fase 9: victoria del último trompo. Va en la franja inferior reservada. */
 export function dibujarVictoria(ctx, p, ganador, resto, duracion, ronda, t) {
   const cx = p.lienzo.ancho / 2;
-  const cy = p.lienzo.alto - (p.lienzo.margenAbajo + 90) / 2 - 20;
+  // La franja inferior ya no es de los carteles: la placa de victoria se coloca con su
+  // propio margen, despegada del borde.
+  const cy = p.lienzo.alto - 170;
   const t2 = limitar(1 - resto / duracion, 0, 1);
   const entra = entradaRapida(limitar(t2 * 4, 0, 1));
   const color = ganador ? colorDeVida(1) : "#9aa4b2";

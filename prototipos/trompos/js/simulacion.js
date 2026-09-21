@@ -983,7 +983,8 @@ export class Simulacion {
 
     this.mensajes.dibujar(ctx, ancho, alto, {
       margenArriba: p.lienzo.margenArriba,
-      maxEliminaciones: this.fase === "victoria" ? 0 : 2,
+      carteles: p.carteles,
+      maxEliminaciones: this.fase === "victoria" ? 0 : p.carteles.maxEliminaciones,
       fotos: this.fotos,
     });
 
