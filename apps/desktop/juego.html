@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beyblades · overlay</title>
+    <!--
+      Overlay del juego de trompos para OBS.
+
+      Es el mismo documento que carga la vista previa del panel y el que se pega
+      como fuente de navegador en OBS: 1080 x 1920, fondo transparente y **sin
+      ningún control**. Los controles viven en la pestaña Overlays.
+
+      No hay credenciales, ni tokens, ni rutas locales en esta página.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }
+      /* El lienzo manda: 1080 x 1920 tal cual, estirado al marco de la fuente. */
+      #lienzo {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain;
+        background: transparent;
+      }
+      /* Aviso mínimo si el juego está desactivado: una línea, sin caja ni botones. */
+      #aviso {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 24px;
+        text-align: center;
+        font: 600 28px/1.3 system-ui, sans-serif;
+        color: rgba(255, 255, 255, 0.72);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="lienzo" width="1080" height="1920"></canvas>
+    <div id="aviso"></div>
+    <script type="module" src="/src/juego/overlay.ts"></script>
+  </body>
+</html>

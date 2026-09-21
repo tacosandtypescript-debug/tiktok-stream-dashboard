@@ -28,6 +28,11 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: { ignored: ["**/src-tauri/**"] },
+    fs: {
+      // El motor del juego vive en el prototipo (`prototipos/trompos/js`), que es su
+      // entorno de pruebas: el overlay lo importa de allí en vez de mantener una copia.
+      allow: [".", "..", "../..", "../../.."],
+    },
     proxy: {
       // El WebSocket de eventos necesita `ws: true`: sin eso el proxy corta la
       // conexion y el chat se queda quieto aunque el motor este mandando.
@@ -39,5 +44,8 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: false,
+    // Dos documentos: la interfaz (`index.html`) y el overlay del juego
+    // (`juego.html`), que OBS carga como fuente de navegador.
+    rollupOptions: { input: { index: "index.html", juego: "juego.html" } },
   },
 });

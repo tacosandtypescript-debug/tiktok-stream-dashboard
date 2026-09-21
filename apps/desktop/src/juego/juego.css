@@ -1,0 +1,215 @@
+/* Estilos del panel del juego de trompos.
+   Usa los mismos tokens que el resto de la aplicación (--panel, --border, --text,
+   --muted, --accent, --radio…): no hay una segunda paleta. */
+
+.juego .juego-estado {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  background: var(--panel);
+  margin-bottom: 10px;
+}
+
+.juego .juego-estado .luz {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.juego .juego-estado[data-estado="conectado"] .luz {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+.juego .juego-estado[data-estado="reconectando"] .luz,
+.juego .juego-estado[data-estado="conectando"] .luz {
+  background: var(--accent);
+}
+.juego .juego-estado[data-estado="error"] .luz {
+  background: var(--warn);
+}
+
+.juego .juego-estado b {
+  font-family: var(--fuente-datos);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.juego .juego-estado .detalle {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.juego .rejilla-mando {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.juego .campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.juego .campo > span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.juego .campo select,
+.juego .campo input[type="number"],
+.juego .campo input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.juego .interruptores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+
+.juego .interruptores label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.juego .cuentas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.juego .cuentas div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radio);
+  background: var(--panel);
+  font-family: var(--fuente-datos);
+  font-size: 12px;
+}
+
+.juego .cuentas span {
+  color: var(--muted);
+}
+
+.juego .tabla-regalos-juego {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.juego .fila-regalo {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radio);
+  background: var(--panel);
+}
+
+.juego .fila-regalo[data-activo="0"] {
+  opacity: 0.5;
+}
+
+.juego .fila-regalo .nombre {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.juego .fila-regalo .nombre strong {
+  font-size: 13px;
+}
+
+.juego .fila-regalo .detalle {
+  color: var(--muted);
+  font-size: 11px;
+  grid-column: 2 / -1;
+}
+
+.juego .pastilla {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--fuente-datos);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.juego .pastilla.vida {
+  color: var(--accent);
+}
+.juego .pastilla.poder {
+  color: var(--text);
+}
+.juego .pastilla.vida_poder {
+  color: var(--warn);
+}
+
+.juego .form-regalo {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  background: var(--panel);
+  margin: 8px 0;
+}
+
+.juego .form-regalo .rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.juego .confirmar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.juego .escenarios {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.juego .escenarios button {
+  text-align: left;
+  font-size: 12px;
+}
+
+.juego .nota-estado {
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 18px;
+  margin: 6px 0;
+}

@@ -22,6 +22,7 @@ import { useState } from "react";
 
 import type { OverlayDesignInfo } from "../api";
 import { Card, Copiar, VistaPrevia } from "../components";
+import { Juego } from "../juego/Juego";
 import { t } from "../i18n/es";
 
 /** Las vistas, en el orden en que se enseñan. */
@@ -243,6 +244,11 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
               </div>
             ) : null}
           </Card>
+
+          {/* El juego de trompos: overlay propio (1080 x 1920, fondo transparente) que se
+              alimenta de los regalos que ya recibe la aplicación. Va aquí, con los demás
+              juegos, y reutiliza las tarjetas y los botones de esta misma página. */}
+          <Juego />
         </div>
 
         {previa ? (
