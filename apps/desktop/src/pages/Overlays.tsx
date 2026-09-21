@@ -1,7 +1,7 @@
 //! Overlays para OBS: elegir diseño por vista, verlo en vivo y copiar la
 //! dirección.
 //!
-//! Tres decisiones que se ven en esta página:
+//! Cuatro decisiones que se ven en esta página:
 //!
 //!   * **Una elección por vista**, porque cada tabla es una fuente de OBS
 //!     independiente y hace un trabajo distinto: el tap tap es un marcador de
@@ -13,15 +13,23 @@
 //!   * **La previa va con el simulador** (`?demo=1`): se mueve sola con taps
 //!     inventados. Sin eso habría que estar en directo justo en ese momento para
 //!     juzgar un diseño, y los minijuegos no se podrían ni mirar.
+//!   * **Los juegos son una sola sección con tarjetas iguales.** Cuatro filas del
+//!     mismo tamaño —Pelotas, Duelo, Esgrima y Beyblades— y la configuración del
+//!     que la tenga, **desplegada dentro de la misma tarjeta**: Beyblades era un
+//!     bloque de 1.500 px suelto debajo, que se comía la columna y se solapaba con
+//!     lo de al lado.
 //!
 //! Coste: un diseño cargado es un renderer más de WebView2 mientras la pestaña
 //! está abierta (docs/plan-review.md §175). Por eso se pinta **una vista a la
-//! vez** y no las tres: pasar de pestaña desmonta el marco y lo libera.
+//! vez** y no las tres: pasar de pestaña desmonta el marco y lo libera. Por lo
+//! mismo la configuración de un juego se monta al desplegarla y se desmonta al
+//! cerrarla.
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { OverlayDesignInfo } from "../api";
 import { Card, Copiar, VistaPrevia } from "../components";
+import { guardarConfig, leerConfig } from "../juego/config";
 import { Juego } from "../juego/Juego";
 import { t } from "../i18n/es";
 
@@ -69,6 +77,30 @@ function urlDePrevia(base: string, vista: string, diseno: string): string {
 export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Props) {
   const [vista, setVista] = useState<Vista>("tap");
   const [creando, setCreando] = useState(false);
+
+  /**
+   * Qué juego tiene la configuración desplegada.
+   *
+   * Es un **identificador** y no un booleano a propósito: el día que otro juego tenga
+   * configuración propia, su fila solo tiene que poner su id aquí y el sistema entero
+   * —el botón, el desplegado y el cierre— ya vale para él.
+   */
+  const [desplegado, setDesplegado] = useState<string | null>(null);
+
+  /**
+   * Si Beyblades está encendido en el overlay.
+   *
+   * Vive aquí, y no dentro del panel, porque lo escriben **dos** sitios: la fila de la
+   * tarjeta («Usar este») y el botón de dentro («Activar» / «Desactivar»). Con una
+   * copia en cada uno, el que no escribe se queda viejo y la fila diría «En antena»
+   * mientras el panel enseña «Activar». Se lee del mismo sitio que lee el panel
+   * —`localStorage`— así que sigue habiendo una sola verdad.
+   */
+  const [beybladesActivo, setBeybladesActivo] = useState(() => leerConfig().activo);
+  const cambiarBeyblades = useCallback((activo: boolean) => {
+    guardarConfig({ ...leerConfig(), activo });
+    setBeybladesActivo(activo);
+  }, []);
 
   if (base === null) {
     return (
@@ -187,10 +219,15 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
             )}
           </Card>
 
-          {/* La sección de juegos: los que hay —que se pueden poner en antena— y el
-              sitio desde donde se crearán los nuevos. Un juego ocupa el hueco de Tap
-              tap, así que se dice: mientras haya uno puesto, esa vista no enseña el
-              marcador. */}
+          {/* La sección de juegos: **el contenedor de todos los minijuegos**, con una
+              tarjeta por juego y el mismo tamaño para todas. Un juego ocupa el hueco de
+              Tap tap, así que se dice: mientras haya uno puesto, esa vista no enseña el
+              marcador.
+
+              Beyblades no sale del catálogo de Rust —es un overlay propio, con su
+              servidor de comandos y su configuración—, así que su fila se escribe aquí
+              con el mismo marcado y los mismos estilos que las demás. Su configuración
+              no vive en un bloque aparte debajo: se despliega aquí dentro. */}
           <Card
             title={t.overlay.games}
             actions={
@@ -206,36 +243,67 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
           >
             <p className="hint">{t.overlay.gamesHint}</p>
 
-            {juegos.length > 0 ? (
-              <ul className="disenos disenos-juegos">
-                {juegos.map((juego) => {
-                  const rotulo = rotuloDe(juego.id);
-                  const puesto = seleccion.tap === juego.id;
-                  return (
-                    <li key={juego.id} className={puesto ? "diseno activo" : "diseno"}>
-                      <span className="diseno-texto">
-                        <strong>{rotulo.nombre}</strong>
-                        <span>{rotulo.resumen}</span>
-                      </span>
-                      {puesto ? (
-                        <span className="etiqueta">{t.overlay.inUse}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="ghost"
-                          disabled={busy}
-                          onClick={() => ponerJuego(juego.id)}
-                        >
-                          {t.overlay.use}
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="empty">{t.overlay.empty}</p>
-            )}
+            {/* La lista nunca está vacía: Beyblades no depende del catálogo. */}
+            <ul className="disenos disenos-juegos">
+              {juegos.map((juego) => {
+                const rotulo = rotuloDe(juego.id);
+                const puesto = seleccion.tap === juego.id;
+                return (
+                  <li key={juego.id} className={puesto ? "diseno activo" : "diseno"}>
+                    <span className="diseno-texto">
+                      <strong>{rotulo.nombre}</strong>
+                      <span>{rotulo.resumen}</span>
+                    </span>
+                    {puesto ? (
+                      <span className="etiqueta">{t.overlay.inUse}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy}
+                        onClick={() => ponerJuego(juego.id)}
+                      >
+                        {t.overlay.use}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+
+              <li className={beybladesActivo ? "diseno activo" : "diseno"}>
+                <span className="diseno-texto">
+                  <strong>{rotuloDe("beyblades").nombre}</strong>
+                  <span>{rotuloDe("beyblades").resumen}</span>
+                </span>
+                <span className="diseno-acciones">
+                  {beybladesActivo ? (
+                    <span className="etiqueta">{t.overlay.inUse}</span>
+                  ) : (
+                    <button type="button" className="ghost" onClick={() => cambiarBeyblades(true)}>
+                      {t.overlay.use}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="ghost"
+                    aria-expanded={desplegado === "beyblades"}
+                    onClick={() =>
+                      setDesplegado((cual) => (cual === "beyblades" ? null : "beyblades"))
+                    }
+                  >
+                    {desplegado === "beyblades" ? t.overlay.collapse : t.overlay.configure}
+                  </button>
+                </span>
+              </li>
+            </ul>
+
+            {/* La configuración del juego desplegado, dentro de la propia tarjeta: lo
+                que viene después en la página baja solo, sin alturas fijas de por medio. */}
+            {desplegado === "beyblades" ? (
+              <div className="juego-desplegado">
+                <Juego activo={beybladesActivo} onActivo={cambiarBeyblades} />
+              </div>
+            ) : null}
 
             {creando ? (
               <div className="juegos-alta">
@@ -244,11 +312,6 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
               </div>
             ) : null}
           </Card>
-
-          {/* El juego de trompos: overlay propio (1080 x 1920, fondo transparente) que se
-              alimenta de los regalos que ya recibe la aplicación. Va aquí, con los demás
-              juegos, y reutiliza las tarjetas y los botones de esta misma página. */}
-          <Juego />
         </div>
 
         {previa ? (

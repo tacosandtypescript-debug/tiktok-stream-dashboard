@@ -2733,11 +2733,22 @@ footer.stats {
   min-width: 0;
 }
 
-/* La dirección es lo que mide lo que mide; la tarjeta de diseños se lleva el resto y
-   es la que cede cuando la lista no cabe, porque ya sabe desplazarse por dentro. Los
-   juegos van abajo con su alto justo: son tres filas y no tienen por qué crecer. */
+/* Las tarjetas de la columna van **en flujo normal**: cada una mide lo suyo y lo que
+ * venga detrás baja solo. Nada de filas fijas ni de alturas calculadas.
+ *
+ * Antes eran tres filas —dirección, lista y juegos— porque había tres tarjetas, y la del
+ * medio se llevaba el alto que sobraba. Al entrar la configuración de Beyblades dentro de
+ * la tarjeta de juegos, esa tarjeta crece hasta 1.500 px: con la plantilla de tres filas,
+ * el contenido desplegado no tenía fila donde ir, se salía del panel y quedaba tapado por
+ * lo de al lado. Con `grid-auto-rows: min-content` cada tarjeta mide lo que mide, y el
+ * desplazamiento lo hace el panel entero, que ya lleva `overflow-y: auto`.
+ *
+ * La fila de las dos columnas **no** se toca: sigue siendo `1fr` del panel para que el
+ * hueco de la previa siga midiendo lo que mide el panel y no lo que se pinte dentro —es
+ * de donde saca la escala—. Lo que crece por abajo es el stack, que desborda su fila. */
 .overlays-columnas > .stack {
-  grid-template-rows: min-content minmax(0, 1fr) min-content;
+  align-content: start;
+  grid-auto-rows: min-content;
   min-height: 0;
 }
 
@@ -2796,6 +2807,36 @@ footer.stats {
    enteros, sin barra. */
 .disenos-juegos {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Las acciones de una fila de diseño.
+ *
+ * Los juegos del catálogo tienen **una** —usarlo o el rótulo de «en antena»—, pero
+ * Beyblades tiene dos: usarlo y desplegar su configuración. Van juntas y pegadas a la
+ * derecha, en el mismo sitio donde las demás llevan la suya. */
+.diseno-acciones {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+}
+
+/* La configuración de un juego, desplegada **dentro** de la tarjeta de Juegos.
+ *
+ * Cuelga de su fila con el filo de acento a la izquierda, y el marco propio de la tarjeta
+ * de dentro se disuelve: ya hay un marco alrededor —el de Juegos— y dos bordes
+ * concéntricos se leen como un error. */
+.juego-desplegado {
+  border-left: 2px solid var(--accent);
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-3);
+}
+
+.juego-desplegado > .card {
+  background: transparent;
+  border: 0;
+  padding: 0;
 }
 
 /* El hueco de «crear un juego», que es lo siguiente que se monta: dice que existe y

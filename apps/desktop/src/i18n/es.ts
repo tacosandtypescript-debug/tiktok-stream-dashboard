@@ -85,6 +85,12 @@ export const t = {
     gameCreate: "+ Crear juego",
     inUse: "En antena",
     use: "Usar este",
+    /**
+     * El despliegue de la configuración de un juego, dentro de la propia tarjeta de
+     * Juegos. Es el mismo botón para todos: el que sepa desplegarse lo usa.
+     */
+    configure: "Configurar",
+    collapse: "Cerrar",
     preview: "Vista previa",
     previewHint:
       "La previa va con el simulador: se mueve sola con taps inventados, sin tocar el directo. Lo que ves es el mismo fichero que carga OBS.",
@@ -150,6 +156,14 @@ export const t = {
       esgrima: {
         nombre: "Esgrima",
         resumen: "El nº1 defiende la corona con espada; gana quien tenga más ritmo.",
+      },
+      /* Beyblades **no** sale del catálogo de Rust: es un overlay propio (`juego.html`)
+         con su servidor de comandos y su configuración. Se rotula aquí igual que los
+         demás para que su tarjeta sea la misma que la de Pelotas, Duelo y Esgrima, y
+         no un bloque aparte. */
+      beyblades: {
+        nombre: "Beyblades",
+        resumen: "Batalla de trompos controlada por regalos e interacción del LIVE.",
       },
     } as Record<string, { nombre: string; resumen: string }>,
   },

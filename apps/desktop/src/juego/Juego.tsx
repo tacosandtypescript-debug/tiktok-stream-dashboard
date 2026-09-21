@@ -1,7 +1,11 @@
 //! Panel del juego de trompos dentro de la aplicación.
 //!
-//! Vive en la sección Overlays, con las mismas tarjetas, botones y tokens que el
-//! resto: no hay una interfaz aparte ni una segunda paleta.
+//! **No lleva rótulo ni acciones propias**: es lo que se despliega dentro de la
+//! tarjeta de Juegos de Overlays al pulsar Beyblades. El nombre del juego y su mando
+//! los pone la fila de esa tarjeta, igual que para Pelotas, Duelo y Esgrima; aquí
+//! vive solo la configuración, con los mismos botones y tokens que el resto. El
+//! envoltorio es una tarjeta sin cabecera, y la página le disuelve el marco porque ya
+//! hay otro alrededor.
 //!
 //! Lo que hace el panel: activar el overlay, enseñar la vista previa (que es el
 //! **mismo documento** que carga OBS), copiar su dirección, mandar los comandos de
@@ -70,7 +74,21 @@ function regaloNuevo(): RegaloJuego {
   };
 }
 
-export function Juego() {
+interface Props {
+  /**
+   * Si el juego está encendido en el overlay.
+   *
+   * Lo gobierna la página y no este panel porque lo escriben **dos** sitios: la fila
+   * de la tarjeta («Usar este») y el botón de aquí dentro. Con una copia en cada uno,
+   * el que no escribe se queda viejo y la fila diría «En antena» mientras el panel
+   * enseña «Activar».
+   */
+  activo: boolean;
+  /** Enciende o apaga el juego. Escribe la página; aquí solo se pide. */
+  onActivo: (activo: boolean) => void;
+}
+
+export function Juego({ activo, onActivo }: Props) {
   const [config, setConfig] = useState<ConfigJuego>(() => leerConfig());
   const [estado, setEstado] = useState<EstadoJuego | null>(() => leerEstado());
   const [previa, setPrevia] = useState(false);
@@ -80,14 +98,20 @@ export function Juego() {
   const direccion = useMemo(() => urlOverlay(), []);
 
   /** Cualquier cambio de configuración se guarda y el overlay se entera solo. */
-  const aplicar = useCallback((cambio: Partial<ConfigJuego>, nota?: string) => {
-    setConfig((actual) => {
-      const siguiente = { ...actual, ...cambio };
-      guardarConfig(siguiente);
-      return siguiente;
-    });
-    if (nota) setAviso(nota);
-  }, []);
+  const aplicar = useCallback(
+    (cambio: Partial<ConfigJuego>, nota?: string) => {
+      setConfig((actual) => {
+        // `activo` se escribe desde el padre, así que se sella con el valor suyo y no
+        // con el de la copia local: si no, cambiar el volumen apagaría el juego sin
+        // que nadie lo hubiera pedido.
+        const siguiente = { ...actual, ...cambio, activo };
+        guardarConfig(siguiente);
+        return siguiente;
+      });
+      if (nota) setAviso(nota);
+    },
+    [activo],
+  );
 
   /** La tabla de regalos se edita en bloque. */
   const aplicarRegalos = useCallback(
@@ -115,24 +139,13 @@ export function Juego() {
     };
   }, []);
 
-  const activo = config.activo;
   const conectado = estado?.conexion === "conectado";
 
   return (
-    <Card
-      title="Beyblades"
-      actions={
-        <button
-          type="button"
-          className={activo ? "ghost" : ""}
-          onClick={() =>
-            aplicar({ activo: !activo }, !activo ? "Juego activado en el overlay" : "Juego desactivado")
-          }
-        >
-          {activo ? "Desactivar" : "Activar"}
-        </button>
-      }
-    >
+    /* Sin título ni acciones: el rótulo y el mando de la fila los pone la tarjeta de
+       Juegos, y aquí solo vive lo que se despliega. El marco lo disuelve la página
+       (`.juego-desplegado .card`), que es quien sabe que esto va dentro de otra. */
+    <Card>
       <div className="juego">
         <p className="hint">
           Overlay de batalla de trompos: los regalos que ya recibe la aplicación mueven a los
@@ -146,12 +159,22 @@ export function Juego() {
           <span className="detalle">
             {activo
               ? `${estado?.fase ?? "—"} · ${estado?.vivos ?? 0}/${estado?.participantes ?? 0} en pie · ronda ${estado?.ronda ?? 1}`
-              : t.overlay.unavailable}
+              : "Desactivado"}
             {estado?.ultimo ? ` · último: ${estado.ultimo}` : ""}
           </span>
         </div>
 
         <div className="acciones">
+          <button
+            type="button"
+            className={activo ? "ghost" : ""}
+            onClick={() => {
+              onActivo(!activo);
+              setAviso(!activo ? "Juego activado en el overlay" : "Juego desactivado");
+            }}
+          >
+            {activo ? "Desactivar" : "Activar"}
+          </button>
           <button type="button" className="ghost" aria-expanded={previa} onClick={() => setPrevia((v) => !v)}>
             {previa ? "Ocultar vista previa" : "Vista previa"}
           </button>
