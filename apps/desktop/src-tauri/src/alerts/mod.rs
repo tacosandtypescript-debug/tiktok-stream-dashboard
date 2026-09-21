@@ -179,6 +179,119 @@ pub fn tramo_de_regalo(ajustes: &AjustesAlertas, diamantes: i64) -> Option<TipoA
     })
 }
 
+/// Lo que hay que enseñar cuando la rafaga de likes ya merece un aviso.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvisoDeLikes {
+    /// Quien mas ha dado dentro de la rafaga. `None` si TikTok no dijo quien.
+    pub usuario: Option<UserRef>,
+    /// Los likes de la rafaga entera, no los del ultimo mensaje.
+    pub likes: i64,
+}
+
+/// La rafaga de likes en curso.
+///
+/// El minimo del aviso de likes se compara contra **lo que se lleva de rafaga**,
+/// no contra el incremento de un mensaje. TikTok trocea los likes en mensajes
+/// pequeños —una media de una docena por mensaje en una sala movida—, asi que un
+/// minimo de cincuenta medido por mensaje no se cumple nunca: el aviso parecia
+/// roto. Y medido por mensaje con el minimo bajo no arreglaba nada, porque
+/// llegarian cinco mensajes por segundo, cada uno con su aviso, y la cola —la del
+/// motor y la del overlay— se llenaria de likes: los regalos y los follows
+/// acabarian descartados detras.
+///
+/// Asi que la rafaga se acumula y se cierra de dos maneras:
+///
+///   * por **tiempo** ([`Self::VENTANA`]): los likes de hace un minuto no son
+///     esta rafaga, y sin cerrarla el total solo subiria;
+///   * al **avisar**, que ademas deja una espera ([`Self::ESPERA`]) antes del
+///     siguiente. El aviso de likes no puede estar siempre en pantalla.
+#[derive(Debug, Default)]
+pub struct RafagaLikes {
+    /// Cuando empezo la rafaga que se esta contando.
+    desde: Option<std::time::Instant>,
+    total: i64,
+    /// Quien mas ha dado dentro de la rafaga: es el nombre que sale en el aviso.
+    top: Option<(UserRef, i64)>,
+    /// El ultimo que dio likes, para cuando nadie destaca.
+    ultimo: Option<UserRef>,
+    /// Cuando se aviso por ultima vez, para la espera entre avisos.
+    ultimo_aviso: Option<std::time::Instant>,
+}
+
+impl RafagaLikes {
+    /// Lo que dura una rafaga sin cerrar.
+    pub const VENTANA: std::time::Duration = std::time::Duration::from_secs(3);
+    /// Lo que hay que esperar entre un aviso y el siguiente.
+    pub const ESPERA: std::time::Duration = std::time::Duration::from_secs(4);
+
+    /// Suma un mensaje de likes y decide si toca avisar.
+    ///
+    /// `ahora` entra como parametro, y no se lee dentro, para poder probar el
+    /// paso del tiempo sin dormir el test.
+    pub fn sumar(
+        &mut self,
+        usuario: Option<&UserRef>,
+        likes: i64,
+        ahora: std::time::Instant,
+        minimo: i64,
+    ) -> Option<AvisoDeLikes> {
+        // Un mensaje sin likes no es un mensaje: no abre rafaga ni la cierra.
+        if likes <= 0 {
+            return None;
+        }
+
+        match self.desde {
+            Some(desde) if ahora.duration_since(desde) >= Self::VENTANA => self.reiniciar(ahora),
+            None => self.desde = Some(ahora),
+            Some(_) => {}
+        }
+
+        self.total += likes;
+        if let Some(usuario) = usuario {
+            self.ultimo = Some(usuario.clone());
+            // El nombre del aviso es el de quien mas ha dado en la rafaga: decir
+            // el del ultimo mensaje seria decir el de quien paso por aqui, que
+            // con likes troceados es casi siempre el mismo de todos modos.
+            let destaca = match &self.top {
+                Some((_, max)) => likes > *max,
+                None => true,
+            };
+            if destaca {
+                self.top = Some((usuario.clone(), likes));
+            }
+        }
+
+        let esperado = match self.ultimo_aviso {
+            None => true,
+            Some(aviso) => ahora.duration_since(aviso) >= Self::ESPERA,
+        };
+        if !esperado || self.total < minimo.max(0) {
+            return None;
+        }
+
+        let quien = self
+            .top
+            .as_ref()
+            .map(|(usuario, _)| usuario.clone())
+            .or_else(|| self.ultimo.clone());
+        let cuantos = self.total;
+        self.ultimo_aviso = Some(ahora);
+        // La rafaga que se acaba de contar ya se ha enseñado: la siguiente
+        // empieza de cero, o el aviso se dispararia solo con el tiempo.
+        self.reiniciar(ahora);
+        Some(AvisoDeLikes {
+            usuario: quien,
+            likes: cuantos,
+        })
+    }
+
+    fn reiniciar(&mut self, ahora: std::time::Instant) {
+        self.desde = Some(ahora);
+        self.total = 0;
+        self.top = None;
+    }
+}
+
 /// Lo que se puede configurar de un tipo de aviso.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AjusteAviso {
@@ -1710,6 +1823,156 @@ mod tests {
             tramo_de_regalo(&ajustes, 5_000),
             Some(TipoAviso::GiftGrande)
         );
+    }
+
+    /// Un usuario de mentira, con nombre, para los avisos de likes.
+    fn quien(nombre: &str) -> UserRef {
+        UserRef {
+            id: format!("id-{nombre}"),
+            unique_id: nombre.to_lowercase(),
+            nickname: nombre.to_string(),
+            avatar_url: String::new(),
+        }
+    }
+
+    /// La rafaga se mide por lo que se lleva junto, no por el mensaje suelto.
+    ///
+    /// Es el fallo que esto arregla: TikTok manda los likes troceados, asi que
+    /// cinco mensajes de doce likes son sesenta likes y el aviso de «a partir de
+    /// cincuenta» tiene que salir. Medido por mensaje no salia nunca.
+    #[test]
+    fn la_rafaga_junta_los_mensajes_troceados() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+
+        for i in 0..4 {
+            let cuando = t0 + std::time::Duration::from_millis(100 * i);
+            assert_eq!(
+                rafaga.sumar(Some(&cris), 12, cuando, 50),
+                None,
+                "cuarenta y ocho likes todavia no llegan al minimo"
+            );
+        }
+
+        let aviso = rafaga
+            .sumar(
+                Some(&cris),
+                12,
+                t0 + std::time::Duration::from_millis(500),
+                50,
+            )
+            .expect("sesenta likes ya pasan el minimo");
+        assert_eq!(aviso.likes, 60, "el aviso lleva la rafaga entera");
+        assert_eq!(aviso.usuario, Some(cris));
+    }
+
+    /// Entre aviso y aviso hay una espera: el de likes no puede estar siempre.
+    ///
+    /// Sin esto, en una sala que da sesenta likes por segundo saldria un aviso por
+    /// mensaje, la cola se llenaria y los regalos y los follows se quedarian
+    /// descartados detras.
+    #[test]
+    fn la_rafaga_no_avisa_dos_veces_seguidas() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+
+        assert!(rafaga.sumar(Some(&cris), 60, t0, 50).is_some());
+
+        for i in 1..=10 {
+            let cuando = t0 + std::time::Duration::from_millis(200 * i);
+            assert_eq!(
+                rafaga.sumar(Some(&cris), 60, cuando, 50),
+                None,
+                "dentro de la espera no se avisa, por muchos likes que lleguen"
+            );
+        }
+
+        let tarde = t0 + RafagaLikes::ESPERA;
+        assert!(
+            rafaga.sumar(Some(&cris), 60, tarde, 50).is_some(),
+            "pasada la espera, y con la rafaga llena, vuelve a avisar"
+        );
+    }
+
+    /// Los likes de hace un rato no son esta rafaga.
+    #[test]
+    fn una_rafaga_vieja_se_cierra_sola() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+
+        assert_eq!(rafaga.sumar(Some(&cris), 30, t0, 50), None);
+        assert_eq!(
+            rafaga.sumar(
+                Some(&cris),
+                30,
+                t0 + RafagaLikes::VENTANA + std::time::Duration::from_millis(1),
+                50
+            ),
+            None,
+            "treinta y treinta separados por mas de una ventana son dos rafagas cortas"
+        );
+    }
+
+    /// El aviso se lo lleva quien mas ha dado dentro de la rafaga.
+    #[test]
+    fn el_nombre_es_el_de_quien_mas_dio() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+        let m4cox = quien("M4cox");
+
+        assert_eq!(
+            rafaga.sumar(Some(&m4cox), 45, t0, 50),
+            None,
+            "cuarenta y cinco likes todavia no llegan"
+        );
+        let aviso = rafaga
+            .sumar(
+                Some(&cris),
+                10,
+                t0 + std::time::Duration::from_millis(50),
+                50,
+            )
+            .expect("cincuenta y cinco likes");
+        assert_eq!(aviso.likes, 55);
+        assert_eq!(
+            aviso.usuario,
+            Some(m4cox),
+            "gana quien mas dio, no el ultimo mensaje"
+        );
+    }
+
+    /// Un minimo en cero avisa con la primera rafaga, pero sigue con su espera.
+    #[test]
+    fn un_minimo_en_cero_avisa_igual() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+        assert!(rafaga.sumar(Some(&cris), 3, t0, 0).is_some());
+        assert_eq!(rafaga.sumar(Some(&cris), 3, t0, 0), None, "la espera sigue");
+    }
+
+    /// Sin usuario no se inventa un nombre, pero el aviso sale igual.
+    #[test]
+    fn sin_usuario_el_aviso_sale_sin_nombre() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let aviso = rafaga.sumar(None, 80, t0, 50).expect("ochenta likes");
+        assert_eq!(aviso.usuario, None);
+        assert_eq!(aviso.likes, 80);
+    }
+
+    /// Un mensaje sin likes no abre ni cierra nada.
+    #[test]
+    fn un_mensaje_vacio_no_cuenta() {
+        let mut rafaga = RafagaLikes::default();
+        let t0 = std::time::Instant::now();
+        let cris = quien("cris");
+        assert_eq!(rafaga.sumar(Some(&cris), 0, t0, 1), None);
+        assert_eq!(rafaga.sumar(Some(&cris), -5, t0, 1), None);
     }
 
     /// Con los tres tramos apagados, un regalo no dispara nada.

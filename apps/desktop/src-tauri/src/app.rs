@@ -140,6 +140,12 @@ pub struct AppState {
     /// de regalos silenciaria las actualizaciones de tap tap y el ranking de
     /// likes se quedaria congelado justo cuando mas se mueve.
     pub(crate) last_rankings: Mutex<Option<std::time::Instant>>,
+    /// La rafaga de likes en curso, para el aviso de likes.
+    ///
+    /// El minimo de ese aviso se mide contra lo que se lleva de rafaga y no contra
+    /// el mensaje suelto: TikTok manda los likes troceados y por mensaje no llega
+    /// nunca al minimo. Ver `alerts::RafagaLikes`.
+    pub(crate) rafaga_likes: Mutex<crate::alerts::RafagaLikes>,
     /// Progreso de la sesion pendiente de escribir: pico de espectadores y
     /// total de likes. Va aparte del feed porque su destino es la fila de
     /// `streams`, no una tabla de eventos.
@@ -348,6 +354,7 @@ impl AppState {
             ui_events: Mutex::new(std::collections::HashMap::new()),
             last_board: Mutex::new(None),
             last_rankings: Mutex::new(None),
+            rafaga_likes: Mutex::new(crate::alerts::RafagaLikes::default()),
             progress: Mutex::new(SessionProgress::default()),
             ui_chat: Mutex::new(UiChatTrace::default()),
             ultimos_usuarios: RwLock::new(ultimos_usuarios),
@@ -894,21 +901,12 @@ impl AppState {
                     ));
                 }
                 // La alerta de likes la filtra el propio ajuste por su minimo, que
-                // para eso es configurable: aqui no se decide, se le pasa la rafaga.
+                // para eso es configurable: aqui no se decide, se le pasa **la
+                // rafaga** —no el mensaje suelto, que es lo que hacia que el minimo
+                // no se cumpliera nunca—. Ver `disparar_alerta_de_likes`.
                 // `{usuario}` puede quedar vacio: TikTok no siempre dice quien dio
                 // los likes, y el texto de fabrica se lee igual sin nombre.
-                self.disparar_alerta(
-                    crate::alerts::TipoAviso::Like,
-                    crate::alerts::Variables {
-                        usuario: user
-                            .as_ref()
-                            .map(crate::alerts::nombre_de)
-                            .unwrap_or_default(),
-                        likes: *count,
-                        ..crate::alerts::Variables::default()
-                    },
-                    *count,
-                );
+                self.disparar_alerta_de_likes(user.as_ref(), *count);
                 // Tap tap: cada rafaga de likes **ya trae quien la manda**
                 // (`WebcastLikeMessage.user`, campo 5 del proto), asi que la
                 // aportacion por persona se puede agregar sin pedir nada mas a
@@ -2281,6 +2279,53 @@ impl AppState {
         if let Some(tramo) = tramo {
             self.disparar_alerta(tramo, variables, diamantes);
         }
+    }
+
+    /// Dispara el aviso de likes con la **rafaga acumulada**.
+    ///
+    /// El minimo del ajuste se compara contra lo que se lleva de rafaga y no
+    /// contra el incremento de un mensaje. TikTok trocea los likes —una media de
+    /// una docena por mensaje en una sala movida—, asi que con el minimo de
+    /// fabrica (cincuenta) medido por mensaje no salia ningun aviso, y con un
+    /// minimo bajo saldria uno por mensaje y la cola se llenaria de likes,
+    /// descartando los regalos y los follows que venian detras. La politica entera
+    /// —ventana, espera y a quien se le pone el nombre— vive en
+    /// [`crate::alerts::RafagaLikes`].
+    fn disparar_alerta_de_likes(&self, user: Option<&crate::core::event::UserRef>, count: i64) {
+        let Ok(ajustes) = self.alertas.read() else {
+            return;
+        };
+        let ajuste = ajustes.de(crate::alerts::TipoAviso::Like);
+        // Apagado o sin nada que enseñar: ni se acumula. Acumular para nada
+        // gastaria el turno de la rafaga y el aviso saldria al encenderlo con
+        // likes de antes.
+        if !ajuste.util() {
+            return;
+        }
+        let minimo = ajuste.minimo;
+        drop(ajustes);
+
+        let Ok(mut rafaga) = self.rafaga_likes.lock() else {
+            return;
+        };
+        let Some(aviso) = rafaga.sumar(user, count, std::time::Instant::now(), minimo) else {
+            return;
+        };
+        drop(rafaga);
+
+        self.disparar_alerta(
+            crate::alerts::TipoAviso::Like,
+            crate::alerts::Variables {
+                usuario: aviso
+                    .usuario
+                    .as_ref()
+                    .map(crate::alerts::nombre_de)
+                    .unwrap_or_default(),
+                likes: aviso.likes,
+                ..crate::alerts::Variables::default()
+            },
+            aviso.likes,
+        );
     }
 
     /// Dispara un aviso si su tipo esta activo y pasa el minimo.

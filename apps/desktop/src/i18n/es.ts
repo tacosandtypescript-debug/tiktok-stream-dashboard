@@ -406,7 +406,8 @@ export const t = {
       "Lo que hace la alerta mientras está en pantalla, ya entrada y antes de salir. Se repite durante todo ese rato: flotar, vibrar, una luz que la cruza, un resplandor en el contorno… Cada efecto trae sus propios mandos, y al elegirlo se ponen sus valores recomendados.",
     minimo: "Mínimo",
     minimoGift: "Solo a partir de estos diamantes",
-    minimoLike: "Solo a partir de estos likes",
+    minimoLike:
+      "Solo a partir de estos likes en la ráfaga. Los mensajes de TikTok se suman durante unos segundos, así que no hace falta que uno solo traiga esa cifra: sesenta likes en cinco mensajes de doce cuentan como sesenta.",
     /* El mínimo de un tramo decide dónde empieza: por debajo de él, el regalo cae
        al tramo de abajo. */
     minimoTramo: "Desde estos diamantes",
