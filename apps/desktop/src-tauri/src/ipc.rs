@@ -588,3 +588,129 @@ fn a_json<T: serde::Serialize>(valor: &T) -> Result<serde_json::Value, String> {
     serde_json::to_value(valor)
         .map_err(|error| format!("no se pudo serializar la respuesta: {error}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    /// Los comandos que declara el shell de escritorio.
+    ///
+    /// Se leen del **fuente** y no de una lista escrita a mano: una lista a mano se
+    /// queda vieja justo cuando hace falta que no lo este, que es cuando alguien
+    /// anade un comando.
+    fn comandos_del_shell(codigo: &str) -> BTreeSet<String> {
+        let mut nombres = BTreeSet::new();
+        let mut lineas = codigo.lines();
+        while let Some(linea) = lineas.next() {
+            if linea.trim() != "#[tauri::command]" {
+                continue;
+            }
+            // La firma puede ocupar varias lineas; el nombre esta en la primera.
+            for firma in lineas.by_ref().take(6) {
+                let firma = firma.trim();
+                let resto = firma
+                    .strip_prefix("fn ")
+                    .or_else(|| firma.strip_prefix("async fn "));
+                if let Some(resto) = resto {
+                    if let Some((nombre, _)) = resto.split_once('(') {
+                        nombres.insert(nombre.trim().to_string());
+                    }
+                    break;
+                }
+            }
+        }
+        nombres
+    }
+
+    /// Los comandos que atiende el despachador del servidor web.
+    ///
+    /// Solo el cuerpo de `dispatch`: las sub-acciones de `accion_tts` —`pause`,
+    /// `skip`...— tienen la misma forma y no son comandos de la superficie.
+    fn comandos_del_despachador(codigo: &str) -> BTreeSet<String> {
+        let desde = codigo
+            .find("pub async fn dispatch")
+            .expect("existe `dispatch` en ipc.rs");
+        let cuerpo = &codigo[desde..];
+        // Una llave a principio de linea solo puede ser el cierre de la funcion:
+        // dentro, todo va indentado.
+        let hasta = cuerpo
+            .find("\n}\n")
+            .expect("`dispatch` cierra su llave en una linea propia");
+        cuerpo[..hasta]
+            .lines()
+            .filter_map(|linea| {
+                let linea = linea.trim();
+                let resto = linea.strip_prefix('"')?;
+                let (nombre, cola) = resto.split_once('"')?;
+                cola.trim_start()
+                    .starts_with("=>")
+                    .then(|| nombre.to_string())
+            })
+            .collect()
+    }
+
+    /// Las diferencias **a proposito**, para que se vean y no se confundan con un
+    /// olvido. Si aparece una tercera, el test falla y hay que decidir cual es.
+    const SOLO_ESCRITORIO: &[&str] = &[
+        // Abre el navegador en la maquina del streamer: expuesto por HTTP, quien
+        // diera con el puerto podria lanzar un navegador en el servidor. En su
+        // lugar, el panel web tiene `perfil_url`.
+        "abrir_perfil",
+    ];
+    const SOLO_WEB: &[&str] = &[
+        // La direccion del perfil ya validada: es lo que el panel web ofrece en
+        // lugar de `abrir_perfil`.
+        "perfil_url",
+    ];
+
+    /// Los dos transportes tienen que ofrecer los mismos comandos.
+    ///
+    /// La superficie esta declarada dos veces —los `#[tauri::command]` de
+    /// `desktop.rs` y los brazos de `dispatch`—, y nada impedia que se separaran: un
+    /// comando anadido en un solo lado funciona en la ventana y no en el panel web
+    /// (o al reves), y el fallo es un «comando desconocido» que nadie ve hasta que lo
+    /// usa. Este test es lo que lo convierte en un fallo de la suite.
+    #[test]
+    fn los_dos_transportes_exponen_los_mismos_comandos() {
+        let shell = comandos_del_shell(include_str!("desktop.rs"));
+        let web = comandos_del_despachador(include_str!("ipc.rs"));
+
+        assert!(
+            !shell.is_empty() && !web.is_empty(),
+            "no se extrajo ningun comando, revisa el extractor: {shell:?} / {web:?}"
+        );
+
+        let solo_escritorio: Vec<&String> = shell
+            .iter()
+            .filter(|nombre| !web.contains(*nombre) && !SOLO_ESCRITORIO.contains(&nombre.as_str()))
+            .collect();
+        let solo_web: Vec<&String> = web
+            .iter()
+            .filter(|nombre| !shell.contains(*nombre) && !SOLO_WEB.contains(&nombre.as_str()))
+            .collect();
+
+        assert!(
+            solo_escritorio.is_empty(),
+            "estos comandos solo los tiene el escritorio, y el panel web contestaria \
+             «comando desconocido»: {solo_escritorio:?}"
+        );
+        assert!(
+            solo_web.is_empty(),
+            "estos comandos solo los tiene el servidor web, y la ventana no los ve: {solo_web:?}"
+        );
+
+        // Y las excepciones siguen existiendo: si alguna desaparece, esta lista miente.
+        for nombre in SOLO_ESCRITORIO {
+            assert!(
+                shell.contains(*nombre),
+                "{nombre} ya no existe en el escritorio"
+            );
+        }
+        for nombre in SOLO_WEB {
+            assert!(
+                web.contains(*nombre),
+                "{nombre} ya no existe en el servidor web"
+            );
+        }
+    }
+}

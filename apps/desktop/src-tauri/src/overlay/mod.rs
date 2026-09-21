@@ -42,7 +42,6 @@ use axum::Router;
 use serde::Deserialize;
 use tokio::sync::{broadcast, watch};
 
-use crate::app::AppState;
 use crate::core::{Event, EventKind};
 
 /// Vista en la que cae una peticion con `view` desconocido.
@@ -127,7 +126,37 @@ enum MensajeAlertas {
 /// celda que escribe la interfaz. Asi cambiar el diseno de una vista se ve en la
 /// siguiente peticion, sin reiniciar el servidor ni volver a abrir el puerto, y
 /// no hay dos copias del token que puedan discrepar.
-type ConfigCompartida = Arc<RwLock<Option<Arc<OverlayConfig>>>>;
+pub type ConfigCompartida = Arc<RwLock<Option<Arc<OverlayConfig>>>>;
+
+/// Lo que el servidor de overlays necesita del motor, y **nada mas**.
+///
+/// Antes recibia el `AppState` entero —el composition root—, asi que `overlay`
+/// dependia de `app` mientras `app` ya dependia de `overlay`: dos modulos que se
+/// necesitaban mutuamente, y un servidor HTTP con acceso a todo el motor. Peor de
+/// cara al futuro: cualquier cosa que se anadiera a `AppState` la podia tocar el
+/// overlay sin que nadie se enterara.
+///
+/// Este puerto dice en una pantalla lo unico que el servidor usa de verdad. Lo
+/// implementa `AppState` en `app.rs`: el motor no sabe que existe un servidor, solo
+/// que alguien le pide estas cinco cosas.
+pub trait Motor: Send + Sync {
+    /// Los eventos del bus interno, para reenviarlos a los Browser Source de OBS.
+    fn suscripcion(&self) -> broadcast::Receiver<Arc<Event>>;
+    /// Puerto, token y diseno elegido. La celda es la misma que escribe la interfaz.
+    fn config(&self) -> ConfigCompartida;
+    /// Los avisos que el motor ha encolado: el servidor solo los entrega.
+    fn cola_de_alertas(&self) -> Arc<crate::alerts::ColaAlertas>;
+    /// Proveedor, estado y handle del directo: lo que viaja en la foto de bienvenida.
+    fn sesion(&self) -> (String, String, String);
+    /// Las tres tablas de ranking de la sesion.
+    fn tablas(
+        &self,
+    ) -> (
+        Vec<crate::core::event::RankingEntry>,
+        Vec<crate::core::event::RankingEntry>,
+        Vec<crate::core::event::RankingEntry>,
+    );
+}
 
 /// Estado compartido por todas las conexiones.
 ///
@@ -206,25 +235,24 @@ pub(crate) struct Parametros {
 /// Se lanza aparte del runtime de Tauri a proposito: si Axum se cae o se queda
 /// sin hilos, la interfaz y el motor siguen funcionando (plan-review §151).
 /// Devuelve el puerto que se ha conseguido reservar.
-pub fn spawn(state: Arc<AppState>, config: &OverlayConfig) -> anyhow::Result<u16> {
+pub fn spawn(motor: Arc<dyn Motor>, config: &OverlayConfig) -> anyhow::Result<u16> {
     let puerto = puerto_disponible(config.port)?;
 
-    let mut suscripcion = state.bus.subscribe();
+    let mut suscripcion = motor.suscripcion();
     // Las tablas iniciales, para que una conexion que llegue antes del primer
     // evento ya tenga algo que pintar.
-    let inicial = mensaje_actual(&state);
+    let inicial = mensaje_actual(motor.as_ref());
     let (tx, rx) = watch::channel(inicial);
 
     // Los datos de sesion se guardan aparte porque la foto de bienvenida se manda
     // **en cada conexion** (ver `atender`), no una sola vez.
-    let (provider, status, handle) = datos_de_sesion(&state);
-    let sesion = Arc::new(RwLock::new((provider, status, handle)));
+    let sesion = Arc::new(RwLock::new(motor.sesion()));
 
     let estado = Arc::new(OverlayState {
-        config: state.overlay.clone(),
+        config: motor.config(),
         ultimo: rx,
         sesion: sesion.clone(),
-        cola: state.cola_alertas(),
+        cola: motor.cola_de_alertas(),
     });
 
     // Tarea que traduce el bus interno a la emision del overlay, con la misma
@@ -347,9 +375,9 @@ async fn bucle_publicacion(
 }
 
 /// Foto completa del estado que le interesa al overlay.
-fn mensaje_actual(state: &AppState) -> MensajeOverlay {
-    let (provider, status, handle) = datos_de_sesion(state);
-    let (tap, gifts, follows) = tablas_actuales(state);
+fn mensaje_actual(motor: &dyn Motor) -> MensajeOverlay {
+    let (provider, status, handle) = motor.sesion();
+    let (tap, gifts, follows) = motor.tablas();
     MensajeOverlay::State {
         provider,
         status,
@@ -357,30 +385,6 @@ fn mensaje_actual(state: &AppState) -> MensajeOverlay {
         tap,
         gifts,
         follows,
-    }
-}
-
-/// Los tres datos de sesion que viajan en la foto de bienvenida.
-fn datos_de_sesion(state: &AppState) -> (String, String, String) {
-    let snapshot = state.snapshot();
-    (snapshot.provider, snapshot.status, snapshot.handle)
-}
-
-/// Las tres tablas de ranking de la sesion.
-fn tablas_actuales(
-    state: &AppState,
-) -> (
-    Vec<crate::core::event::RankingEntry>,
-    Vec<crate::core::event::RankingEntry>,
-    Vec<crate::core::event::RankingEntry>,
-) {
-    match state.rankings_event() {
-        Some(EventKind::RankingsUpdated {
-            tap,
-            gifts,
-            follows,
-        }) => (tap, gifts, follows),
-        _ => (Vec::new(), Vec::new(), Vec::new()),
     }
 }
 

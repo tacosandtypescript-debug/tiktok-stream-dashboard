@@ -1,0 +1,13 @@
+# Configuracion de Cargo para el workspace.
+#
+# El directorio de compilacion se queda **donde estaba**.
+#
+# Al crear el workspace, Cargo pasaria a compilar en `<raiz>/target`, y eso rompe
+# media docena de sitios que ya apuntan a `apps/desktop/src-tauri/target`: los
+# scripts de build y de empaquetado, `build-tts-sidecar.ps1` y los artefactos que
+# sube el workflow. Fijarlo aqui deja todo eso igual y el workspace aporta solo lo
+# que se buscaba (un lock, `--workspace` de verdad y el spike cubierto).
+#
+# La ruta es relativa a la carpeta que contiene `.cargo`, o sea a la raiz.
+[build]
+target-dir = "apps/desktop/src-tauri/target"

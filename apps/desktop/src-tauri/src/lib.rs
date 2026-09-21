@@ -11,6 +11,7 @@
 //!   providers/  trait TikTokProvider + implementacion nativa + simulador
 //!   chat/       buffer circular de los ultimos N mensajes
 //!   database/   SQLite con migraciones (schema_version)
+//!   rutas       donde se escribe todo (datos, logs, cache, medios)
 //!   telemetry/  logs con rotacion
 //!   core::single  instancia unica
 //!   overlay/    servidor HTTP + WebSocket para los Browser Source de OBS
@@ -26,6 +27,7 @@ pub mod ipc;
 pub mod overlay;
 pub mod preview;
 pub mod providers;
+pub mod rutas;
 pub mod secreto;
 pub mod telemetry;
 pub mod tts;

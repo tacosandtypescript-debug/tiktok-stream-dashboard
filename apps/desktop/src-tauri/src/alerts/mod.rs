@@ -1050,7 +1050,7 @@ pub struct SeedReport {
 impl Almacen {
     /// El almacen de verdad: junto a la base y los logs.
     pub fn nuevo() -> Self {
-        Self::en(crate::database::data_dir().join("alertas"))
+        Self::en(crate::rutas::data_dir().join("alertas"))
     }
 
     /// Un almacen en otra carpeta. Lo usan los tests.

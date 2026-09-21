@@ -1,0 +1,35 @@
+# Raiz del repositorio: un solo workspace para los dos crates.
+#
+# Por que existe: sin esto, cada crate se construia por su cuenta y el spike
+# `tiktok-rust-provider` **no lo compilaba nadie** —ni `build.ps1` ni la CI—, asi que
+# se quedo con un `Cargo.lock` que pedia `unicode-ident 1.0.25`, version que ya no
+# esta en la cache del proyecto. Estaba roto y nadie se habia enterado.
+#
+# Con el workspace:
+#   * `cargo test --workspace` significa de verdad «todos los crates» (antes decia
+#     `--workspace` y cubria uno, que es peor que no decirlo);
+#   * hay **un solo** `Cargo.lock`, en la raiz, y no dos que pueden discrepar;
+#   * el spike vuelve a los gates y deja de pudrirse.
+#
+# Las dependencias de la aplicacion **no cambian**: su `Cargo.lock` ya contenia los
+# 182 pares `nombre@version` que pedia el spike (salvo su propio paquete y un
+# `unicode-ident` de diferencia, que se unifica al que ya usa la aplicacion).
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop/src-tauri",
+    "spikes/tiktok-rust-provider",
+]
+
+# El perfil de release vive **aqui** y no en cada crate.
+#
+# En un workspace, los `[profile.*]` de los miembros se ignoran con un aviso: si
+# siguieran en `apps/desktop/src-tauri/Cargo.toml`, el binario que se publica se
+# compilaria sin `lto` ni `panic = "abort"` —sin que nada fallara— porque mandaria
+# este fichero. Los valores son exactamente los que ya tenia la aplicacion.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

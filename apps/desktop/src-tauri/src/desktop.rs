@@ -730,20 +730,25 @@ fn launch(instance_port: u16) {
             match crate::overlay::OverlayConfig::load_or_create(
                 &crate::overlay::OverlayConfig::path(),
             ) {
-                Ok(config) => match crate::overlay::spawn(state.clone(), &config) {
-                    Ok(puerto) => {
-                        // El puerto real puede no ser el preferido: se guarda el
-                        // que se ha conseguido para que la URL de OBS no cambie.
-                        let config = config.con_puerto(puerto);
-                        let _ = config.save(&crate::overlay::OverlayConfig::path());
-                        tracing::info!(
-                            pagina = %config.pagina_url(crate::overlay::VISTA_POR_DEFECTO),
-                            "overlay de OBS disponible"
-                        );
-                        state.set_overlay(config);
+                Ok(config) => {
+                    // El motor entra como `overlay::Motor`: el servidor HTTP ve cinco
+                    // cosas suyas y nada mas (ver `app.rs`).
+                    let motor: Arc<dyn crate::overlay::Motor> = state.clone();
+                    match crate::overlay::spawn(motor, &config) {
+                        Ok(puerto) => {
+                            // El puerto real puede no ser el preferido: se guarda el
+                            // que se ha conseguido para que la URL de OBS no cambie.
+                            let config = config.con_puerto(puerto);
+                            let _ = config.save(&crate::overlay::OverlayConfig::path());
+                            tracing::info!(
+                                pagina = %config.pagina_url(crate::overlay::VISTA_POR_DEFECTO),
+                                "overlay de OBS disponible"
+                            );
+                            state.set_overlay(config);
+                        }
+                        Err(error) => tracing::warn!(%error, "sin servidor de overlays"),
                     }
-                    Err(error) => tracing::warn!(%error, "sin servidor de overlays"),
-                },
+                }
                 Err(error) => tracing::warn!(%error, "sin configuracion de overlays"),
             }
 

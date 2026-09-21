@@ -21,6 +21,14 @@ después todos los gates de Rust se ejecutan con `--offline`.
 | Tauri validation/release | `tauri.js build --no-bundle --ci` | No | `frontendDist`, `externalBin`, configuración y exe release | Bloqueante |
 | Runtime smoke test | `target/release/tiktok-stream-dashboard.exe --self-test --seconds 4` | No | Arranque del motor, simulador, persistencia y cierre | Bloqueante |
 
+Los gates de Rust corren sobre un **workspace de Cargo** con dos crates
+—`apps/desktop/src-tauri` (la aplicación) y `spikes/tiktok-rust-provider` (el spike
+del protocolo)— y **un solo `Cargo.lock`, en la raíz**. `cargo fmt`, `clippy`,
+`check` y `test` van con `--workspace`, así que cubren los dos: el spike dejó de ser
+un crate que no compilaba nadie. El directorio de compilación sigue siendo
+`apps/desktop/src-tauri/target` (lo fija `.cargo/config.toml`), que es donde apuntan
+los scripts y el workflow.
+
 Los gates de Rust consumen el `Cargo.lock` y solo son offline después de que el
 checkout tenga el registro/cache de crates disponible. En CI, `cargo fetch
 --locked` es el único paso de red para Rust. En local, la preparación equivalente

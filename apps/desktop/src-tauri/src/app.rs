@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use crate::chat::{ChatBuffer, ChatEntry};
 use crate::core::event::{Event, Perfil};
 use crate::core::{EventBus, EventKind, Metrics, MetricsSnapshot, PROTOCOL_VERSION};
-use crate::database::{database_path, Database, DbWriter, WriteJob};
+use crate::database::{Database, DbWriter, WriteJob};
 use crate::feed::{
     like_is_notable, EventFeed, FeedItem, FeedKind, GiftBoard, GiftEventView, GiftTypeSummary,
     RankingBoard, RankingEntry, FEED_CAPACITY,
@@ -372,7 +372,7 @@ impl AppState {
     }
 
     pub fn new(instance_port: u16) -> anyhow::Result<Self> {
-        Self::open(database_path(), instance_port)
+        Self::open(crate::rutas::database_path(), instance_port)
     }
 
     /// Conecta el proveedor activo **y** recuerda a que usuario.
@@ -2625,6 +2625,49 @@ pub struct Snapshot {
     pub alertas_descartados: u64,
     /// Traza del chat: recibido en la interfaz frente a renderizado por React.
     pub ui_chat: UiChatTrace,
+}
+
+/// El motor visto por el servidor de overlays.
+///
+/// La direccion de la dependencia es esta y no la contraria: `overlay` declara lo
+/// que necesita (`overlay::Motor`) y `app` lo cumple. Antes el overlay recibia el
+/// `AppState` entero y los dos modulos se necesitaban mutuamente; ahora el servidor
+/// HTTP solo puede tocar estas cinco cosas, y anadir algo a `AppState` no se lo
+/// regala sin querer.
+impl crate::overlay::Motor for AppState {
+    fn suscripcion(&self) -> tokio::sync::broadcast::Receiver<Arc<Event>> {
+        self.bus.subscribe()
+    }
+
+    fn config(&self) -> crate::overlay::ConfigCompartida {
+        self.overlay.clone()
+    }
+
+    fn cola_de_alertas(&self) -> Arc<crate::alerts::ColaAlertas> {
+        self.cola_alertas()
+    }
+
+    fn sesion(&self) -> (String, String, String) {
+        let snapshot = self.snapshot();
+        (snapshot.provider, snapshot.status, snapshot.handle)
+    }
+
+    fn tablas(
+        &self,
+    ) -> (
+        Vec<crate::core::event::RankingEntry>,
+        Vec<crate::core::event::RankingEntry>,
+        Vec<crate::core::event::RankingEntry>,
+    ) {
+        match self.rankings_event() {
+            Some(EventKind::RankingsUpdated {
+                tap,
+                gifts,
+                follows,
+            }) => (tap, gifts, follows),
+            _ => (Vec::new(), Vec::new(), Vec::new()),
+        }
+    }
 }
 
 /// Base de datos temporal para los tests.

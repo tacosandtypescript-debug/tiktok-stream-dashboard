@@ -147,7 +147,7 @@ impl Default for FishConfig {
     fn default() -> Self {
         Self {
             endpoint: ENDPOINT.to_string(),
-            cache_dir: crate::database::data_dir().join("cache").join("tts"),
+            cache_dir: crate::rutas::data_dir().join("cache").join("tts"),
             timeout: Duration::from_secs(30),
             cache_max_bytes: 200 * 1024 * 1024,
             cache_max_age: Duration::from_secs(7 * 24 * 60 * 60),

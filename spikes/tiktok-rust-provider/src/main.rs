@@ -195,7 +195,10 @@ async fn resolve_room(http: &reqwest::Client, handle: &str) -> Result<RoomInfo> 
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        bail!("api-live/user/room devolvio HTTP {status}: {}", &body[..body.len().min(300)]);
+        bail!(
+            "api-live/user/room devolvio HTTP {status}: {}",
+            &body[..body.len().min(300)]
+        );
     }
 
     let json: Value = serde_json::from_str(&body)
@@ -217,7 +220,9 @@ async fn resolve_room(http: &reqwest::Client, handle: &str) -> Result<RoomInfo> 
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("sin roomId en la respuesta"))?;
 
-    let live_status = json.pointer("/data/liveRoom/status").and_then(Value::as_i64);
+    let live_status = json
+        .pointer("/data/liveRoom/status")
+        .and_then(Value::as_i64);
     let title = json
         .pointer("/data/liveRoom/title")
         .and_then(Value::as_str)
@@ -228,8 +233,12 @@ async fn resolve_room(http: &reqwest::Client, handle: &str) -> Result<RoomInfo> 
         room_id,
         live: live_status != Some(4),
         title,
-        user_count: json.pointer("/data/liveRoom/liveRoomStats/userCount").and_then(Value::as_i64),
-        enter_count: json.pointer("/data/liveRoom/liveRoomStats/enterCount").and_then(Value::as_i64),
+        user_count: json
+            .pointer("/data/liveRoom/liveRoomStats/userCount")
+            .and_then(Value::as_i64),
+        enter_count: json
+            .pointer("/data/liveRoom/liveRoomStats/enterCount")
+            .and_then(Value::as_i64),
     })
 }
 
@@ -264,12 +273,21 @@ async fn fetch_signed(http: &reqwest::Client, room_id: &str) -> Result<SignedFet
 
     let status = response.status();
     let headers = response.headers().clone();
-    let bytes = response.bytes().await.context("leyendo cuerpo del sign server")?;
+    let bytes = response
+        .bytes()
+        .await
+        .context("leyendo cuerpo del sign server")?;
 
     if status.as_u16() == 429 {
         let json: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        let message = json.get("message").and_then(Value::as_str).unwrap_or("(sin mensaje)");
-        let label = json.get("limit_label").and_then(Value::as_str).unwrap_or("");
+        let message = json
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("(sin mensaje)");
+        let label = json
+            .get("limit_label")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         // D2: nunca reintentar en bucle. La cuota anonima es 5/min, 30/h, 100/dia.
         bail!("LIMITE DEL SERVIDOR DE FIRMA {label}: {message}");
     }
@@ -336,7 +354,9 @@ fn gunzip(payload: &[u8]) -> Result<Vec<u8>> {
     use std::io::Read;
     let mut decoder = flate2::read::GzDecoder::new(payload);
     let mut out = Vec::new();
-    decoder.read_to_end(&mut out).context("gunzip del payload")?;
+    decoder
+        .read_to_end(&mut out)
+        .context("gunzip del payload")?;
     Ok(out)
 }
 
@@ -411,11 +431,7 @@ fn user_label(user: &Option<User>) -> String {
 fn print_message(method: &str, payload: &[u8], label: &str) {
     match method {
         "WebcastChatMessage" => match WebcastChatMessage::decode(payload) {
-            Ok(m) => println!(
-                "[{label}] CHAT  {}: {}",
-                user_label(&m.user),
-                m.content
-            ),
+            Ok(m) => println!("[{label}] CHAT  {}: {}", user_label(&m.user), m.content),
             Err(e) => tracing::warn!(%e, "chat no decodificable"),
         },
         "WebcastGiftMessage" => match WebcastGiftMessage::decode(payload) {
@@ -448,7 +464,10 @@ fn print_message(method: &str, payload: &[u8], label: &str) {
             Err(e) => tracing::warn!(%e, "like no decodificable"),
         },
         "WebcastRoomUserSeqMessage" => match WebcastRoomUserSeqMessage::decode(payload) {
-            Ok(m) => println!("[{label}] VIEW  espectadores={} (total={})", m.total_user, m.total),
+            Ok(m) => println!(
+                "[{label}] VIEW  espectadores={} (total={})",
+                m.total_user, m.total
+            ),
             Err(e) => tracing::warn!(%e, "viewers no decodificable"),
         },
         "WebcastSocialMessage" => match WebcastSocialMessage::decode(payload) {
@@ -513,10 +532,22 @@ async fn cmd_watch(
     let signed = fetch_signed(&http, &room.room_id).await?;
     println!(
         "firma OK: push_server={} cursor={} route_params={} cookies={} mensajes_iniciales={}",
-        if signed.envelope.push_server.is_empty() { "VACIO" } else { signed.envelope.push_server.as_str() },
-        if signed.envelope.cursor.is_empty() { "VACIO" } else { signed.envelope.cursor.as_str() },
+        if signed.envelope.push_server.is_empty() {
+            "VACIO"
+        } else {
+            signed.envelope.push_server.as_str()
+        },
+        if signed.envelope.cursor.is_empty() {
+            "VACIO"
+        } else {
+            signed.envelope.cursor.as_str()
+        },
         signed.envelope.route_params.len(),
-        if signed.cookies.is_empty() { "AUSENTES" } else { "presentes" },
+        if signed.cookies.is_empty() {
+            "AUSENTES"
+        } else {
+            "presentes"
+        },
         signed.envelope.messages.len()
     );
     for message in &signed.envelope.messages {
@@ -558,8 +589,7 @@ async fn cmd_watch(
 
     let mut recorder = match record {
         Some(path) => {
-            let file = std::fs::File::create(path)
-                .with_context(|| format!("creando {path}"))?;
+            let file = std::fs::File::create(path).with_context(|| format!("creando {path}"))?;
             Some(std::io::BufWriter::new(file))
         }
         None => None,
@@ -637,7 +667,10 @@ fn cmd_replay(path: &str) -> Result<()> {
     for (index, line) in content.lines().enumerate() {
         let parsed: Value = serde_json::from_str(line)
             .with_context(|| format!("linea {} no es JSON", index + 1))?;
-        let encoded = parsed.get("b64").and_then(Value::as_str).unwrap_or_default();
+        let encoded = parsed
+            .get("b64")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let raw = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .with_context(|| format!("base64 invalido en la linea {}", index + 1))?;

@@ -4319,6 +4319,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiktok-rust-provider-spike"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "flate2",
+ "futures-util",
+ "prost",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tiktok-stream-dashboard"
 version = "0.4.3"
 dependencies = [

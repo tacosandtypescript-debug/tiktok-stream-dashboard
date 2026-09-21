@@ -26,7 +26,7 @@ const KEEP_DAYS: u64 = 14;
 static GUARDS: OnceLock<Vec<WorkerGuard>> = OnceLock::new();
 
 pub fn log_dir() -> PathBuf {
-    crate::database::data_dir().join("logs")
+    crate::rutas::data_dir().join("logs")
 }
 
 /// Inicializa el subsistema de logs. Es idempotente: llamarlo dos veces no
@@ -178,6 +178,6 @@ mod tests {
     fn el_directorio_de_logs_cuelga_del_de_datos() {
         let dir = log_dir();
         assert!(dir.ends_with("logs"));
-        assert!(dir.starts_with(crate::database::data_dir()));
+        assert!(dir.starts_with(crate::rutas::data_dir()));
     }
 }

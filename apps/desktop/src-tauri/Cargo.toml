@@ -69,9 +69,6 @@ default = ["desktop", "custom-protocol"]
 desktop = ["tauri"]
 custom-protocol = ["tauri/custom-protocol"]
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+# El `[profile.release]` vive en la raiz del workspace (`/Cargo.toml`): en un
+# workspace los perfiles de los miembros se ignoran, asi que tenerlo aqui seria una
+# copia que no manda y que puede mentir.

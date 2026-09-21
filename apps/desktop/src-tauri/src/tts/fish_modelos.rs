@@ -427,7 +427,7 @@ pub fn voz_de_json(json: &serde_json::Value) -> VozFish {
 /// esto es otra cosa: imagenes pequeñas y pruebas sueltas que el streamer ha
 /// pedido a proposito.
 pub fn cache_dir() -> PathBuf {
-    crate::database::data_dir().join("cache").join("voces")
+    crate::rutas::data_dir().join("cache").join("voces")
 }
 
 /// La carpeta de las portadas.
@@ -608,7 +608,7 @@ pub fn leer_portada(archivo: &str) -> Option<(Vec<u8>, &'static str)> {
 /// sintetizada es audio de una frase, igual que cualquier otra locucion, y vive
 /// donde viven las demas para que la poda de la cache las trate a todas igual.
 pub fn cache_audio_dir() -> PathBuf {
-    crate::database::data_dir().join("cache").join("tts")
+    crate::rutas::data_dir().join("cache").join("tts")
 }
 
 /// Lee una prueba sintetizada de la cache de audio. `None` si no esta.

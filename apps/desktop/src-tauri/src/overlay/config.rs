@@ -93,7 +93,7 @@ impl Disenos {
 impl OverlayConfig {
     /// Ruta del fichero de configuracion (junto a los logs y la base).
     pub fn path() -> PathBuf {
-        crate::database::data_dir().join("overlay.json")
+        crate::rutas::data_dir().join("overlay.json")
     }
 
     /// Carga la configuracion, o la crea si no existe.
