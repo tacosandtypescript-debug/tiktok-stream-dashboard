@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import { api } from "./api";
 import { App } from "./App";
+import { PreviewAudioProvider } from "./previewAudio";
 import "./styles.css";
 
 /**
@@ -58,7 +59,14 @@ if (!container) {
 ReactDOM.createRoot(container).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      {/*
+        * El coordinador del audio de prueba va **por fuera** de la aplicación, no
+        * dentro de una página: el `<audio>` es uno solo para todas, y así cambiar de
+        * pestaña no depende de que la página que sonaba se acuerde de parar.
+        */}
+      <PreviewAudioProvider>
+        <App />
+      </PreviewAudioProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

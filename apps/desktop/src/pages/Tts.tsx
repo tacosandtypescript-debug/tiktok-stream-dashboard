@@ -14,11 +14,14 @@
 //! enmascarada. La interfaz escribe claves nuevas y no puede leer las que hay; es
 //! la única forma de que una clave no acabe en una captura de pantalla.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type TtsCuota, type TtsProvider, type TtsStatus, type TtsVoice, type TtsVozGuardada } from "../api";
 import { Anillo, Card, Empty, formatDuration, formatNumber } from "../components";
 import { t } from "../i18n/es";
+import { BibliotecaVoces } from "../voces/BibliotecaVoces";
+import { MenuVoz } from "../voces/MenuVoz";
+import { vozGuardada } from "../voces/tipos";
 
 /** Ritmos que entiende edge-tts. */
 const RATES = ["-50%", "-25%", "+0%", "+25%", "+50%", "+100%"];
@@ -47,9 +50,17 @@ const TOPE_CLAVES = 10;
 
 interface Props {
   initial: TtsStatus | null;
+  /**
+   * La dirección del servidor de overlays, que ya trae el token.
+   *
+   * Es la que sirve las portadas cacheadas y las pruebas sintetizadas: la
+   * biblioteca la necesita para armar esas direcciones, y en el navegador (modo
+   * web) es la única forma de llegar a los ficheros del disco del streamer.
+   */
+  urlOverlay?: string;
 }
 
-export function Tts({ initial }: Props) {
+export function Tts({ initial, urlOverlay }: Props) {
   const [status, setStatus] = useState<TtsStatus | null>(initial);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [devices, setDevices] = useState<string[]>([]);
@@ -60,9 +71,12 @@ export function Tts({ initial }: Props) {
   const [claveNombre, setClaveNombre] = useState("");
   const [claveValor, setClaveValor] = useState("");
   const [errorClave, setErrorClave] = useState<string | null>(null);
-  /** Nombre y código de la voz que se está dando de alta. */
-  const [vozNombre, setVozNombre] = useState("");
-  const [vozCodigo, setVozCodigo] = useState("");
+  /** Lo que contestó Fish al probar una clave: se enseña, y no cambia su estado. */
+  const [avisoClave, setAvisoClave] = useState<string | null>(null);
+  /** Si el alta de clave está desplegada. */
+  const [altaClave, setAltaClave] = useState(false);
+  /** La tarjeta de las claves, para poder llevarle el foco desde la biblioteca. */
+  const clavesRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * Qué mitad de la página se está mirando.
@@ -221,11 +235,52 @@ export function Tts({ initial }: Props) {
       .catch((cause: unknown) => setErrorClave(String(cause)));
   };
 
-  const accionClave = (accion: "quitar" | "reintentar", id: number) => {
-    const llamada = accion === "quitar" ? api.ttsKeyRemove(id) : api.ttsKeyReset(id);
+  const accionClave = (accion: "quitar" | "reintentar" | "apagar", id: number) => {
+    const llamada =
+      accion === "quitar"
+        ? api.ttsKeyRemove(id)
+        : accion === "apagar"
+          ? api.ttsKeyDisable(id)
+          : api.ttsKeyReset(id);
     void llamada
       .then(setStatus)
       .catch((cause: unknown) => setErrorClave(String(cause)));
+  };
+
+  /**
+   * Prueba una clave contra la API, sin gastar saldo.
+   *
+   * El resultado se enseña tal cual y **no se toca su estado**: probar no es usar, y
+   * marcar una clave por un corte de red sería mentir sobre ella. Si la clave no
+   * vale, lo dice el motivo que devuelve Fish.
+   */
+  const probarClave = (id: number) => {
+    setAvisoClave(t.tts.keyProbando);
+    void api
+      .ttsKeyProbar(id)
+      .then(() => setAvisoClave(t.tts.keyProbarOk))
+      .catch((cause: unknown) => setAvisoClave(t.tts.keyProbarFallo(String(cause))));
+  };
+
+  const renombrarClave = (id: number, actual: string) => {
+    const propuesto = window.prompt(t.tts.keyRenombrarAviso, actual);
+    if (propuesto === null) return;
+    void api
+      .ttsKeyRename(id, propuesto)
+      .then(setStatus)
+      .catch((cause: unknown) => setErrorClave(String(cause)));
+  };
+
+  /**
+   * Lleva la vista a la tarjeta de las claves.
+   *
+   * Lo pide la biblioteca cuando no hay ninguna: sin clave no se puede explorar el
+   * catálogo, y en vez de dejarlo dicho y ya está se lleva al sitio donde se
+   * arregla. En la ventana ancha las claves ya están a la vista y no pasa nada; en
+   * la estrecha están debajo, y ahí es donde hace falta el salto.
+   */
+  const irAClaves = () => {
+    clavesRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
 
   if (!status) {
@@ -279,13 +334,15 @@ export function Tts({ initial }: Props) {
    */
   const guardarVozEdge = (referencia: string, idioma: string) => {
     const delCatalogo = voices.find((voz) => voz.id === referencia);
-    const nueva = {
+    const nueva = vozGuardada({
       nombre: delCatalogo?.label ?? referencia,
+      // De una voz de Edge el catalogo **es** su nombre: no hay otro titulo.
+      titulo_original: delCatalogo?.label ?? "",
       referencia,
       proveedor: "edge",
       idioma,
       descripcion: delCatalogo?.label ?? "",
-    };
+    });
     update({
       fish_voces: [
         nueva,
@@ -321,24 +378,6 @@ export function Tts({ initial }: Props) {
   };
 
   /**
-   * Si una voz guardada es la que está sonando.
-   *
-   * Depende del motor, y mirar solo la referencia mentiría: una de Fish lo está si
-   * su código es el puesto **y** el motor es Fish; una de Edge, si es la elegida
-   * del idioma que le toca y el motor es Edge. Sin la primera condición, una voz
-   * de Fish aparecería «En uso» con Edge puesto solo porque su código sigue
-   * guardado en los ajustes.
-   */
-  const enUso = (voz: TtsVozGuardada): boolean => {
-    if (voz.proveedor === "fish") {
-      return status.voz.proveedor === "fish" && voz.referencia === status.voz.reference_id;
-    }
-    if (status.voz.proveedor !== "edge") return false;
-    const elegida = voz.idioma === "en" ? status.settings.voice_en : status.settings.voice_es;
-    return voz.referencia === elegida;
-  };
-
-  /**
    * El tono del anillo del saldo.
    *
    * Dos tonos y no tres: la paleta del proyecto usa el color con un significado
@@ -354,40 +393,6 @@ export function Tts({ initial }: Props) {
       : cuota.porcentaje <= UMBRAL_SALDO_BAJO
         ? "bajo"
         : "normal";
-
-  /**
-   * Guarda una voz con su nombre y la deja en uso.
-   *
-   * Se manda la lista **entera** y no una orden de alta: el motor guarda lo que
-   * recibe, así que añadir, renombrar y quitar son la misma operación y el orden
-   * lo decide quien acaba de tocar la pantalla. Si el código ya estaba en la
-   * lista, se le cambia el nombre en vez de repetirlo: dos filas con la misma voz
-   * solo hacen dudar de cuál está puesta.
-   */
-  const anadirVoz = () => {
-    const referencia = vozCodigo.trim();
-    if (!referencia) return;
-    const sinLaRepetida = guardadas.filter(
-      (voz) => !(voz.proveedor === "fish" && voz.referencia === referencia),
-    );
-    update({
-      fish_voces: [
-        {
-          nombre: vozNombre.trim(),
-          referencia,
-          proveedor: "fish",
-          // De una voz de Fish no se sabe el idioma ni hay descripción: su API no
-          // los da con el identificador. Se dejan vacíos en vez de inventarlos.
-          idioma: "",
-          descripcion: "",
-        },
-        ...sinLaRepetida,
-      ],
-      fish_reference_id: referencia,
-    });
-    setVozNombre("");
-    setVozCodigo("");
-  };
 
   return (
     <div className="grid-panel voz" data-vista={vista}>
@@ -464,7 +469,14 @@ export function Tts({ initial }: Props) {
       {/* Dos vistas en la misma pestaña: **lo que suena** mientras emites y **lo
           que tienes guardado**. Los diez paneles suman 1.831 px para 674 de alto y
           sacarlos a otra pestaña no vale —las otras cinco estan exactamente
-          llenas—, asi que se reparten aqui. Se ve todo sin desplazar la pagina. */}
+          llenas—, asi que se reparten aqui. Se ve todo sin desplazar la pagina.
+
+          El reparto de «Lo que suena» es el de la orden de trabajo: el estado de
+          lectura arriba a todo el ancho, **los cinco paneles de trabajo en una sola
+          fila** —cola, motor, que se lee, la voz y como se lee— y la salida de audio
+          como **franja inferior a todo el ancho**. La salida no es un sexto panel:
+          es una tira de una linea que se toca una vez, y metida en la fila obligaba
+          a una segunda fila de paneles con 1.000 px de vacio al lado. */}
       <div className="vista-switch" role="tablist">
         <button
           type="button"
@@ -488,9 +500,17 @@ export function Tts({ initial }: Props) {
 
       <div className="grid-columns">
         {/* Cada tarjeta en su propia celda y con la vista a la que pertenece. La
-            rejilla las reparte sola en tres columnas, y esconder las de la otra
-            vista deja que las demas se recoloquen: mover una tarjeta de vista es
-            cambiarle la clase, no moverla de sitio en el marcado. */}
+            rejilla las reparte sola, y esconder las de la otra vista deja que las
+            demas se recoloquen: mover una tarjeta de vista es cambiarle la clase, no
+            moverla de sitio en el marcado.
+
+            **El orden del marcado es el orden de la pantalla**, asi que las cinco
+            tarjetas de trabajo van en el orden de la orden —cola, motor, que se lee,
+            la voz y como se lee— y la salida de audio va la ultima y con
+            `ancho-completo`, que es lo que la saca de la fila y la pone de franja
+            debajo ocupando las cinco columnas. No se hace con `order`: la rejilla
+            coloca por orden de marcado y con `order` la vista quedaria al reves de
+            como la lee un lector de pantalla. */}
         <div className="stack vista-sonando">
           <Card title={t.tts.queue}>
             {status.queued.length === 0 ? (
@@ -515,89 +535,32 @@ export function Tts({ initial }: Props) {
           </Card>
         </div>
 
-        {/* La lista de voces guardadas, **la primera** de su vista: es a lo que se
-            viene aquí. Va fuera del panel de Fish a propósito —una voz de Edge
-            tiene que poder elegirse con el motor de Edge puesto, y ese panel solo
-            se enseña cuando el motor es Fish—. */}
-        <div className="stack vista-voces">
-          <Card
-            title={t.tts.voicesSaved}
-            actions={
-              guardadas.length > 0 ? (
-                <span className="hint">{t.tts.voicesSavedHint}</span>
-              ) : null
-            }
-          >
-            {guardadas.length === 0 ? (
-              <p className="hint">{t.tts.voicesEmpty}</p>
-            ) : (
-              <ul className="voces">
-                {guardadas.map((voz) => {
-                  const activa = enUso(voz);
-                  const clave = `${voz.proveedor}:${voz.referencia}`;
-                  return (
-                    <li key={clave} className={activa ? "voz activa" : "voz"}>
-                      {/* Lo que no cabe en la fila va en el `title`: el
-                          identificador son 32 caracteres y la descripción es una
-                          línea entera. Guardados se quedan los dos —es lo que
-                          evita volver a la API— y aquí se leen al pasar el ratón. */}
-                      <span
-                        className="voz-nombre"
-                        title={
-                          voz.descripcion
-                            ? `${voz.descripcion} · ${voz.referencia}`
-                            : voz.referencia
-                        }
-                      >
-                        {voz.nombre || voz.referencia}
-                      </span>
-                      <span className="etiqueta">
-                        {t.tts.voiceProvider[voz.proveedor] ?? voz.proveedor}
-                      </span>
-                      {activa ? (
-                        <span className="etiqueta">{t.tts.voiceInUse}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="ghost tiny"
-                          onClick={() => usarVoz(voz)}
-                        >
-                          {t.tts.voiceUse}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="ghost tiny"
-                        title={t.tts.voiceRemoveHint}
-                        onClick={() =>
-                          update({
-                            fish_voces: guardadas.filter(
-                              (otra) =>
-                                !(
-                                  otra.proveedor === voz.proveedor &&
-                                  otra.referencia === voz.referencia
-                                ),
-                            ),
-                          })
-                        }
-                      >
-                        ×
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+        {/* La biblioteca de voces: es lo primero y lo más grande de esta vista
+            porque es a lo que se viene aquí. Dentro lleva sus dos pestañas —Mis
+            voces y Explorar—, el buscador, los filtros y el alta, así que la
+            tarjeta de «Voces guardadas» que había antes desaparece: era una lista
+            sin caras al lado de una biblioteca que sí las tiene. */}
+        <div className="stack vista-voces voz-columna-principal">
+          <BibliotecaVoces
+            urlOverlay={urlOverlay}
+            guardadas={guardadas}
+            proveedor={status.voz.proveedor}
+            referenciaEnUso={status.voz.reference_id}
+            edgeEnUso={{ es: status.settings.voice_es, en: status.settings.voice_en }}
+            hayClaves={status.consumo.claves.length > 0}
+            onStatus={setStatus}
+            onUsar={usarVoz}
+            onIrAClaves={irAClaves}
+          />
         </div>
-
         {/* Las claves de Fish solo se enseñan cuando Fish es el motor: con la
             voz de siempre no se usan para nada. */}
         {status.voz.proveedor === "fish" ? (
-          <div className="stack vista-voces">
+          <div className="stack vista-voces voz-columna-lateral" ref={clavesRef}>
             <Card title={t.tts.keys}>
               <p className="hint">{t.tts.keysHint}</p>
               {errorClave ? <p className="voz-aviso">{errorClave}</p> : null}
+              {avisoClave ? <p className="hint">{avisoClave}</p> : null}
               {status.consumo.claves.length === 0 ? (
                 <Empty>{t.tts.keysEmpty}</Empty>
               ) : (
@@ -620,24 +583,38 @@ export function Tts({ initial }: Props) {
                       <span className="rank-value" title={t.tts.usageCalls(formatNumber(clave.llamadas))}>
                         {formatoBytes(clave.bytes)} · {formatoDinero(clave.usd)}
                       </span>
-                      <span className="clave-acciones">
-                        {clave.estado === "viva" ? null : (
-                          <button
-                            type="button"
-                            className="ghost tiny"
-                            onClick={() => accionClave("reintentar", clave.id)}
-                          >
-                            {t.tts.keyReset}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="ghost tiny"
-                          onClick={() => accionClave("quitar", clave.id)}
-                        >
-                          {t.tts.keyRemove}
-                        </button>
-                      </span>
+                      {/* Las cuatro acciones, dentro del menú: con un botón por
+                          acción la fila se llenaba de mandos y dejaba de leerse el
+                          estado, que es lo que se viene a mirar aquí. */}
+                      <MenuVoz
+                        acciones={[
+                          {
+                            etiqueta: t.tts.keyProbar,
+                            pista: t.tts.keyProbarHint,
+                            onClick: () => probarClave(clave.id),
+                          },
+                          {
+                            etiqueta: t.tts.keyRenombrar,
+                            onClick: () => renombrarClave(clave.id, clave.nombre),
+                          },
+                          clave.estado === "viva"
+                            ? {
+                                etiqueta: t.tts.keyDesactivar,
+                                pista: t.tts.keyDesactivarHint,
+                                onClick: () => accionClave("apagar", clave.id),
+                              }
+                            : {
+                                etiqueta: t.tts.keyActivar,
+                                onClick: () => accionClave("reintentar", clave.id),
+                              },
+                          {
+                            etiqueta: t.tts.keyQuitar,
+                            peligrosa: true,
+                            confirmar: t.tts.keyQuitarAviso,
+                            onClick: () => accionClave("quitar", clave.id),
+                          },
+                        ]}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -646,35 +623,50 @@ export function Tts({ initial }: Props) {
               {status.consumo.claves.length >= TOPE_CLAVES ? (
                 <p className="voz-aviso">{t.tts.keyFull}</p>
               ) : (
-                <div className="alta-linea">
-                  <div className="campo">
-                    <label htmlFor="clave-nombre">{t.tts.keyName}</label>
-                    <input
-                      id="clave-nombre"
-                      type="text"
-                      value={claveNombre}
-                      placeholder={t.tts.keyNamePlaceholder}
-                      onChange={(event) => setClaveNombre(event.target.value)}
-                    />
-                  </div>
-                  <div className="campo">
-                    <label htmlFor="clave-valor">{t.tts.keyValue}</label>
-                    {/* De tipo `password` a proposito: la clave no se enseña ni
-                        mientras se pega. */}
-                    <input
-                      id="clave-valor"
-                      type="password"
-                      value={claveValor}
-                      placeholder={t.tts.keyValuePlaceholder}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(event) => setClaveValor(event.target.value)}
-                    />
-                  </div>
-                  <button type="button" onClick={guardarClave}>
-                    {t.tts.keyAdd}
+                <>
+                  {/* El alta, detrás de un botón: se hace una vez al montar la
+                      escena, y con el formulario siempre abierto ocupaba tres
+                      renglones de una tarjeta que se mira a diario. */}
+                  <button
+                    type="button"
+                    className="ghost clave-alta-boton"
+                    aria-expanded={altaClave}
+                    onClick={() => setAltaClave((abierta) => !abierta)}
+                  >
+                    {t.tts.keyAddOpen}
                   </button>
-                </div>
+                  {altaClave ? (
+                    <div className="alta-linea">
+                      <div className="campo">
+                        <label htmlFor="clave-nombre">{t.tts.keyName}</label>
+                        <input
+                          id="clave-nombre"
+                          type="text"
+                          value={claveNombre}
+                          placeholder={t.tts.keyNamePlaceholder}
+                          onChange={(event) => setClaveNombre(event.target.value)}
+                        />
+                      </div>
+                      <div className="campo">
+                        <label htmlFor="clave-valor">{t.tts.keyValue}</label>
+                        {/* De tipo `password` a proposito: la clave no se enseña ni
+                            mientras se pega. */}
+                        <input
+                          id="clave-valor"
+                          type="password"
+                          value={claveValor}
+                          placeholder={t.tts.keyValuePlaceholder}
+                          autoComplete="off"
+                          spellCheck={false}
+                          onChange={(event) => setClaveValor(event.target.value)}
+                        />
+                      </div>
+                      <button type="button" onClick={guardarClave}>
+                        {t.tts.keyAdd}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
               )}
             </Card>
           </div>
@@ -733,46 +725,20 @@ export function Tts({ initial }: Props) {
           </Card>
         </div>
 
-        {/* Los ajustes de Fish solo se enseñan cuando Fish es el motor: con la
-            voz de siempre no se usan para nada. */}
+        {/* El consumo solo se enseña cuando Fish es el motor: con la voz de
+            siempre no hay saldo que mirar.
+
+            Va **en la misma columna** que las claves —una celda de la rejilla con
+            dos tarjetas dentro— porque las dos son el lado derecho de la vista: las
+            claves arriba y el consumo debajo. Con dos celdas sueltas, la rejilla
+            colocaba el consumo debajo de la biblioteca. */}
         {status.voz.proveedor === "fish" ? (
           <>
-            <div className="stack vista-voces">
-              <Card title={t.tts.fish}>
-                <p className="hint">{t.tts.fishHint}</p>
-
-                {/* El alta, en una linea: nombre, codigo y guardar. Al guardar
-                    queda **en uso**, que es lo que se quiere al pegar una voz
-                    nueva. La lista de las guardadas vive en su propia tarjeta,
-                    porque tambien enseña las de Edge y esa tiene que verse con
-                    cualquiera de los dos motores puesto. */}
-                <div className="alta-linea">
-                  <div className="campo">
-                    <label htmlFor="voz-nombre">{t.tts.voiceName}</label>
-                    <input
-                      id="voz-nombre"
-                      value={vozNombre}
-                      placeholder={t.tts.voiceNamePlaceholder}
-                      spellCheck={false}
-                      maxLength={40}
-                      onChange={(event) => setVozNombre(event.target.value)}
-                    />
-                  </div>
-                  <div className="campo">
-                    <label htmlFor="voz-codigo">{t.tts.voiceCode}</label>
-                    <input
-                      id="voz-codigo"
-                      value={vozCodigo}
-                      placeholder={t.tts.voiceCodePlaceholder}
-                      spellCheck={false}
-                      onChange={(event) => setVozCodigo(event.target.value)}
-                    />
-                  </div>
-                  <button type="button" disabled={!vozCodigo.trim()} onClick={anadirVoz}>
-                    {t.tts.voiceAdd}
-                  </button>
-                </div>
-
+            <div className="stack vista-voces voz-columna-lateral">
+              <Card title={t.tts.usage}>
+                {/* El modelo con el que se sintetiza vive **aqui** y no en la
+                    biblioteca: es lo que decide el precio, y este es el panel que
+                    habla de precios. En la biblioteca se eligen voces. */}
                 <div className="campo">
                   <label htmlFor="voz-modelo">{t.tts.fishModel}</label>
                   <select
@@ -787,14 +753,15 @@ export function Tts({ initial }: Props) {
                     ))}
                   </select>
                 </div>
-              </Card>
-            </div>
-
-            <div className="stack vista-voces">
-              <Card title={t.tts.usage}>
                 {/* El saldo va arriba del todo del panel porque es la pregunta
                     que se hace de un vistazo —«¿me queda?»—, y el resto del panel
                     es el detalle de a dónde se ha ido. */}
+                {/* Dos mitades separadas a proposito: arriba lo que dice **Fish**
+                    (el saldo de la cuenta, que solo lo sabe el proveedor) y abajo lo
+                    que cuenta **la aplicacion** (los bytes de texto que ha mandado
+                    esta instalacion). Mezclarlas hacia pensar que el gasto local y el
+                    saldo real salian del mismo sitio. */}
+                <span className="tira-rotulo">{t.tts.consumoProveedor}</span>
                 <div className="saldo">
                   <Anillo
                     porcentaje={cuota?.porcentaje ?? null}
@@ -839,6 +806,7 @@ export function Tts({ initial }: Props) {
                     explicar: el anillo de arriba dice en su `title` de donde sale
                     cada numero, y la linea del modelo dice a que precio se cuenta.
                     Se queda en lo que no se ve en ningun otro sitio. */}
+                <span className="tira-rotulo">{t.tts.consumoAplicacion}</span>
                 <p className="hint">{t.tts.usageHint}</p>
                 <p className="hint">
                   {t.tts.usageModel(status.consumo.modelo, String(status.consumo.precio_por_millon))}
@@ -873,11 +841,10 @@ export function Tts({ initial }: Props) {
           </>
         ) : null}
 
-        {/* La lista de voces guardadas se ha movido arriba del todo de esta vista:
-            es a lo que se viene aquí, y en el marcado tiene que ir antes que las
-            claves y los ajustes de Fish —la rejilla coloca por orden, y con
-            `order` la vista quedaría al revés de como la lee un lector de
-            pantalla—. */}
+        {/* La biblioteca de voces se ha movido arriba del todo de esta vista: es a
+            lo que se viene aquí, y en el marcado tiene que ir antes que las claves
+            y el consumo —la rejilla coloca por orden de marcado, y con `order` la
+            vista quedaría al revés de como la lee un lector de pantalla—. */}
 
         <div className="stack vista-sonando">
           <Card title={t.tts.sources}>
@@ -1047,56 +1014,68 @@ export function Tts({ initial }: Props) {
           </Card>
         </div>
 
-        <div className="stack vista-sonando">
+        {/* La salida de audio va la ultima y con `ancho-completo`: la rejilla la
+            baja a su propia fila y le da las cinco columnas. Es una tira —donde
+            suena y con que fuerza—, no un panel de trabajo mas: dentro de la fila
+            obligaba a una segunda fila de paneles y dejaba 1.000 px de vacio al
+            lado. */}
+        <div className="stack vista-sonando ancho-completo">
           <Card title={t.tts.output}>
-            <p className="hint">
-              {status.audio_device
-                ? t.tts.deviceActive(status.audio_device)
-                : t.tts.deviceUnavailable}
-            </p>
-            {/* El volumen, con la salida: es la misma pregunta —por donde suena y
-                con que fuerza— y antes vivia en un panel que se llamaba Volumen y
-                no tenia el volumen solo. */}
-            <div className="control">
-              <label htmlFor="voz-volumen">{t.tts.volume}</label>
-              <input
-                id="voz-volumen"
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(status.settings.volume * 100)}
-                onChange={(event) => update({ volume: Number(event.target.value) / 100 })}
-              />
-              <span className="rank-value">{Math.round(status.settings.volume * 100)} %</span>
-            </div>
-            <div className="control">
-              <label>
-                {t.tts.device}
-                <select
-                  value={status.settings.audio_device ?? ""}
-                  onChange={(event) => {
-                    void api
-                      .ttsSelectDevice(event.target.value || null)
-                      .then(setStatus)
-                      .catch((cause: unknown) =>
-                        setError(`${t.tts.deviceSelectError} ${String(cause)}`),
-                      );
-                  }}
-                >
-                  <option value="">{t.tts.deviceDefault}</option>
-                  {status.settings.audio_device &&
-                  !devices.includes(status.settings.audio_device) ? (
-                    <option value={status.settings.audio_device}>
-                      {status.settings.audio_device} (no disponible)
-                    </option>
-                  ) : null}
-                  {devices.map((device) => (
-                    <option key={device} value={device}>
-                      {device}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            {/* La franja va **en una linea**, como la pide la orden: dispositivo
+                activo, volumen y selector, uno al lado del otro. Apilada medía 152 px
+                y la orden pide 90-120; en horizontal entra en una y el ancho que
+                sobra —tiene 1.240 px para tres controles— se lo queda el volumen, que
+                es el unico que se arrastra. */}
+            <div className="salida-audio">
+              <p className="hint">
+                {status.audio_device
+                  ? t.tts.deviceActive(status.audio_device)
+                  : t.tts.deviceUnavailable}
+              </p>
+              {/* El volumen, con la salida: es la misma pregunta —por donde suena y
+                  con que fuerza— y antes vivia en un panel que se llamaba Volumen y
+                  no tenia el volumen solo. */}
+              <div className="control">
+                <label htmlFor="voz-volumen">{t.tts.volume}</label>
+                <input
+                  id="voz-volumen"
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(status.settings.volume * 100)}
+                  onChange={(event) => update({ volume: Number(event.target.value) / 100 })}
+                />
+                <span className="rank-value">{Math.round(status.settings.volume * 100)} %</span>
+              </div>
+              <div className="control">
+                <label>
+                  {t.tts.device}
+                  <select
+                    value={status.settings.audio_device ?? ""}
+                    onChange={(event) => {
+                      void api
+                        .ttsSelectDevice(event.target.value || null)
+                        .then(setStatus)
+                        .catch((cause: unknown) =>
+                          setError(`${t.tts.deviceSelectError} ${String(cause)}`),
+                        );
+                    }}
+                  >
+                    <option value="">{t.tts.deviceDefault}</option>
+                    {status.settings.audio_device &&
+                    !devices.includes(status.settings.audio_device) ? (
+                      <option value={status.settings.audio_device}>
+                        {status.settings.audio_device} (no disponible)
+                      </option>
+                    ) : null}
+                    {devices.map((device) => (
+                      <option key={device} value={device}>
+                        {device}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
           </Card>
         </div>

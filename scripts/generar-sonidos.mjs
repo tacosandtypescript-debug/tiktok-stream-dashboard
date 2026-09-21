@@ -8,8 +8,8 @@
 // es aritmetica.
 //
 // Los WAV que salen de aqui **se versionan**; no se generan durante el build.
-// `include_bytes!` los necesita al compilar, y un `cargo build` a secas tiene que
-// funcionar sin pasos previos. Este script existe para poder retocarlos.
+// El pack se copia a AppData durante el primer arranque y este script existe para
+// poder retocar los sonidos de fabrica sin depender de una carpeta externa.
 //
 // Uso:  node scripts/generar-sonidos.mjs
 //       node scripts/generar-sonidos.mjs --listar
@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
-const DESTINO = join(AQUI, "..", "apps", "desktop", "src-tauri", "sonidos");
+const DESTINO = join(AQUI, "..", "apps", "desktop", "src-tauri", "alertas-pack", "audio");
 
 /** Frecuencia de muestreo. 44,1 kHz es lo que reproduce cualquier navegador. */
 const HZ = 44100;

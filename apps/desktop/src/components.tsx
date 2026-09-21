@@ -4,7 +4,7 @@
 //! sin blur, sin sombras costosas. Todo es CSS plano y barato de pintar.
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type {
   ChatEntry,
@@ -415,6 +415,7 @@ export function VistaPrevia({
   alto,
   etiqueta,
   nota,
+  escala,
 }: {
   /** Dirección del overlay, con su token. */
   url: string;
@@ -425,9 +426,19 @@ export function VistaPrevia({
   etiqueta: string;
   /** Lo que va a la derecha de la barra: el diseño, el simulador... */
   nota: string;
+  /**
+   * Cuánto ocupa lo que hay pintado dentro, si quien llama lo controla.
+   *
+   * Se manda al documento de dentro en vez de repintarlo: mover el mando del tamaño
+   * tiene que verse **al momento**, sin volver a disparar el aviso.
+   */
+  escala?: number;
 }) {
   const hueco = useRef<HTMLDivElement>(null);
-  const [escala, setEscala] = useState(1);
+  const marco = useRef<HTMLIFrameElement>(null);
+  const [escalaMarco, setEscalaMarco] = useState(1);
+  /** Cuántas veces ha terminado de cargar el marco. Ver el efecto de abajo. */
+  const [cargas, setCargas] = useState(0);
 
   useLayoutEffect(() => {
     const nodo = hueco.current;
@@ -438,7 +449,7 @@ export function VistaPrevia({
       const altoHueco =
         nodo.clientHeight - (barra?.getBoundingClientRect().height ?? 0) - 2;
       if (anchoHueco > 0 && altoHueco > 0) {
-        setEscala(Math.min(1, anchoHueco / ancho, altoHueco / alto));
+        setEscalaMarco(Math.min(1, anchoHueco / ancho, altoHueco / alto));
       }
     };
     medir();
@@ -446,6 +457,28 @@ export function VistaPrevia({
     observador.observe(nodo);
     return () => observador.disconnect();
   }, [ancho, alto]);
+
+  /**
+   * Manda el tamaño al documento que hay dentro del marco.
+   *
+   * El marco es de **otro origen** —lo sirve el servidor de overlays, en otro puerto—,
+   * así que el navegador no deja leerlo ni tocarlo desde aquí: la única puerta es
+   * `postMessage`. Y se manda también al terminar de cargar, porque un mensaje que
+   * llega antes de que el documento exista se pierde.
+   */
+  useEffect(() => {
+    if (escala === undefined) return;
+    const ventana = marco.current?.contentWindow;
+    if (!ventana) return;
+    let destino = "*";
+    try {
+      destino = new URL(url).origin;
+    } catch {
+      // Una dirección rara se queda en `*`, y no pasa nada: el mensaje solo lleva un
+      // número y al otro lado solo se escribe una variable de CSS.
+    }
+    ventana.postMessage({ dash: "escala", escala }, destino);
+  }, [escala, url, cargas]);
 
   return (
     <div className="previa-hueco" ref={hueco}>
@@ -462,16 +495,21 @@ export function VistaPrevia({
         </div>
         <div
           className="previa-caja"
-          style={{ width: Math.round(ancho * escala), height: Math.round(alto * escala) }}
+          style={{
+            width: Math.round(ancho * escalaMarco),
+            height: Math.round(alto * escalaMarco),
+          }}
         >
           {/* La `key` recarga el marco al cambiar la dirección: sin ella, React
               reutilizaría el mismo `iframe` y el documento viejo seguiría pintado. */}
           <iframe
             key={url}
+            ref={marco}
             className="previa"
             src={url}
             title={`${etiqueta} · ${nota}`}
-            style={{ width: ancho, height: alto, transform: `scale(${escala})` }}
+            onLoad={() => setCargas((antes) => antes + 1)}
+            style={{ width: ancho, height: alto, transform: `scale(${escalaMarco})` }}
           />
         </div>
       </div>
@@ -669,14 +707,24 @@ export function Card({
   actions,
   children,
   grow = false,
+  nota,
 }: {
   title?: string;
   actions?: ReactNode;
   children: ReactNode;
   grow?: boolean;
+  /**
+   * La explicación de la tarjeta, para la ayuda emergente.
+   *
+   * Existe para las descripciones que **no hacen falta siempre**: el editor de avisos
+   * lleva ocho filas de mandos, y una línea más de prosa le costaba 16 px de alto que
+   * salían de la biblioteca. En el `title` sigue estando para quien la busque, sin
+   * ocupar sitio.
+   */
+  nota?: string;
 }) {
   return (
-    <section className={grow ? "card grow" : "card"}>
+    <section className={grow ? "card grow" : "card"} title={nota}>
       {title || actions ? (
         <header className="card-head">
           {title ? <h2>{title}</h2> : <span />}
@@ -685,6 +733,123 @@ export function Card({
       ) : null}
       {children}
     </section>
+  );
+}
+
+/**
+ * Confirmación destructiva dentro de la aplicación.
+ *
+ * Se usa en vez de `window.confirm`: el diálogo conserva el foco, responde a
+ * Escape, deja visible Cancelar y no bloquea el hilo de React mientras una
+ * operación de red está en curso.
+ */
+export function DialogoConfirmacion({
+  abierto,
+  titulo,
+  mensaje,
+  confirmar,
+  cancelar,
+  ocupado = false,
+  onConfirmar,
+  onCancelar,
+}: {
+  abierto: boolean;
+  titulo: string;
+  mensaje: ReactNode;
+  confirmar: string;
+  cancelar: string;
+  ocupado?: boolean;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}) {
+  const tituloId = useId();
+  const mensajeId = useId();
+  const dialogoRef = useRef<HTMLElement | null>(null);
+  const cancelarRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+
+    const enfocar = () => {
+      const focusables = Array.from(
+        dialogoRef.current?.querySelectorAll<HTMLElement>("[data-dialog-focusable]") ?? [],
+      ).filter((elemento) => !elemento.hasAttribute("disabled"));
+      (focusables[0] ?? dialogoRef.current)?.focus();
+    };
+    const manejarTecla = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape" && !ocupado) {
+        evento.preventDefault();
+        onCancelar();
+        return;
+      }
+      if (evento.key !== "Tab") return;
+
+      const focusables = Array.from(
+        dialogoRef.current?.querySelectorAll<HTMLElement>("[data-dialog-focusable]") ?? [],
+      ).filter((elemento) => !elemento.hasAttribute("disabled"));
+      if (focusables.length === 0) {
+        evento.preventDefault();
+        dialogoRef.current?.focus();
+        return;
+      }
+      const primero = focusables[0];
+      const ultimo = focusables[focusables.length - 1];
+      if (evento.shiftKey && document.activeElement === primero) {
+        evento.preventDefault();
+        ultimo.focus();
+      } else if (!evento.shiftKey && document.activeElement === ultimo) {
+        evento.preventDefault();
+        primero.focus();
+      }
+    };
+
+    const id = window.setTimeout(enfocar, 0);
+    document.addEventListener("keydown", manejarTecla);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("keydown", manejarTecla);
+    };
+  }, [abierto, ocupado, onCancelar]);
+
+  if (!abierto) return null;
+
+  return (
+    <div className="dialog-fondo" role="presentation">
+      <section
+        ref={dialogoRef}
+        className="dialogo-confirmacion"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={tituloId}
+        aria-describedby={mensajeId}
+        aria-busy={ocupado}
+        tabIndex={-1}
+      >
+        <h2 id={tituloId}>{titulo}</h2>
+        <p id={mensajeId}>{mensaje}</p>
+        <div className="dialogo-acciones">
+          <button
+            ref={cancelarRef}
+            type="button"
+            className="ghost"
+            data-dialog-focusable
+            disabled={ocupado}
+            onClick={onCancelar}
+          >
+            {cancelar}
+          </button>
+          <button
+            type="button"
+            className="danger"
+            data-dialog-focusable
+            disabled={ocupado}
+            onClick={onConfirmar}
+          >
+            {ocupado ? `${confirmar}…` : confirmar}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -738,7 +903,12 @@ export function Copiar({ texto }: { texto: string | undefined }) {
 
   return (
     <span className="copiar">
-      <code className="path">{texto}</code>
+      {/* El `title` lleva la dirección entera: en una columna estrecha el código se
+          recorta por el final, y copiar a ciegas una dirección que no se puede leer
+          es pedir un acto de fe. Con el ratón encima se ve completa. */}
+      <code className="path" title={texto}>
+        {texto}
+      </code>
       <button
         type="button"
         className="ghost"

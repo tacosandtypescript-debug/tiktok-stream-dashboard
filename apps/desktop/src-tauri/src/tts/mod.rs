@@ -8,6 +8,7 @@ pub mod consumo;
 pub mod cuota;
 pub mod filters;
 pub mod fish;
+pub mod fish_modelos;
 pub mod manager;
 pub mod plantilla;
 pub mod player;

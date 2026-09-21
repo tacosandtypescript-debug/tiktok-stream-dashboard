@@ -189,9 +189,217 @@ pub struct AjusteAviso {
     pub sonido: String,
     pub duracion_ms: u32,
     pub volumen: f32,
+    /// Cuanto ocupa el aviso en pantalla. `1.0` es el tamaño de siempre.
+    ///
+    /// Es **por tipo** y no uno solo para todos porque los tres tramos de regalo
+    /// existen justo para eso: una rosa pasa discreta y una galaxia para el directo.
+    /// Con un unico tamaño global, el tramo enorme taparia la pantalla con la misma
+    /// caja que el pequeño.
+    ///
+    /// `#[serde(default)]` para que los ajustes guardados antes de que existiera
+    /// sigan cargando con el tamaño de siempre. Mismo criterio que el resto.
+    #[serde(default = "escala_de_fabrica")]
+    pub escala: f32,
     /// Minimo para que dispare: diamantes en regalos, likes en rafagas.
     #[serde(default)]
     pub minimo: i64,
+    /// Como entra el aviso en pantalla. Ver `ANIMACIONES`.
+    #[serde(default = "entrada_de_fabrica")]
+    pub animacion_entrada: String,
+    /// Como sale.
+    #[serde(default = "salida_de_fabrica")]
+    pub animacion_salida: String,
+    /// Cuanto tarda en entrar, en milisegundos.
+    #[serde(default = "entrada_ms_de_fabrica")]
+    pub entrada_ms: u32,
+    /// Cuanto tarda en salir, en milisegundos.
+    #[serde(default = "salida_ms_de_fabrica")]
+    pub salida_ms: u32,
+    /// El ritmo de las dos. `auto` deja que cada animacion traiga el suyo.
+    #[serde(default = "ritmo_de_fabrica")]
+    pub ritmo: String,
+    /// Que hace la alerta **mientras esta en pantalla**, ya entrada y antes de salir.
+    /// Ver `PERMANENCIAS`.
+    #[serde(default = "permanencia_de_fabrica")]
+    pub idle: String,
+    /// Cuanto se mueve o cuanto se deforma.
+    ///
+    /// Son **pixeles** en lo que se mueve —flotar, rebotar, agitar— y **tanto por
+    /// ciento** en lo que no se mide en pixeles: la franja del brillo, el empuje de la
+    /// gelatina y el realce del borde. Un campo por efecto y no uno por unidad: los
+    /// efectos no comparten unidades, pero si comparten el mando, y el rotulo de la
+    /// interfaz dice en cual esta.
+    #[serde(default = "permanencia_distancia_de_fabrica")]
+    pub idle_distancia: u32,
+    /// Lo que tarda un ciclo entero.
+    #[serde(default = "permanencia_ms_de_fabrica")]
+    pub idle_ms: u32,
+    /// Cuanto espera entre repeticiones. **Cero es «sin parar»**, que es lo que hacen
+    /// flotar y rebotar.
+    #[serde(default)]
+    pub idle_intervalo_ms: u32,
+    /// Cuanto brilla la franja del brillo, en tanto por ciento.
+    #[serde(default = "permanencia_brillo_de_fabrica")]
+    pub idle_brillo: u32,
+    /// El color del resplandor del borde.
+    #[serde(default = "permanencia_color_de_fabrica")]
+    pub idle_color: String,
+    /// Lo que se difumina el resplandor del borde, en pixeles.
+    #[serde(default = "permanencia_blur_de_fabrica")]
+    pub idle_blur: u32,
+    /// El modo del efecto, para los que tienen mas de uno. Ver `MODOS_PERMANENCIA`.
+    #[serde(default = "permanencia_modo_de_fabrica")]
+    pub idle_modo: String,
+}
+
+/// Lo que hace la alerta **mientras esta visible**, despues de entrar y antes de salir.
+///
+/// Es un catalogo mas, con la misma idea que `ANIMACIONES`: cada aviso guarda el nombre
+/// del efecto que quiere y sus parametros, y el motor del overlay lo aplica. Un tipo de
+/// alerta nuevo no necesita efectos propios y un efecto nuevo vale para los siete.
+///
+/// La diferencia con las de entrada y salida es que **estas se repiten**: son un bucle
+/// mientras el aviso esta en pantalla, y por eso tienen ciclo e intervalo, que las otras
+/// no tienen.
+pub const PERMANENCIAS: &[&str] = &[
+    "ninguna", "flotar", "rebotar", "agitar", "brillo", "gelatina", "borde",
+];
+
+/// Los modos de los efectos que tienen mas de uno.
+///
+/// `pulso` y `recorrido` son del borde: latir entero, o que la luz de la vuelta al
+/// contorno. `izquierda` y `derecha` son del brillo: por donde entra la franja.
+pub const MODOS_PERMANENCIA: &[&str] = &["pulso", "recorrido", "izquierda", "derecha"];
+
+/// Cuanto puede durar un ciclo de permanencia, y cuanto puede esperar entre ciclos.
+///
+/// El tope de abajo existe por lo mismo que en las animaciones: a 60 ms por ciclo aquello
+/// no es un efecto, es un parpadeo. Y el de arriba, para que un cero de mas no deje el
+/// aviso quieto creyendo el streamer que se ha roto.
+pub const PERMANENCIA_MINIMA_MS: u32 = 200;
+pub const PERMANENCIA_MAXIMA_MS: u32 = 20_000;
+
+/// De fabrica, la alerta se queda **quieta**: el movimiento continuo es algo que se pide,
+/// no algo que aparece sin pedirlo.
+fn permanencia_de_fabrica() -> String {
+    "ninguna".to_string()
+}
+
+fn permanencia_distancia_de_fabrica() -> u32 {
+    8
+}
+
+fn permanencia_ms_de_fabrica() -> u32 {
+    2_500
+}
+
+fn permanencia_brillo_de_fabrica() -> u32 {
+    40
+}
+
+/// El cian de la marca: el resplandor tine del color de la casa salvo que se elija otro.
+fn permanencia_color_de_fabrica() -> String {
+    "#25f4ee".to_string()
+}
+
+fn permanencia_blur_de_fabrica() -> u32 {
+    12
+}
+
+fn permanencia_modo_de_fabrica() -> String {
+    "pulso".to_string()
+}
+
+/// Las animaciones que puede usar un aviso.
+///
+/// Es un **catalogo**, no una animacion por tipo de alerta: cada aviso guarda el
+/// nombre de las dos que quiere y sus tiempos, y el motor del overlay las aplica. Un
+/// tipo de alerta nuevo no necesita animaciones propias, y una animacion nueva vale
+/// para los siete.
+///
+/// Los nombres dicen **de donde viene** el aviso al entrar. Como la salida es la misma
+/// animacion al reves, «arriba» de salida significa que se va hacia arriba; el rotulo
+/// de la interfaz lo dice con esas palabras, porque el mismo nombre leido en la salida
+/// se entenderia al reves.
+pub const ANIMACIONES: &[&str] = &[
+    "ninguna",
+    "fundido",
+    "arriba",
+    "abajo",
+    "izquierda",
+    "derecha",
+    "acercar",
+    "alejar",
+    "rebote",
+    "giro",
+    "desenfoque",
+];
+
+/// Los ritmos. El primero deja que lo ponga la animacion, que es lo que hace que
+/// «rebote» rebote sin tener que elegirlo aparte.
+pub const RITMOS: &[&str] = &["auto", "suave", "rebote", "lineal", "rapido", "lento"];
+
+/// Cuanto puede durar una animacion.
+///
+/// El tope de abajo no es decorativo: a 40 ms la animacion no se ve y el streamer
+/// creeria que no funciona. El de arriba evita que un cero de mas convierta la entrada
+/// en una espera eterna.
+pub const ANIMACION_MINIMA_MS: u32 = 100;
+pub const ANIMACION_MAXIMA_MS: u32 = 5_000;
+
+/// La animacion de entrada de fabrica.
+///
+/// Es la que traia el overlay escrita a mano —un `scale(0.86)` con rebote— para que
+/// los avisos que ya estaban configurados sigan entrando exactamente igual.
+fn entrada_de_fabrica() -> String {
+    "rebote".to_string()
+}
+
+fn salida_de_fabrica() -> String {
+    "fundido".to_string()
+}
+
+fn entrada_ms_de_fabrica() -> u32 {
+    380
+}
+
+fn salida_ms_de_fabrica() -> u32 {
+    220
+}
+
+fn ritmo_de_fabrica() -> String {
+    "auto".to_string()
+}
+
+/// Deja un nombre del catalogo, o el de fabrica si no esta.
+///
+/// Se compara en minusculas y sin espacios de sobra: un `"Fundido"` escrito a mano en
+/// el JSON es el mismo nombre que `"fundido"`, y rechazarlo por la caja seria
+/// fastidiar sin motivo.
+fn del_catalogo(nombre: &str, catalogo: &[&str], defecto: &str) -> String {
+    let limpio = nombre.trim().to_ascii_lowercase();
+    if catalogo.contains(&limpio.as_str()) {
+        limpio
+    } else {
+        defecto.to_string()
+    }
+}
+
+/// El color, si tiene forma de color.
+///
+/// Solo se admite `#rrggbb`: es lo que manda un selector de color y lo que se puede
+/// meter en una variable de CSS sin miedo. Un `red; } body { display: none` colado en
+/// ese campo no se pintaria mal, se **saldria de su sitio** y romperia la hoja entera.
+fn color_valido(color: &str) -> Option<String> {
+    let limpio = color.trim().to_ascii_lowercase();
+    let cuerpo = limpio.strip_prefix('#')?;
+    let es_hex = cuerpo.len() == 6 && cuerpo.chars().all(|c| c.is_ascii_hexdigit());
+    es_hex.then_some(limpio)
+}
+
+/// El tamaño de un aviso cuando nadie lo ha tocado: el de siempre.
+fn escala_de_fabrica() -> f32 {
+    1.0
 }
 
 impl AjusteAviso {
@@ -304,59 +512,91 @@ impl AjustesAlertas {
     ///
     /// Los siete traen sonido y texto, para que un directo recien instalado suene
     /// sin tocar nada. Los sonidos son **del proyecto**: los genera
-    /// `scripts/generar-sonidos.mjs` y viajan dentro del ejecutable.
+    /// `scripts/generar-sonidos.mjs` y viajan en el recurso versionado de Alertas.
     pub fn de_fabrica() -> Self {
         Self {
             gift: AjusteAviso {
                 activo: true,
                 texto: "{usuario} donó {regalo} ×{cantidad}".to_string(),
-                medio: String::new(),
                 sonido: pack::CAMPANA_SUAVE.to_string(),
                 duracion_ms: 5000,
-                volumen: 0.8,
                 // Con una rosa no salta: en un directo movido, cada rosa es una
                 // alerta y el aviso del regalo grande se pierde entre ellas.
                 minimo: 10,
+                ..AjusteAviso::default()
             },
             gift_grande: tramo_grande_de_fabrica(),
             gift_enorme: tramo_enorme_de_fabrica(),
             follow: AjusteAviso {
                 activo: true,
                 texto: "{usuario} te sigue".to_string(),
-                medio: String::new(),
                 sonido: pack::SUBIDA.to_string(),
                 duracion_ms: 4000,
-                volumen: 0.8,
-                minimo: 0,
+                ..AjusteAviso::default()
             },
             subscribe: AjusteAviso {
                 activo: true,
                 texto: "{usuario} se suscribió ({meses_texto})".to_string(),
-                medio: String::new(),
                 sonido: pack::FANFARRIA.to_string(),
                 duracion_ms: 5000,
-                volumen: 0.8,
-                minimo: 0,
+                ..AjusteAviso::default()
             },
             share: AjusteAviso {
                 activo: false,
                 texto: "{usuario} compartió el directo".to_string(),
-                medio: String::new(),
                 sonido: pack::TOQUE.to_string(),
                 duracion_ms: 4000,
                 volumen: 0.75,
-                minimo: 0,
+                ..AjusteAviso::default()
             },
             like: AjusteAviso {
                 activo: false,
                 texto: "{usuario} +{likes} likes".to_string(),
-                medio: String::new(),
                 sonido: pack::PIZCA.to_string(),
                 duracion_ms: 3500,
                 volumen: 0.6,
                 minimo: 50,
+                ..AjusteAviso::default()
             },
             salida: SalidaAlertas::default(),
+        }
+    }
+}
+
+/// Lo que trae un aviso cuando nadie ha configurado nada.
+///
+/// Existe para que los siete avisos de fabrica digan **solo lo que los distingue** —el
+/// texto, el sonido, el minimo— y no repitan siete veces el volumen, el tamaño y la
+/// animacion, que son los mismos. Un campo nuevo se añade aqui una vez y los siete lo
+/// heredan.
+///
+/// Ojo con `activo`: aqui es `false`, y los avisos que nacen encendidos lo dicen. Es
+/// lo contrario de `AjustesAlertas::de_fabrica`, que es lo que se le da a un streamer
+/// nuevo; esto es la base sobre la que se construye.
+impl Default for AjusteAviso {
+    fn default() -> Self {
+        Self {
+            activo: false,
+            texto: String::new(),
+            medio: String::new(),
+            sonido: String::new(),
+            duracion_ms: 4_000,
+            volumen: 0.8,
+            escala: escala_de_fabrica(),
+            minimo: 0,
+            animacion_entrada: entrada_de_fabrica(),
+            animacion_salida: salida_de_fabrica(),
+            entrada_ms: entrada_ms_de_fabrica(),
+            salida_ms: salida_ms_de_fabrica(),
+            ritmo: ritmo_de_fabrica(),
+            idle: permanencia_de_fabrica(),
+            idle_distancia: permanencia_distancia_de_fabrica(),
+            idle_ms: permanencia_ms_de_fabrica(),
+            idle_intervalo_ms: 0,
+            idle_brillo: permanencia_brillo_de_fabrica(),
+            idle_color: permanencia_color_de_fabrica(),
+            idle_blur: permanencia_blur_de_fabrica(),
+            idle_modo: permanencia_modo_de_fabrica(),
         }
     }
 }
@@ -371,13 +611,17 @@ fn tramo_grande_de_fabrica() -> AjusteAviso {
     AjusteAviso {
         activo: true,
         texto: "{usuario} suelta {regalo} ×{cantidad}".to_string(),
-        medio: String::new(),
         sonido: pack::CAMPANA_BRILLANTE.to_string(),
         duracion_ms: 6000,
         volumen: 0.85,
+        // Un escalon mas que el tramo pequeño: la diferencia entre tramos se tiene
+        // que **ver**, no solo oirse. Es el unico sitio donde el tamaño trae un
+        // valor puesto de fabrica, y es a proposito.
+        escala: 1.25,
         // Cien diamantes es el terreno de las gafas de sol y los corazones con las
         // manos: regalos que ya se notan, pero que no son el momento del directo.
         minimo: 100,
+        ..AjusteAviso::default()
     }
 }
 
@@ -386,12 +630,15 @@ fn tramo_enorme_de_fabrica() -> AjusteAviso {
     AjusteAviso {
         activo: true,
         texto: "¡{usuario} va en serio! {regalo} ×{cantidad}".to_string(),
-        medio: String::new(),
         sonido: pack::REDOBLE.to_string(),
         duracion_ms: 8000,
         volumen: 0.9,
+        // El momento del directo: si esto entra, para todo lo demas. Que ocupe mas
+        // que los otros dos es la mitad del aviso.
+        escala: 1.5,
         // Mil diamantes es una galaxia. Si esto entra, el directo para.
         minimo: 1000,
+        ..AjusteAviso::default()
     }
 }
 
@@ -411,6 +658,19 @@ pub const DURACION_MINIMA_MS: u32 = 500;
 pub const DURACION_MAXIMA_MS: u32 = 60_000;
 pub const TEXTO_MAXIMO: usize = 200;
 
+/// Cuanto puede crecer o encogerse un aviso.
+///
+/// El tope de arriba no es decorativo: el overlay coloca el aviso en el centro de la
+/// fuente de OBS, asi que por encima de cierto tamaño el medio se sale del cuadro y
+/// el streamer veria un recorte que no pidio. Con 2× y el tope de la hoja de estilos
+/// (62 vh de alto, 70 vw de ancho) el aviso sigue cabiendo entero en cualquier
+/// lienzo de 16:9.
+///
+/// El de abajo existe por lo contrario: un aviso al 5 % es un aviso que no se ve, y
+/// eso no es un tamaño pequeño, es un fallo silencioso.
+pub const ESCALA_MINIMA: f32 = 0.25;
+pub const ESCALA_MAXIMA: f32 = 2.0;
+
 impl AjustesAlertas {
     /// Deja los ajustes en valores que el motor puede cumplir.
     ///
@@ -428,7 +688,55 @@ impl AjustesAlertas {
             } else {
                 0.8
             };
+            // Mismo criterio que el volumen: un `NaN` o un infinito que llegue de un
+            // fichero tocado a mano no puede acabar en un `calc()` del CSS, donde
+            // romperia el tamaño entero del aviso en vez de solo este campo.
+            ajuste.escala = if ajuste.escala.is_finite() {
+                ajuste.escala.clamp(ESCALA_MINIMA, ESCALA_MAXIMA)
+            } else {
+                escala_de_fabrica()
+            };
             ajuste.minimo = ajuste.minimo.max(0);
+            // Las animaciones son nombres de un catalogo cerrado. Uno que no exista
+            // —un fichero tocado a mano, una version mas nueva— vuelve al de fabrica
+            // en vez de dejar el aviso sin entrada y sin salida, que es un aviso que
+            // aparece de golpe y no se sabe por que.
+            ajuste.animacion_entrada = del_catalogo(
+                &ajuste.animacion_entrada,
+                ANIMACIONES,
+                &entrada_de_fabrica(),
+            );
+            ajuste.animacion_salida =
+                del_catalogo(&ajuste.animacion_salida, ANIMACIONES, &salida_de_fabrica());
+            ajuste.ritmo = del_catalogo(&ajuste.ritmo, RITMOS, &ritmo_de_fabrica());
+            ajuste.entrada_ms = ajuste
+                .entrada_ms
+                .clamp(ANIMACION_MINIMA_MS, ANIMACION_MAXIMA_MS);
+            ajuste.salida_ms = ajuste
+                .salida_ms
+                .clamp(ANIMACION_MINIMA_MS, ANIMACION_MAXIMA_MS);
+
+            // La permanencia. El intervalo **si** puede ser cero, y significa «sin
+            // parar»; los demas llevan su tope para que un cero de mas no deje el aviso
+            // quieto sin que nadie sepa por que.
+            ajuste.idle = del_catalogo(&ajuste.idle, PERMANENCIAS, &permanencia_de_fabrica());
+            ajuste.idle_modo = del_catalogo(
+                &ajuste.idle_modo,
+                MODOS_PERMANENCIA,
+                &permanencia_modo_de_fabrica(),
+            );
+            ajuste.idle_ms = ajuste
+                .idle_ms
+                .clamp(PERMANENCIA_MINIMA_MS, PERMANENCIA_MAXIMA_MS);
+            ajuste.idle_intervalo_ms = ajuste.idle_intervalo_ms.min(PERMANENCIA_MAXIMA_MS);
+            ajuste.idle_distancia = ajuste.idle_distancia.min(400);
+            ajuste.idle_brillo = ajuste.idle_brillo.min(100);
+            ajuste.idle_blur = ajuste.idle_blur.min(120);
+            // Un color que no sea un color acabaria dentro de una variable de CSS y no
+            // se pintaria nada. Se comprueba la forma —`#rrggbb`— y no el nombre: una
+            // lista de nombres seria una lista que se queda corta.
+            ajuste.idle_color =
+                color_valido(&ajuste.idle_color).unwrap_or_else(permanencia_color_de_fabrica);
             if !tipo.admite_minimo() {
                 // Un minimo en un follow no filtraria nada y solo confundiria.
                 ajuste.minimo = 0;
@@ -554,6 +862,57 @@ pub struct Aviso {
     pub sonido: String,
     pub duracion_ms: u32,
     pub volumen: f32,
+    /// Cuanto ocupa el aviso en pantalla. `1.0` es el tamaño de siempre.
+    ///
+    /// Viaja en el aviso y no se lee de los ajustes al pintarlo: entre que el motor
+    /// encola y el overlay lo saca, el streamer puede haber cambiado el tamaño, y el
+    /// aviso tiene que salir con el que tenia cuando paso.
+    #[serde(default = "escala_de_fabrica")]
+    pub escala: f32,
+    /// Si es un aviso de mentira, del boton de probar.
+    ///
+    /// La cola lo necesita para no amontonar pruebas: la que vale es la ultima que
+    /// se pulso. El overlay no lo usa, pero viaja con el aviso porque es un dato del
+    /// aviso y no del sitio donde espera.
+    #[serde(default)]
+    pub prueba: bool,
+    /// Como entra y como sale, con sus tiempos y su ritmo.
+    ///
+    /// Viaja **en el aviso** y no se lee de los ajustes al pintarlo, por el mismo
+    /// motivo que el tamaño: entre que el motor lo encola y el overlay lo saca, el
+    /// streamer puede haber cambiado la animacion, y el aviso tiene que salir con la
+    /// que tenia cuando paso.
+    #[serde(default = "entrada_de_fabrica")]
+    pub animacion_entrada: String,
+    #[serde(default = "salida_de_fabrica")]
+    pub animacion_salida: String,
+    #[serde(default = "entrada_ms_de_fabrica")]
+    pub entrada_ms: u32,
+    #[serde(default = "salida_ms_de_fabrica")]
+    pub salida_ms: u32,
+    #[serde(default = "ritmo_de_fabrica")]
+    pub ritmo: String,
+    /// La animacion de permanencia, la que se repite mientras el aviso esta en pantalla.
+    ///
+    /// Viaja con el aviso por lo mismo que las otras: entre que el motor lo encola y el
+    /// overlay lo saca, el streamer puede haber cambiado los ajustes, y el aviso tiene
+    /// que salir con lo que tenia puesto cuando paso.
+    #[serde(default = "permanencia_de_fabrica")]
+    pub idle: String,
+    #[serde(default = "permanencia_distancia_de_fabrica")]
+    pub idle_distancia: u32,
+    #[serde(default = "permanencia_ms_de_fabrica")]
+    pub idle_ms: u32,
+    #[serde(default)]
+    pub idle_intervalo_ms: u32,
+    #[serde(default = "permanencia_brillo_de_fabrica")]
+    pub idle_brillo: u32,
+    #[serde(default = "permanencia_color_de_fabrica")]
+    pub idle_color: String,
+    #[serde(default = "permanencia_blur_de_fabrica")]
+    pub idle_blur: u32,
+    #[serde(default = "permanencia_modo_de_fabrica")]
+    pub idle_modo: String,
 }
 
 impl Aviso {
@@ -567,6 +926,21 @@ impl Aviso {
             sonido: ajuste.sonido.clone(),
             duracion_ms: ajuste.duracion_ms,
             volumen: ajuste.volumen,
+            escala: ajuste.escala,
+            prueba: false,
+            animacion_entrada: ajuste.animacion_entrada.clone(),
+            animacion_salida: ajuste.animacion_salida.clone(),
+            entrada_ms: ajuste.entrada_ms,
+            salida_ms: ajuste.salida_ms,
+            ritmo: ajuste.ritmo.clone(),
+            idle: ajuste.idle.clone(),
+            idle_distancia: ajuste.idle_distancia,
+            idle_ms: ajuste.idle_ms,
+            idle_intervalo_ms: ajuste.idle_intervalo_ms,
+            idle_brillo: ajuste.idle_brillo,
+            idle_color: ajuste.idle_color.clone(),
+            idle_blur: ajuste.idle_blur,
+            idle_modo: ajuste.idle_modo.clone(),
         }
     }
 
@@ -598,16 +972,22 @@ impl Aviso {
                 ..Variables::default()
             },
         };
-        Self::nuevo(seq, tipo, ajuste, variables)
+        Self::nuevo(seq, tipo, ajuste, variables).como_prueba()
+    }
+
+    /// El mismo aviso, marcado como prueba.
+    fn como_prueba(mut self) -> Self {
+        self.prueba = true;
+        self
     }
 }
 
 /// Los nombres del pack de sonidos que trae la aplicacion.
 ///
 /// Estan aqui, en un solo sitio, porque los usan **dos**: los ajustes de fabrica
-/// —que apuntan a ellos— y la siembra del almacen —que los escribe—. Con el nombre
-/// escrito en los dos lados, un dia se cambiaria uno y el aviso quedaria mudo sin
-/// que nada fallara.
+/// —que apuntan a ellos— y el seeder del pack —que verifica esos nombres antes de
+/// copiarlos—. Con el nombre escrito en los dos lados, un dia se cambiaria uno y el
+/// aviso quedaria mudo sin que nada fallara.
 pub mod pack {
     pub const CAMPANA_SUAVE: &str = "campana-suave.wav";
     pub const CAMPANA_BRILLANTE: &str = "campana-brillante.wav";
@@ -628,31 +1008,16 @@ pub struct Almacen {
     dir: PathBuf,
 }
 
-/// Los sonidos que van **dentro del ejecutable**.
+/// Resultado de sembrar el pack de fábrica en el almacén de runtime.
 ///
-/// Son propios: los sintetiza `scripts/generar-sonidos.mjs` y se versionan en
-/// `src-tauri/sonidos/`. Van embebidos y no repartidos al lado porque la release
-/// son dos ficheros y no tiene por que pasar a ser nueve: una carpeta de assets
-/// que se queda a medias al copiar es justo el fallo que ya costo una tarde con el
-/// motor de voz.
-const PACK: &[(&str, &[u8])] = &[
-    (
-        pack::CAMPANA_SUAVE,
-        include_bytes!("../../sonidos/campana-suave.wav"),
-    ),
-    (
-        pack::CAMPANA_BRILLANTE,
-        include_bytes!("../../sonidos/campana-brillante.wav"),
-    ),
-    (pack::REDOBLE, include_bytes!("../../sonidos/redoble.wav")),
-    (pack::SUBIDA, include_bytes!("../../sonidos/subida.wav")),
-    (
-        pack::FANFARRIA,
-        include_bytes!("../../sonidos/fanfarria.wav"),
-    ),
-    (pack::TOQUE, include_bytes!("../../sonidos/toque.wav")),
-    (pack::PIZCA, include_bytes!("../../sonidos/pizca.wav")),
-];
+/// `rejected` no aborta el arranque: permite enseñar en el log un pack incompleto
+/// sin perder los ficheros válidos que sí se pudieron copiar.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SeedReport {
+    pub copied: usize,
+    pub skipped_existing: usize,
+    pub rejected: Vec<String>,
+}
 
 impl Almacen {
     /// El almacen de verdad: junto a la base y los logs.
@@ -669,35 +1034,137 @@ impl Almacen {
         &self.dir
     }
 
-    /// Escribe en el almacen los sonidos del pack que **falten**.
+    /// Compatibilidad para los callers de desarrollo: siembra el pack del checkout.
     ///
-    /// Devuelve cuantos ha escrito. No pisa nada: si ya hay un fichero con ese
-    /// nombre se respeta, porque puede ser uno que el streamer haya puesto en su
-    /// sitio a proposito. Es idempotente —la segunda pasada escribe cero— y por eso
-    /// se puede llamar en cada arranque sin miedo.
-    ///
-    /// Se llama al abrir la aplicacion y **no** en el camino de una alerta: escribir
-    /// siete ficheros no puede estar entre un regalo y su aviso.
+    /// La aplicación empaquetada usa `sembrar_pack_desde` con el directorio de
+    /// recursos de Tauri. Este atajo conserva una entrada sencilla para tests y
+    /// herramientas locales, pero siempre escribe solamente en `self.dir`.
     pub fn sembrar_pack(&self) -> usize {
+        let origen = Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack");
+        self.sembrar_pack_desde(&origen).copied
+    }
+
+    /// Copia al almacén los medios del pack que **falten**.
+    ///
+    /// El pack tiene dos carpetas (`imagenes` y `audio`), pero el almacén de
+    /// runtime sigue siendo plano para conservar los nombres que ya guardan
+    /// SQLite y los ajustes de Alertas. No se sobreescribe nada: un fichero local
+    /// existente puede ser una personalización del streamer y tiene prioridad.
+    /// La operación es idempotente y tolera entradas inválidas sin detener las
+    /// demás copias.
+    pub fn sembrar_pack_desde(&self, origen: &Path) -> SeedReport {
+        let mut reporte = SeedReport::default();
         if std::fs::create_dir_all(&self.dir).is_err() {
-            return 0;
+            reporte.rejected.push(format!(
+                "{}: no se pudo crear el almacén de Alertas",
+                self.dir.display()
+            ));
+            return reporte;
         }
-        let mut escritos = 0;
-        for (nombre, bytes) in PACK {
-            let destino = self.dir.join(nombre);
-            if destino.exists() {
-                continue;
-            }
-            match std::fs::write(&destino, bytes) {
-                Ok(()) => escritos += 1,
-                // Un fichero que no se puede escribir no puede tumbar el arranque:
-                // los avisos funcionan igual, sin ese sonido.
+
+        if !origen.is_dir() {
+            reporte
+                .rejected
+                .push(format!("{}: el pack no existe", origen.display()));
+            return reporte;
+        }
+
+        for subdirectorio in ["imagenes", "audio"] {
+            let directorio = origen.join(subdirectorio);
+            let entradas = match std::fs::read_dir(&directorio) {
+                Ok(entradas) => entradas,
                 Err(error) => {
-                    tracing::warn!(fichero = nombre, %error, "no se pudo sembrar un sonido del pack")
+                    reporte.rejected.push(format!(
+                        "{}: no se pudo leer el directorio del pack: {error}",
+                        directorio.display()
+                    ));
+                    continue;
+                }
+            };
+
+            let mut caminos: Vec<PathBuf> = entradas
+                .filter_map(|entrada| match entrada {
+                    Ok(entrada) => Some(entrada.path()),
+                    Err(error) => {
+                        reporte.rejected.push(format!(
+                            "{}: no se pudo leer una entrada: {error}",
+                            directorio.display()
+                        ));
+                        None
+                    }
+                })
+                .collect();
+            caminos.sort();
+
+            for origen_fichero in caminos {
+                if !origen_fichero.is_file() {
+                    continue;
+                }
+
+                let nombre = match origen_fichero.file_name().and_then(|n| n.to_str()) {
+                    Some(nombre) => nombre,
+                    None => {
+                        reporte.rejected.push(format!(
+                            "{}: el nombre no es texto válido",
+                            origen_fichero.display()
+                        ));
+                        continue;
+                    }
+                };
+
+                let bytes = match std::fs::metadata(&origen_fichero) {
+                    Ok(metadata) => metadata.len(),
+                    Err(error) => {
+                        reporte.rejected.push(format!(
+                            "{}: no se pudo leer el tamaño: {error}",
+                            origen_fichero.display()
+                        ));
+                        continue;
+                    }
+                };
+                if bytes == 0 {
+                    reporte.rejected.push(format!(
+                        "{}: el fichero está vacío",
+                        origen_fichero.display()
+                    ));
+                    continue;
+                }
+                if bytes > TAMANO_MAXIMO {
+                    reporte.rejected.push(format!(
+                        "{}: el fichero pasa del tope de {} MB",
+                        origen_fichero.display(),
+                        TAMANO_MAXIMO / (1024 * 1024)
+                    ));
+                    continue;
+                }
+
+                let nombre_limpio = match validar_nombre_de_pack(nombre) {
+                    Ok(nombre) => nombre,
+                    Err(error) => {
+                        reporte
+                            .rejected
+                            .push(format!("{}: {error}", origen_fichero.display()));
+                        continue;
+                    }
+                };
+
+                let destino = self.dir.join(nombre_limpio);
+                if destino.exists() {
+                    reporte.skipped_existing += 1;
+                    continue;
+                }
+
+                match std::fs::copy(&origen_fichero, &destino) {
+                    Ok(_) => reporte.copied += 1,
+                    Err(error) => reporte.rejected.push(format!(
+                        "{}: no se pudo copiar al almacén: {error}",
+                        origen_fichero.display()
+                    )),
                 }
             }
         }
-        escritos
+
+        reporte
     }
 
     /// El tipo MIME de un fichero del almacen, por su extension.
@@ -864,6 +1331,25 @@ fn extension_de(nombre: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Valida un nombre que ya pertenece al pack versionado.
+///
+/// La importación normal puede sanear y renombrar un fichero para hacerlo
+/// seguro. En el pack eso ocultaría un error de catálogo y rompería una posible
+/// referencia persistida, así que se exige que el nombre ya sea exactamente el
+/// que producirían las mismas reglas.
+fn validar_nombre_de_pack(nombre: &str) -> Result<String> {
+    let extension = extension_de(nombre);
+    if !ACEPTADOS.iter().any(|(ext, _)| *ext == extension) {
+        anyhow::bail!("formato no admitido: .{extension}");
+    }
+
+    let limpio = limpiar_nombre(nombre);
+    if limpio != nombre {
+        anyhow::bail!("nombre no válido; se convertiría en «{limpio}»");
+    }
+    Ok(limpio)
+}
+
 /// Deja el nombre en algo que no puede salir de la carpeta.
 fn limpiar_nombre(nombre: &str) -> String {
     let extension = extension_de(nombre);
@@ -942,6 +1428,36 @@ impl ColaAlertas {
             self.entregados.fetch_add(1, Ordering::Relaxed);
             return;
         }
+        self.guardar(aviso);
+    }
+
+    /// Encola una **prueba**, que ademas se queda esperando a las fuentes que no estan.
+    ///
+    /// `encolar` entrega en el acto en cuanto hay alguien escuchando, y la previa del
+    /// panel **siempre** esta escuchando —es el overlay de verdad, metido en un
+    /// marco—. Asi que una prueba pulsada con OBS cerrado se la quedaba la previa y
+    /// **no llegaba nunca a OBS**, que es justo donde se quiere ver.
+    ///
+    /// Probar es el momento en el que hace falta la garantia: se prueba para saber
+    /// como queda en antena. Por eso la prueba se guarda tambien para la fuente que
+    /// vuelva despues. Y esto cubre un caso real que no es un fallo: OBS apaga el
+    /// Browser Source cuando su escena no se ve, asi que al cambiar a la escena de las
+    /// alertas la prueba aparece sola.
+    ///
+    /// Se guarda **una sola**: la que vale es la ultima que se pulso. Sin esto, cinco
+    /// pruebas con OBS cerrado le soltarian cinco avisos seguidos al reconectar, y lo
+    /// que el streamer quiere ver es como queda el ultimo ajuste.
+    pub fn encolar_prueba(&self, aviso: Aviso) {
+        if let Ok(mut pendientes) = self.pendientes.lock() {
+            pendientes.retain(|esperando| !esperando.prueba);
+        }
+        self.guardar(aviso.clone());
+        // Y sale ya para quien este mirando, que es lo que hace util el boton.
+        let _ = self.emisor.send(aviso);
+    }
+
+    /// Aparta un aviso para la proxima fuente que se conecte, con su tope.
+    fn guardar(&self, aviso: Aviso) {
         let Ok(mut pendientes) = self.pendientes.lock() else {
             return;
         };
@@ -1213,7 +1729,15 @@ mod tests {
     #[test]
     fn los_avisos_de_fabrica_suenan_y_su_sonido_existe() {
         let ajustes = AjustesAlertas::de_fabrica();
-        let nombres: Vec<&str> = PACK.iter().map(|(nombre, _)| *nombre).collect();
+        let nombres = [
+            pack::CAMPANA_SUAVE,
+            pack::CAMPANA_BRILLANTE,
+            pack::REDOBLE,
+            pack::SUBIDA,
+            pack::FANFARRIA,
+            pack::TOQUE,
+            pack::PIZCA,
+        ];
 
         for tipo in TipoAviso::TODOS {
             let ajuste = ajustes.de(tipo);
@@ -1261,9 +1785,24 @@ mod tests {
     /// onda: que haya muestras distintas y que el pico sea de verdad.
     #[test]
     fn el_pack_son_wav_con_contenido() {
-        assert_eq!(PACK.len(), 7, "el pack son siete sonidos");
+        let nombres = [
+            pack::CAMPANA_SUAVE,
+            pack::CAMPANA_BRILLANTE,
+            pack::REDOBLE,
+            pack::SUBIDA,
+            pack::FANFARRIA,
+            pack::TOQUE,
+            pack::PIZCA,
+        ];
+        assert_eq!(nombres.len(), 7, "el pack son siete sonidos");
 
-        for (nombre, bytes) in PACK {
+        for nombre in nombres {
+            let ruta = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("alertas-pack")
+                .join("audio")
+                .join(nombre);
+            let bytes = std::fs::read(&ruta)
+                .unwrap_or_else(|error| panic!("no se pudo leer {}: {error}", ruta.display()));
             assert!(bytes.len() > 44, "{nombre} no tiene ni cabecera");
             assert_eq!(&bytes[0..4], b"RIFF", "{nombre} no es un RIFF");
             assert_eq!(&bytes[8..12], b"WAVE", "{nombre} no es un WAVE");
@@ -1317,18 +1856,82 @@ mod tests {
         let (almacen, dir) = almacen_de_prueba("pack");
 
         assert_eq!(almacen.listar().len(), 0, "la carpeta nace vacia");
-        assert_eq!(almacen.sembrar_pack(), PACK.len(), "la primera vez, todos");
-        assert_eq!(almacen.listar().len(), PACK.len());
+        let primera =
+            almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
+        assert_eq!(primera.copied, 219, "la primera vez entra todo el pack");
+        assert_eq!(primera.skipped_existing, 0);
+        assert!(
+            primera.rejected.is_empty(),
+            "pack rechazado: {:?}",
+            primera.rejected
+        );
+        assert_eq!(almacen.listar().len(), 219);
+
+        let ajustes = AjustesAlertas::de_fabrica();
+        for tipo in TipoAviso::TODOS {
+            let sonido = &ajustes.de(tipo).sonido;
+            assert!(
+                almacen.ruta_de(sonido).is_some(),
+                "la referencia persistida de {} no resuelve {}",
+                tipo.id(),
+                sonido
+            );
+        }
 
         // La segunda pasada no escribe nada: es lo que lo hace seguro en cada
         // arranque.
-        assert_eq!(almacen.sembrar_pack(), 0, "la segunda vez, ninguno");
+        let segunda =
+            almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
+        assert_eq!(segunda.copied, 0, "la segunda vez, ninguno");
+        assert_eq!(segunda.skipped_existing, 219);
 
         // Y uno propio con el mismo nombre se respeta.
         let mio = dir.join(pack::PIZCA);
         std::fs::write(&mio, b"lo mio").unwrap();
-        assert_eq!(almacen.sembrar_pack(), 0);
+        let tercera =
+            almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
+        assert_eq!(tercera.copied, 0);
+        assert_eq!(tercera.skipped_existing, 219);
         assert_eq!(std::fs::read(&mio).unwrap(), b"lo mio", "no se pisa");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El seeder conserva el camino no destructivo tambien cuando el pack tiene
+    /// entradas invalidas: copia lo valido, informa lo demas y vuelve a ser
+    /// idempotente en la siguiente pasada.
+    #[test]
+    fn el_seed_rechaza_invalidos_y_no_sobrescribe() {
+        let (almacen, dir) = almacen_de_prueba("seed-invalido");
+        let origen = dir.join("pack");
+        std::fs::create_dir_all(origen.join("imagenes")).unwrap();
+        std::fs::create_dir_all(origen.join("audio")).unwrap();
+        std::fs::write(origen.join("imagenes").join("bueno.webp"), b"webp").unwrap();
+        std::fs::write(origen.join("audio").join("nota.txt"), b"no").unwrap();
+        std::fs::write(origen.join("audio").join("Nombre Malo.mp3"), b"no").unwrap();
+        std::fs::write(origen.join("audio").join("vacio.wav"), []).unwrap();
+
+        let primera = almacen.sembrar_pack_desde(&origen);
+        assert_eq!(primera.copied, 1);
+        assert_eq!(primera.skipped_existing, 0);
+        assert_eq!(primera.rejected.len(), 3);
+        assert_eq!(
+            std::fs::read(almacen.ruta_de("bueno.webp").unwrap()).unwrap(),
+            b"webp"
+        );
+
+        let segunda = almacen.sembrar_pack_desde(&origen);
+        assert_eq!(segunda.copied, 0);
+        assert_eq!(segunda.skipped_existing, 1);
+
+        std::fs::write(almacen.ruta_de("bueno.webp").unwrap(), b"local").unwrap();
+        let tercera = almacen.sembrar_pack_desde(&origen);
+        assert_eq!(tercera.copied, 0);
+        assert_eq!(tercera.skipped_existing, 1);
+        assert_eq!(
+            std::fs::read(almacen.ruta_de("bueno.webp").unwrap()).unwrap(),
+            b"local"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1534,6 +2137,218 @@ mod tests {
         let ajuste: AjusteAviso = serde_json::from_str(incompleto).unwrap();
         assert_eq!(ajuste.medio, "", "un medio que no estaba queda vacio");
         assert_eq!(ajuste.minimo, 0, "y un minimo que no estaba, en cero");
+        assert_eq!(
+            ajuste.escala,
+            escala_de_fabrica(),
+            "y un tamaño que no estaba, el de siempre: un perfil guardado antes de \
+             que existiera el mando no puede cambiar de tamaño al actualizar"
+        );
+    }
+
+    /// El tamaño de un aviso es **por tipo**, y los tramos de regalo traen el suyo.
+    ///
+    /// Es la razon de que el mando sea por aviso y no uno global: si los tres tramos
+    /// midieran igual, el unico sitio donde el tamaño significa algo —que una galaxia
+    /// ocupe mas que una rosa— no existiria.
+    #[test]
+    fn los_tramos_de_regalo_crecen_por_escalones() {
+        let ajustes = AjustesAlertas::de_fabrica();
+        assert_eq!(ajustes.gift.escala, 1.0);
+        assert!(
+            ajustes.gift_grande.escala > ajustes.gift.escala,
+            "el tramo grande tiene que ocupar mas que el pequeño"
+        );
+        assert!(
+            ajustes.gift_enorme.escala > ajustes.gift_grande.escala,
+            "y el enorme mas que el grande"
+        );
+        for tipo in TipoAviso::TODOS {
+            let escala = ajustes.de(tipo).escala;
+            assert!(
+                (ESCALA_MINIMA..=ESCALA_MAXIMA).contains(&escala),
+                "{tipo:?} sale con un tamaño que el motor no acepta"
+            );
+        }
+    }
+
+    /// Las animaciones son un **catalogo cerrado**, y un nombre que no este vuelve al
+    /// de fabrica.
+    ///
+    /// Importa porque el nombre viaja hasta una variable de CSS del overlay: una
+    /// animacion desconocida dejaria el aviso sin entrada y sin salida, que es justo lo
+    /// que se venia a arreglar, y sin un solo error en ningun sitio.
+    #[test]
+    fn una_animacion_desconocida_vuelve_a_la_de_fabrica() {
+        let mut ajustes = AjustesAlertas::de_fabrica();
+        ajustes.gift.animacion_entrada = "hacer-un-molino".to_string();
+        ajustes.gift.animacion_salida = "  FUNDIDO  ".to_string();
+        ajustes.gift.ritmo = "a-lo-loco".to_string();
+        ajustes.gift.entrada_ms = 99_999;
+        ajustes.gift.salida_ms = 1;
+
+        ajustes.sanear(&[]);
+
+        assert_eq!(ajustes.gift.animacion_entrada, entrada_de_fabrica());
+        assert_eq!(
+            ajustes.gift.animacion_salida, "fundido",
+            "un nombre del catalogo se acepta aunque venga con espacios y en mayusculas"
+        );
+        assert_eq!(ajustes.gift.ritmo, ritmo_de_fabrica());
+        assert_eq!(ajustes.gift.entrada_ms, ANIMACION_MAXIMA_MS);
+        assert_eq!(ajustes.gift.salida_ms, ANIMACION_MINIMA_MS);
+    }
+
+    /// El catalogo del motor y el del overlay son **el mismo**, y no se pueden separar.
+    ///
+    /// El overlay lleva sus animaciones en `alertas.js` porque corre en otro proceso y
+    /// no puede preguntarselas a Rust. Si alguien añade una arriba y se olvida abajo, el
+    /// motor la acepta, la guarda y el aviso sale **sin animacion** —en silencio, sin un
+    /// error y sin que nada falle—, que es la peor forma de romperse.
+    ///
+    /// Esta comprobacion lee el fichero del overlay y compara las dos listas. Es la
+    /// unica forma de que las dos mitades sigan de acuerdo sin depender de que alguien
+    /// se acuerde.
+    #[test]
+    fn el_catalogo_del_overlay_tiene_las_mismas_animaciones() {
+        let js = include_str!("../overlay/web/alertas.js");
+
+        // Todo lo que el motor ofrece tiene que existir en el overlay...
+        for nombre in ANIMACIONES.iter().chain(RITMOS).chain(PERMANENCIAS) {
+            assert!(
+                js.contains(&format!("\n    {nombre}:")),
+                "«{nombre}» esta en el catalogo del motor pero no en alertas.js"
+            );
+        }
+
+        // ...los modos de la permanencia, que van dentro de cada efecto y no en un
+        // catalogo con claves. Se busca el nombre **escrito de cualquiera de las dos
+        // formas** —entre comillas o como clave de un mapa—: lo que importa es que el
+        // modo este nombrado en el overlay, no como se nombre.
+        for modo in MODOS_PERMANENCIA {
+            let nombrado = js.contains(&format!("\"{modo}\"")) || js.contains(&format!("{modo}:"));
+            assert!(
+                nombrado,
+                "el modo «{modo}» esta en el motor pero no se nombra en alertas.js"
+            );
+        }
+
+        // ...y al reves: una animacion que solo este en el overlay seria inalcanzable
+        // desde la interfaz, porque el saneado la rechazaria al guardar.
+        for (declaracion, catalogo) in [
+            ("const ANIMACIONES = {", ANIMACIONES),
+            ("const PERMANENCIAS = {", PERMANENCIAS),
+        ] {
+            let bloque = js
+                .split(declaracion)
+                .nth(1)
+                .and_then(|resto| resto.split("\n  };").next())
+                .unwrap_or_else(|| panic!("alertas.js tiene que declarar {declaracion}"));
+            for linea in bloque.lines() {
+                // Las claves del catalogo estan a **exactamente** cuatro espacios. El CSS
+                // que devuelven los efectos vive dentro de plantillas y va mas adentro,
+                // asi que exigir la sangria exacta es lo que separa una clave de un
+                // `background-image: linear-gradient(...)`, que tambien lleva dos puntos.
+                let sangria = linea.len() - linea.trim_start().len();
+                if sangria != 4 {
+                    continue;
+                }
+                let Some((clave, _)) = linea.trim().split_once(':') else {
+                    continue;
+                };
+                let clave = clave.trim();
+                if clave.is_empty() || !clave.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                    continue;
+                }
+                assert!(
+                    catalogo.contains(&clave),
+                    "«{clave}» esta en alertas.js y no en el catalogo del motor"
+                );
+            }
+        }
+    }
+
+    /// Un aviso de verdad sale con la animacion de **su** tipo, no con una global.
+    ///
+    /// Es lo que permite que Regalos rebote y Seguidores entre deslizando: la animacion
+    /// es un ajuste del tipo, igual que el texto o el sonido.
+    #[test]
+    fn cada_aviso_sale_con_su_animacion() {
+        let mut ajustes = AjustesAlertas::de_fabrica();
+        ajustes.gift.animacion_entrada = "rebote".to_string();
+        ajustes.follow.animacion_entrada = "derecha".to_string();
+        ajustes.follow.animacion_salida = "izquierda".to_string();
+        ajustes.follow.entrada_ms = 700;
+
+        let regalo = Aviso::demo(1, TipoAviso::Gift, ajustes.de(TipoAviso::Gift));
+        let seguidor = Aviso::demo(2, TipoAviso::Follow, ajustes.de(TipoAviso::Follow));
+
+        assert_eq!(regalo.animacion_entrada, "rebote");
+        assert_eq!(regalo.animacion_salida, salida_de_fabrica());
+        assert_eq!(seguidor.animacion_entrada, "derecha");
+        assert_eq!(seguidor.animacion_salida, "izquierda");
+        assert_eq!(seguidor.entrada_ms, 700);
+        assert_eq!(
+            regalo.entrada_ms,
+            entrada_ms_de_fabrica(),
+            "que el de Seguidores lo cambie no puede tocar el de Regalos"
+        );
+    }
+
+    /// Los ajustes guardados **antes** de que existieran las animaciones cargan con la
+    /// de fabrica, que es la que traia el overlay escrita a mano.
+    #[test]
+    fn un_perfil_sin_animaciones_entra_como_siempre() {
+        let viejo = r#"{
+            "activo": true, "texto": "hola", "duracion_ms": 3000, "volumen": 0.7
+        }"#;
+        let ajuste: AjusteAviso = serde_json::from_str(viejo).expect("tiene que cargar");
+        assert_eq!(ajuste.animacion_entrada, "rebote");
+        assert_eq!(ajuste.animacion_salida, "fundido");
+        assert_eq!(ajuste.entrada_ms, 380);
+        assert_eq!(ajuste.salida_ms, 220);
+        assert_eq!(ajuste.ritmo, "auto");
+    }
+
+    /// Una prueba se guarda para la fuente que no esta, pero **una sola**.
+    ///
+    /// Es el caso que se escapo: la previa del panel es un suscriptor mas, asi que
+    /// `encolar` daba la prueba por entregada y OBS no la veia nunca. Y se guarda la
+    /// ultima y no todas: cinco pulsaciones con OBS cerrado le soltarian cinco avisos
+    /// seguidos al reconectar.
+    #[test]
+    fn la_prueba_se_guarda_para_la_fuente_que_no_esta_y_solo_una() {
+        let cola = ColaAlertas::nueva();
+        let ajuste = AjustesAlertas::de_fabrica().gift_grande;
+
+        // Con la previa escuchando, que es el caso real.
+        let _previa = cola.suscribir();
+
+        for _ in 0..5 {
+            let aviso = Aviso::demo(cola.siguiente_seq(), TipoAviso::GiftGrande, &ajuste);
+            assert!(aviso.prueba, "un aviso del boton de probar es una prueba");
+            cola.encolar_prueba(aviso);
+        }
+
+        let pendientes = cola.pendientes();
+        assert_eq!(
+            pendientes.len(),
+            1,
+            "cinco pruebas dejan una sola esperando, la ultima"
+        );
+        assert_eq!(pendientes[0].seq, 5, "y la que espera es la ultima pulsada");
+        assert_eq!(
+            pendientes[0].escala, ajuste.escala,
+            "la prueba viaja con el tamaño puesto, que es lo que se va a mirar"
+        );
+
+        // Un aviso de verdad **no** se queda esperando: si hay alguien escuchando, se
+        // entrega, que es como funciona un directo.
+        cola.encolar(Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste));
+        assert_eq!(
+            cola.pendientes().len(),
+            1,
+            "un aviso normal no se acumula detras de la prueba"
+        );
     }
 
     /// Los ajustes pueden llegar de cualquier sitio —un fichero tocado a mano, un
@@ -1545,16 +2360,28 @@ mod tests {
         let mut ajustes = AjustesAlertas::de_fabrica();
         ajustes.gift.duracion_ms = 5_000_000;
         ajustes.gift.volumen = 50.0;
+        ajustes.gift.escala = 40.0;
         ajustes.gift.minimo = -3;
         ajustes.gift.texto = "x".repeat(1000);
         ajustes.gift.medio = "fantasma.gif".to_string();
         ajustes.follow.minimo = 10;
         ajustes.follow.volumen = f32::NAN;
+        ajustes.follow.escala = f32::NAN;
 
         ajustes.sanear(&["golpe.gif".to_string()]);
 
         assert_eq!(ajustes.gift.duracion_ms, DURACION_MAXIMA_MS);
         assert_eq!(ajustes.gift.volumen, 1.0);
+        assert_eq!(
+            ajustes.gift.escala, ESCALA_MAXIMA,
+            "un aviso no puede crecer por encima del cuadro de OBS"
+        );
+        assert_eq!(
+            ajustes.follow.escala,
+            escala_de_fabrica(),
+            "un tamaño no finito no puede llegar a un calc() del CSS: vuelve al de \
+             fabrica en vez de romper el tamaño entero del aviso"
+        );
         assert_eq!(
             ajustes.gift.minimo, 0,
             "un minimo negativo no tiene sentido"

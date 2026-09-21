@@ -96,11 +96,16 @@ enum MensajeOverlay {
 /// Dos formas y no una: al conectar se manda **lo que se quedo esperando**
 /// (`alertas`, en plural, una lista) y despues cada aviso suelto (`alerta`). El
 /// cliente los mete en la misma cola, asi que da igual de donde vengan.
+///
+/// El aviso suelto va **en caja** desde que `Aviso` crecio con las animaciones: sin
+/// ella, una variante ocupaba un `Vec` y la otra un aviso entero, y el enum se quedaba
+/// con el tamaño de la grande para transportar la pequeña. `Box` se serializa igual
+/// —el JSON no cambia— asi que el cliente no se entera.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum MensajeAlertas {
     Alertas { avisos: Vec<crate::alerts::Aviso> },
-    Alerta { aviso: crate::alerts::Aviso },
+    Alerta { aviso: Box<crate::alerts::Aviso> },
 }
 
 /// Celda compartida con el estado de la aplicacion.
@@ -242,6 +247,12 @@ pub fn spawn(state: Arc<AppState>, config: &OverlayConfig) -> anyhow::Result<u16
                     // Los medios de las alertas: lo que el streamer ha cargado,
                     // servido desde aqui para que OBS no dependa de rutas del disco.
                     .route("/media/{nombre}", get(media))
+                    // La biblioteca de voces: la portada que se guardo en la cache
+                    // y la prueba que se sintetizo. Van por aqui y no por el
+                    // frontal porque el panel tambien corre en el navegador (modo
+                    // web) y alli no hay acceso al disco del streamer.
+                    .route("/voces/portada/{archivo}", get(portada_voz))
+                    .route("/voces/prueba/{archivo}", get(prueba_voz))
                     .route("/overlay", get(websocket))
                     .route("/salud", get(salud))
                     .with_state(estado_tarea);
@@ -449,6 +460,75 @@ async fn media(
     }
 }
 
+/// Sirve la portada cacheada de una voz del catalogo.
+///
+/// Lleva el mismo token que los medios y por la misma razon: la direccion acaba
+/// dentro de la pagina del panel, y eso no la hace publica.
+///
+/// Se sirve **desde la cache local** y nunca desde Fish: es lo que hace que la
+/// biblioteca siga enseñando las voces cuando el catalogo tarda o no contesta.
+async fn portada_voz(
+    State(estado): State<Arc<OverlayState>>,
+    axum::extract::Path(archivo): axum::extract::Path<String>,
+    Query(params): Query<Parametros>,
+) -> Response {
+    if !estado.token_valido(&params.t) {
+        return (StatusCode::UNAUTHORIZED, "token invalido").into_response();
+    }
+    // Leer fuera del runtime: el disco no se toca desde un hilo de Tokio.
+    match tokio::task::spawn_blocking(move || crate::tts::fish_modelos::leer_portada(&archivo))
+        .await
+    {
+        Ok(Some((bytes, tipo))) => (
+            [
+                (header::CONTENT_TYPE, tipo),
+                // Una portada cambia poco —solo al actualizar la voz—, asi que el
+                // navegador puede quedarsela y no pedirla en cada vuelta.
+                (header::CACHE_CONTROL, "max-age=3600"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "esa portada no esta").into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "la lectura de una portada se cancelo");
+            (StatusCode::INTERNAL_SERVER_ERROR, "no se pudo leer").into_response()
+        }
+    }
+}
+
+/// Sirve una prueba sintetizada: el MP3 que dejo el motor al generarla.
+///
+/// Es el unico audio que la biblioteca reproduce **desde el disco**: las muestras
+/// oficiales son direcciones de Fish y las reproduce el navegador directamente.
+async fn prueba_voz(
+    State(estado): State<Arc<OverlayState>>,
+    axum::extract::Path(archivo): axum::extract::Path<String>,
+    Query(params): Query<Parametros>,
+) -> Response {
+    if !estado.token_valido(&params.t) {
+        return (StatusCode::UNAUTHORIZED, "token invalido").into_response();
+    }
+    match tokio::task::spawn_blocking(move || crate::tts::fish_modelos::leer_prueba(&archivo)).await
+    {
+        Ok(Some(bytes)) => (
+            [
+                (header::CONTENT_TYPE, "audio/mpeg"),
+                // Al reves que la portada: una prueba se puede volver a generar y
+                // el nombre del fichero depende del texto, asi que no se cachea.
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "esa prueba no esta").into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "la lectura de una prueba se cancelo");
+            (StatusCode::INTERNAL_SERVER_ERROR, "no se pudo leer").into_response()
+        }
+    }
+}
+
 /// Que diseno se sirve para esta peticion. Ver `pagina`.
 fn diseno_para(estado: &OverlayState, params: &Parametros) -> &'static disenos::Diseno {
     let vista = vista_para(&params.view);
@@ -619,7 +699,7 @@ async fn atender_alertas(mut socket: WebSocket, cola: Arc<crate::alerts::ColaAle
             nuevo = receptor.recv() => {
                 match nuevo {
                     Ok(aviso) => {
-                        if enviar(&mut socket, &MensajeAlertas::Alerta { aviso }).await.is_err() {
+                        if enviar(&mut socket, &MensajeAlertas::Alerta { aviso: Box::new(aviso) }).await.is_err() {
                             break;
                         }
                     }

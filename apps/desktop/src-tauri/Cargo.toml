@@ -20,7 +20,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [], optional = true }
 
 # --- Runtime asincrono ------------------------------------------------------
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process", "signal", "fs"] }
 futures-util = "0.3"
 
 # --- Servidor de overlays para OBS ------------------------------------------

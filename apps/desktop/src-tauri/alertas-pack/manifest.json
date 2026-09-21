@@ -1,0 +1,1326 @@
+{
+  "version": 1,
+  "generated_by": "scripts/manifestar-pack-alertas.mjs",
+  "files": [
+    {
+      "path": "audio/001-fahhhhhhhhhhhhhh.mp3",
+      "extension": "mp3",
+      "bytes": 79456,
+      "sha256": "f65311d5eea216616cde00edc9e0ee0e2be1f5a03aeeb5aef8b23d55f676826a"
+    },
+    {
+      "path": "audio/002-faaah.mp3",
+      "extension": "mp3",
+      "bytes": 47784,
+      "sha256": "c8b03ff0adacaf75b504b46e505f70af70a76d234cedaeb80eef9ee7ef6d909a"
+    },
+    {
+      "path": "audio/003-gato-riendo.mp3",
+      "extension": "mp3",
+      "bytes": 53459,
+      "sha256": "77b04084750dae80881c73c35dccc2c7a3a496142e554342d55b905e794b623c"
+    },
+    {
+      "path": "audio/004-1500-es-hora-y-media.mp3",
+      "extension": "mp3",
+      "bytes": 169318,
+      "sha256": "269c5365c99917b833785f9a82b2222434da9f5f49e2f1c1d452b4475e926b1e"
+    },
+    {
+      "path": "audio/005-vine-boom-sound.mp3",
+      "extension": "mp3",
+      "bytes": 21230,
+      "sha256": "c4dadbc0b9cd21b1313ec11845a00d9401bc208ae0f59f54a0282b8cb89d56c2"
+    },
+    {
+      "path": "audio/006-duermete-alv-ya.mp3",
+      "extension": "mp3",
+      "bytes": 225325,
+      "sha256": "2b757bb73c68319d811182869666df3ec8eadbe07eb3a0e8737dd62e193313f2"
+    },
+    {
+      "path": "audio/007-fart.mp3",
+      "extension": "mp3",
+      "bytes": 1690,
+      "sha256": "11c2bbd0505f013f928c21bff7c202b62ac3da5c67db16f8b7a489f653e304c8"
+    },
+    {
+      "path": "audio/008-q-onda-compare.mp3",
+      "extension": "mp3",
+      "bytes": 302062,
+      "sha256": "f0a7265e7046bac7d88c7d3999c4ef3c85233e72966c93130de13b41f274da3f"
+    },
+    {
+      "path": "audio/009-spongebob-fail.mp3",
+      "extension": "mp3",
+      "bytes": 54782,
+      "sha256": "7a21ade91762874e2b21be21efa15436bcc49e88ffb98d16cf597618caebfa93"
+    },
+    {
+      "path": "audio/010-anime-ahh.mp3",
+      "extension": "mp3",
+      "bytes": 14138,
+      "sha256": "059c7e7e8812edf5bb938b0c627327f57ee14e115dcbfac4548a4f769c4d715c"
+    },
+    {
+      "path": "audio/011-trae-ese-qlo-para-ac-quico.mp3",
+      "extension": "mp3",
+      "bytes": 143184,
+      "sha256": "d70facf09bbc5c2bbbb9e396f11cd0d7bd6fd04917937aa9a08e44941e7e4451"
+    },
+    {
+      "path": "audio/012-ya-nos-cargo-la-chingada.mp3",
+      "extension": "mp3",
+      "bytes": 73249,
+      "sha256": "a631dd8699d5818ced2dc27297604098385ee7647d9237609f581f0185c50de8"
+    },
+    {
+      "path": "audio/013-c-llate-baboso-mm.mp3",
+      "extension": "mp3",
+      "bytes": 51546,
+      "sha256": "14896572da92e812c578ba9461c5c7830678a1fc61196a05ce2a44521a692390"
+    },
+    {
+      "path": "audio/014-auraa.mp3",
+      "extension": "mp3",
+      "bytes": 206098,
+      "sha256": "9b84d9ad724e5f0cad187d64e5f6386eed24fea02b136373cc026decb6b48bf0"
+    },
+    {
+      "path": "audio/015-lo-siento-pobrecita.mp3",
+      "extension": "mp3",
+      "bytes": 124474,
+      "sha256": "81e6ca0d4e6bbb23d940532ccb2602e19ddccec2166168eacb8cd9c4c89c94a7"
+    },
+    {
+      "path": "audio/016-o-oooo.mp3",
+      "extension": "mp3",
+      "bytes": 145285,
+      "sha256": "c9431df653d5543e06a498c23a3e7f8a2b90e79e2a3e3b704403104747ebbdf8"
+    },
+    {
+      "path": "audio/017-rizz-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 77462,
+      "sha256": "dbbde7a7920b680ab42a6b8cab49dbd59e24841878bb622fb889669f9fae286f"
+    },
+    {
+      "path": "audio/018-anime-wow.mp3",
+      "extension": "mp3",
+      "bytes": 67637,
+      "sha256": "5118c619f0ab62e181f32d9eacd490441b49aaa7bb8e1be1b6b51e7a3c25debc"
+    },
+    {
+      "path": "audio/019-enrique.mp3",
+      "extension": "mp3",
+      "bytes": 24293,
+      "sha256": "f849a02180c7fa3cde257eaac22ad250f4ce3f8fff270e42e2c7ae629e0bf80e"
+    },
+    {
+      "path": "audio/020-c-llese-el-hocico-mm.mp3",
+      "extension": "mp3",
+      "bytes": 43930,
+      "sha256": "a8800bfc62c50aaea47133a3a0600fbd181a6fb0cc41a651de1a22a24c765c15"
+    },
+    {
+      "path": "audio/021-se-ve-que-si-le-sabes-luisito.mp3",
+      "extension": "mp3",
+      "bytes": 99954,
+      "sha256": "4ab1816b88528612e6a9ef4f1be2b0206322685d27c3e410077b96f58e07f066"
+    },
+    {
+      "path": "audio/022-dexter-meme.mp3",
+      "extension": "mp3",
+      "bytes": 172619,
+      "sha256": "4a716f2a47d4fa230840e14ecc96965ba6be05c62c1cafa9e6f7c540e458a42f"
+    },
+    {
+      "path": "audio/023-among-us-role-reveal-sound.mp3",
+      "extension": "mp3",
+      "bytes": 99894,
+      "sha256": "2a1a36e036c776bc030bf79ef69e312e6bbe0bc96b9ee0f30956ff4aad30ae4b"
+    },
+    {
+      "path": "audio/024-rosa-de-guadalupe-suspense.mp3",
+      "extension": "mp3",
+      "bytes": 239606,
+      "sha256": "939a83d42f1190ba305232f7f75fbd092976d9be7d198bf2c6140854ecef5e6c"
+    },
+    {
+      "path": "audio/025-la-bebecita-saturado.mp3",
+      "extension": "mp3",
+      "bytes": 283052,
+      "sha256": "1f4586bb5650b7114f051ed21209a69b26a4cfa9b7e40fdcf942671a9506615a"
+    },
+    {
+      "path": "audio/026-est-pido-gato.mp3",
+      "extension": "mp3",
+      "bytes": 289516,
+      "sha256": "0be45f6893d5620be511b80193070f93bb59e431bc3f0c6f2353c84deb68bd14"
+    },
+    {
+      "path": "audio/027-ay-ay-necesito-pito.mp3",
+      "extension": "mp3",
+      "bytes": 29812,
+      "sha256": "f5c6cddcebddc966df1be86091aa07d2904e518cfbc2398b98e4a6d2a8420cc5"
+    },
+    {
+      "path": "audio/028-tono-celular-chino.mp3",
+      "extension": "mp3",
+      "bytes": 242461,
+      "sha256": "412f765ae104bcf9fb26aa7eb630e56c03b8a6b5369fae0aed785f2a99ed5ec4"
+    },
+    {
+      "path": "audio/029-va-a-jugar-o-que.mp3",
+      "extension": "mp3",
+      "bytes": 432871,
+      "sha256": "a671dbabaed6b84428d5f8f642186bd2aeb5b10b302ea6d67c413133624bfbd0"
+    },
+    {
+      "path": "audio/030-miau-triste.mp3",
+      "extension": "mp3",
+      "bytes": 143287,
+      "sha256": "dd41dbaf407f4f376641f15c23408258731cb3675db9ef7c8e5afe232108bb11"
+    },
+    {
+      "path": "audio/031-sitatyr.mp3",
+      "extension": "mp3",
+      "bytes": 301851,
+      "sha256": "3a67288173d95aca5881a82967d6baf352def4b0a25986b5fd3d4769921edfa5"
+    },
+    {
+      "path": "audio/032-hola-p-nche-p-tita.mp3",
+      "extension": "mp3",
+      "bytes": 26648,
+      "sha256": "4af94843fdaca4e94012395b8a3566604dc6bdf31251e74116dbe9094774e9f9"
+    },
+    {
+      "path": "audio/033-alerta-alcoh-lica.mp3",
+      "extension": "mp3",
+      "bytes": 197760,
+      "sha256": "6fcf08443e7e1a0980d5a284f46a30a934797eea698fbdb7a2cf6915d2a81061"
+    },
+    {
+      "path": "audio/034-no-creoooo.mp3",
+      "extension": "mp3",
+      "bytes": 687863,
+      "sha256": "21dcfac7f1701a27237f0466abce9b1740bbc40602e953ce87e4763567532ff8"
+    },
+    {
+      "path": "audio/035-spiderman-meme-song.mp3",
+      "extension": "mp3",
+      "bytes": 199294,
+      "sha256": "a029a61b6563178e2a2fb322d10afabb38359a5e0d4a3fa486a5a86b3655605a"
+    },
+    {
+      "path": "audio/036-du-bist-gut-genug.mp3",
+      "extension": "mp3",
+      "bytes": 117923,
+      "sha256": "cac1c41a3a5c4c479e70728d3beb136c151e17c69e69e86286c067a10b841575"
+    },
+    {
+      "path": "audio/037-soy-mencho-wey.mp3",
+      "extension": "mp3",
+      "bytes": 187321,
+      "sha256": "122fb72952b223cdbb9161befe11790246da91a9bd323514985a891929d649b3"
+    },
+    {
+      "path": "audio/038-no-digas-mamadas-mary-jane.mp3",
+      "extension": "mp3",
+      "bytes": 58605,
+      "sha256": "f16c4e411b113ac6930c261610b94dc85411d7928c76087966d5e977814fd76e"
+    },
+    {
+      "path": "audio/039-gemidos-250.mp3",
+      "extension": "mp3",
+      "bytes": 235005,
+      "sha256": "934a895d664ae83b42a315c3ce72cdec0d461020a6cab3e060f1afcd94d87bfb"
+    },
+    {
+      "path": "audio/040-no-ma-ana.mp3",
+      "extension": "mp3",
+      "bytes": 161064,
+      "sha256": "9ffb8c861c2000c9d22a53549e78ecc0351c01e7e688ecc52886bd8f1bf93559"
+    },
+    {
+      "path": "audio/041-buenas-tardes-grupo.mp3",
+      "extension": "mp3",
+      "bytes": 292350,
+      "sha256": "9d6ab1b0794a4da37cc3d735bc962b30ef77afd6a21450d7cd3d1d384d8765fc"
+    },
+    {
+      "path": "audio/042-nombre-chapul-n-mm.mp3",
+      "extension": "mp3",
+      "bytes": 60570,
+      "sha256": "9c6259326a80f19f7fba1b6924ede5a3b4c68fe41d8509754f2b0f60ee53c734"
+    },
+    {
+      "path": "audio/043-chavo-ya-fui.mp3",
+      "extension": "mp3",
+      "bytes": 147584,
+      "sha256": "c717ab677d0b8d5a0650ecdda339e65177723e9932a55e27d33e838d67633e86"
+    },
+    {
+      "path": "audio/044-chicken-on-tree-screaming.mp3",
+      "extension": "mp3",
+      "bytes": 91821,
+      "sha256": "419e073ebfbd286a614d8e70611a63d8120ed56a3ccad9fcd8430fc03d9289b8"
+    },
+    {
+      "path": "audio/045-sonido-dross.mp3",
+      "extension": "mp3",
+      "bytes": 99001,
+      "sha256": "e57f0532bfa476b7c48179f24df58fba7aaf51369b871180d865bc01d2ca78d6"
+    },
+    {
+      "path": "audio/046-hay-que-drogarse.mp3",
+      "extension": "mp3",
+      "bytes": 120363,
+      "sha256": "284744956066fb379c07fb60f587b773e38bd44a625b6266e8e35932fe11e1b0"
+    },
+    {
+      "path": "audio/047-estaba-paralizado-con-mucho-miedo.mp3",
+      "extension": "mp3",
+      "bytes": 226824,
+      "sha256": "eb205133d0cd168a85d919d9ca1b563ca7f3f87de0e17513b2c3f8d689e423cb"
+    },
+    {
+      "path": "audio/048-discord-notification.mp3",
+      "extension": "mp3",
+      "bytes": 8301,
+      "sha256": "8f4d3150992cf86049b5a7beca5d0e9343b78e8dd9243f6dbe4d03a310ffaee1"
+    },
+    {
+      "path": "audio/049-fart-button.mp3",
+      "extension": "mp3",
+      "bytes": 5997,
+      "sha256": "2c94897d0856f51e022643cae3d24d392ddff0c47c7c4e9464d212c9ec791a6e"
+    },
+    {
+      "path": "audio/050-me-urge-la-patrulla.mp3",
+      "extension": "mp3",
+      "bytes": 224529,
+      "sha256": "bbe4d843a5a67dcec867cc39d8cd384bbe481e6435fe9b10c2f5a79be4c063b2"
+    },
+    {
+      "path": "audio/051-pozole-pozolito.mp3",
+      "extension": "mp3",
+      "bytes": 168482,
+      "sha256": "31116c6a79134ad82c8702582143f26092c9d0c3cca242a4077da66611d76947"
+    },
+    {
+      "path": "audio/052-paque-te-enojas-bebe.mp3",
+      "extension": "mp3",
+      "bytes": 35278,
+      "sha256": "3d572ae0646679506675baac847e6deacfad836cddf254374d26d5d2285f4103"
+    },
+    {
+      "path": "audio/053-lev-ntenseeeee.mp3",
+      "extension": "mp3",
+      "bytes": 251741,
+      "sha256": "bafb3fdb96910cda130963534f7c152a41e4171a9b778747683209ab4bf56103"
+    },
+    {
+      "path": "audio/054-si-o-no-pendejo.mp3",
+      "extension": "mp3",
+      "bytes": 228451,
+      "sha256": "b8ed0cdbe1392915a3bdb38250ac7733b91242a794d1816c097d937f9fb20556"
+    },
+    {
+      "path": "audio/055-bruh.mp3",
+      "extension": "mp3",
+      "bytes": 14061,
+      "sha256": "6a04c34422d17b5ad0a62baaf5810dab7e19aa06baf5cbe2002fc750486ff170"
+    },
+    {
+      "path": "audio/056-tienes-un-mensajeee.mp3",
+      "extension": "mp3",
+      "bytes": 189475,
+      "sha256": "c883736393e17ca36ea27b5774f987994dcfc77cbf2ca04de1aacc2f5024a2ee"
+    },
+    {
+      "path": "audio/057-la-ropa-se-vino-el-agua.mp3",
+      "extension": "mp3",
+      "bytes": 36707,
+      "sha256": "3bd19d7106da3dfd1a4a56902c4f9c0f5169f931529d4d843a793c6f48eacbfd"
+    },
+    {
+      "path": "audio/058-brazzino-77.mp3",
+      "extension": "mp3",
+      "bytes": 238281,
+      "sha256": "3af036049a421f50e9e9da34ee158f49f6a639f80b42b6d8b9592cd08cb54f77"
+    },
+    {
+      "path": "audio/059-pou-estourado.mp3",
+      "extension": "mp3",
+      "bytes": 256941,
+      "sha256": "882f3f81f3eadf2aaef4a4f182e12578f01d80838955f43f9abba26bdbf3daaf"
+    },
+    {
+      "path": "audio/060-mexico-sin-hambre.mp3",
+      "extension": "mp3",
+      "bytes": 102525,
+      "sha256": "835dd58775b523707717f3ba472a98f911bacb8f1e35d2f0251ef9343cfe7fc0"
+    },
+    {
+      "path": "audio/061-indian-song.mp3",
+      "extension": "mp3",
+      "bytes": 113197,
+      "sha256": "da296d29a235f711e191873ac88a278db055e1adf46fd45c580285bd79a8fef8"
+    },
+    {
+      "path": "audio/062-ya-est-tronando.mp3",
+      "extension": "mp3",
+      "bytes": 111299,
+      "sha256": "16d591649b58739fd721db1fbb8a806fe47937192228840174dfc1cf3e41c8b6"
+    },
+    {
+      "path": "audio/063-traemos-la-mamada-en-250.mp3",
+      "extension": "mp3",
+      "bytes": 181727,
+      "sha256": "8c5d2a90b243b2e2b0342b051b9f8f6153c574b84203a3ed7d88e4904ff53119"
+    },
+    {
+      "path": "audio/064-estan-desviando-el-tema.mp3",
+      "extension": "mp3",
+      "bytes": 133770,
+      "sha256": "2b9f6cea27ab1faf1281d6ee6c56aa7992220be22815acd66f01b17dd561893a"
+    },
+    {
+      "path": "audio/065-lego-breaking.mp3",
+      "extension": "mp3",
+      "bytes": 27513,
+      "sha256": "52863c02902e2666c7c88beb24551b1e05f3a86c7fcb8b9c493d277a29f3c23a"
+    },
+    {
+      "path": "audio/066-oh-my-god-bro-oh-hell-nah-man.mp3",
+      "extension": "mp3",
+      "bytes": 173799,
+      "sha256": "cb6b3179d9964d200929b8733a57a972a7c7b1a64dfd8b16e8e691e8c205b238"
+    },
+    {
+      "path": "audio/067-si-pinche-prieto.mp3",
+      "extension": "mp3",
+      "bytes": 112377,
+      "sha256": "889c99b1fcee4bf6d2456cff6497b794cf1529dee5f847e9b65821af3471761d"
+    },
+    {
+      "path": "audio/068-sigues-con-lo-mismo.mp3",
+      "extension": "mp3",
+      "bytes": 22569,
+      "sha256": "b94c90f739b11d54d4d50bfbed0856844b5f5c150802ca55a263c7b9937636af"
+    },
+    {
+      "path": "audio/069-fahhh.mp3",
+      "extension": "mp3",
+      "bytes": 37539,
+      "sha256": "21994c560d583f2c8b166ae16d5eab7fc5b925505e1ba93d7681543ebe443c08"
+    },
+    {
+      "path": "audio/070-metal-pipe-clang.mp3",
+      "extension": "mp3",
+      "bytes": 45694,
+      "sha256": "69f185a65580059bd279faf3efca8bc66dca0a984473cd5a97be3a3b5b3dd797"
+    },
+    {
+      "path": "audio/071-error-soundss.mp3",
+      "extension": "mp3",
+      "bytes": 8377,
+      "sha256": "e5c633eda2370c0e08b4289dbf990d5aa180c00a4cc27de46d9d45b0df3795e8"
+    },
+    {
+      "path": "audio/072-c-llese-o-lo-meo.mp3",
+      "extension": "mp3",
+      "bytes": 23366,
+      "sha256": "4df75963f75e0c11d245e1e2b160810726d9f55e471c975116b73308a990925e"
+    },
+    {
+      "path": "audio/073-eeeepale.mp3",
+      "extension": "mp3",
+      "bytes": 147549,
+      "sha256": "f1a8dccf6603d22ddfe159eae9f3af33a3d546ea8a7ffe701c8763655f85b561"
+    },
+    {
+      "path": "audio/074-risa-mm.mp3",
+      "extension": "mp3",
+      "bytes": 296273,
+      "sha256": "775efc06b45e90e2021c7fc4adc310a0f70c23dc263ad242f283267c8aa3dd3e"
+    },
+    {
+      "path": "audio/075-long-brain-fart.mp3",
+      "extension": "mp3",
+      "bytes": 189798,
+      "sha256": "c942f728b715d6490596d9f0e7fdc16d7a21b4625ac81e2168dada6e0325317f"
+    },
+    {
+      "path": "audio/076-yo-soy-gacha-lupita-tik-tok.mp3",
+      "extension": "mp3",
+      "bytes": 51161,
+      "sha256": "a850513b33ac175e39681fff53ef8fdeb6e456250eb89409fad3c853500bad57"
+    },
+    {
+      "path": "audio/077-buenos-dias-cr7.mp3",
+      "extension": "mp3",
+      "bytes": 130701,
+      "sha256": "9c50643e11ead4d8e7d02c44f5796b60f470bc5d30cde68d9cf52d2745fa3502"
+    },
+    {
+      "path": "audio/078-paja-con-sicatricure-calamardo.mp3",
+      "extension": "mp3",
+      "bytes": 178513,
+      "sha256": "5d1545c60765169380425e53f503bab1f1e5276bd12b84472bba1ad5734c232e"
+    },
+    {
+      "path": "audio/079-g-rgaras-mm.mp3",
+      "extension": "mp3",
+      "bytes": 44903,
+      "sha256": "6defd422c109fe3ee4ea59b1888344bd16435024a1343783d8a1686a33cd3afd"
+    },
+    {
+      "path": "audio/080-mentiras-son-todas-mentiras.mp3",
+      "extension": "mp3",
+      "bytes": 117374,
+      "sha256": "f128e5a8cda1ef0c7d5b2b115915c2fcc5a36bb675c4bcb065ca0d7e9dc79a3b"
+    },
+    {
+      "path": "audio/081-hub-intro-sound.mp3",
+      "extension": "mp3",
+      "bytes": 84525,
+      "sha256": "17b1fa74915e5a9d40824e92f7cee2121b96b7a1cd0f735b7e5b26340a2d351f"
+    },
+    {
+      "path": "audio/082-callate-ala-ver.mp3",
+      "extension": "mp3",
+      "bytes": 51840,
+      "sha256": "aaf7da62e0d9ad82dae3c0d310834cde5f02486df0a918de352edbd384a5607e"
+    },
+    {
+      "path": "audio/083-snore-mimimimimimi.mp3",
+      "extension": "mp3",
+      "bytes": 91467,
+      "sha256": "9c459766ddfbe6156b8f5cd1539102b0207937f490aa449e62837d34795dc015"
+    },
+    {
+      "path": "audio/084-se-ora-su-hijo-esta.mp3",
+      "extension": "mp3",
+      "bytes": 156035,
+      "sha256": "10c364edb3526c5a4c51cde43c8f7d77e5450afd0afd643366a30a9a12d985eb"
+    },
+    {
+      "path": "audio/085-ding-sound-effect.mp3",
+      "extension": "mp3",
+      "bytes": 47993,
+      "sha256": "bf9c08a6b942f6c875b07e35de5ebbc3a009c7567a0e9d1a69ff79c0c79e9e81"
+    },
+    {
+      "path": "audio/086-bone-crack.mp3",
+      "extension": "mp3",
+      "bytes": 17900,
+      "sha256": "9b3ba8bb0bd562d95a066aab7576860b3c2f9cb96fd95b27ce67bf56093f0638"
+    },
+    {
+      "path": "audio/087-yippeeeeeeeeeeeeee.mp3",
+      "extension": "mp3",
+      "bytes": 44753,
+      "sha256": "cb3e6f1c199eeb5c277c51daa00aa6446966b45fff940ef5a2b5ca51aa7825c8"
+    },
+    {
+      "path": "audio/088-maldito-traidor-spain-versi-n-1-0.mp3",
+      "extension": "mp3",
+      "bytes": 272611,
+      "sha256": "a0505c8152c3ed43e6b8b8267d2aefaf2246e6bbb664dca01ab6a2241ae590ba"
+    },
+    {
+      "path": "audio/089-risa-rana.mp3",
+      "extension": "mp3",
+      "bytes": 109648,
+      "sha256": "294673362e81c923356e3257a869c4b3a7a459eafd09afc18ceadec0738ecdd6"
+    },
+    {
+      "path": "audio/090-fuera-depresi-n.mp3",
+      "extension": "mp3",
+      "bytes": 184320,
+      "sha256": "2a497420e95e226da6cf0eb68118e8dda957c6a11273365a1d8249be8bd64caa"
+    },
+    {
+      "path": "audio/091-ponte-a-jalar-rober.mp3",
+      "extension": "mp3",
+      "bytes": 30383,
+      "sha256": "a8f2e46f5cebabe70485fcc93a181b5347a56a2cef8d26dc97fbe607f686ebc0"
+    },
+    {
+      "path": "audio/092-me-perdonas.mp3",
+      "extension": "mp3",
+      "bytes": 19150,
+      "sha256": "1ef16185f3292ce2d29c3d2180390af64249f33e16c93ee45dd3adeb3253ee5b"
+    },
+    {
+      "path": "audio/093-sad-violin-the-meme-one.mp3",
+      "extension": "mp3",
+      "bytes": 73813,
+      "sha256": "6aa0f62297c2154fbf715e1f43b435c0a468b4083bbdc91200531ba96fce5324"
+    },
+    {
+      "path": "audio/094-pinche-pelon.mp3",
+      "extension": "mp3",
+      "bytes": 103680,
+      "sha256": "4ccedd5bb0e11638e24fb7572058b7ef0b96f78b961c5ee4e4b31eb3781065d8"
+    },
+    {
+      "path": "audio/095-voy-tendido-carnal.mp3",
+      "extension": "mp3",
+      "bytes": 99461,
+      "sha256": "a863ff4009d8634d3ad37f0354bd9d4f9abfd2f9cdf04c48cb029bbbc4c87977"
+    },
+    {
+      "path": "audio/096-michael-jackson-hee-hee.mp3",
+      "extension": "mp3",
+      "bytes": 23661,
+      "sha256": "21bdc60ba9b42aabe8653eb15d5b176361fed228bb4b53eb0e2fb1e400fdba81"
+    },
+    {
+      "path": "audio/097-yaaaaaaaay.mp3",
+      "extension": "mp3",
+      "bytes": 131074,
+      "sha256": "3029aafb117205e93b3a59b57a167b79ab0e58a062e6dd97170893fb7e97eb0b"
+    },
+    {
+      "path": "audio/098-piano-dross.mp3",
+      "extension": "mp3",
+      "bytes": 27513,
+      "sha256": "20b60a224eed713b91d11f974f87181882e3b3bcc394de66ddc9a742179b2647"
+    },
+    {
+      "path": "audio/099-piuw.mp3",
+      "extension": "mp3",
+      "bytes": 7551,
+      "sha256": "cee2d5c15dee5b666d6b783bbc18d3b92a057dafd8f216e2d66abe9e5f5e11f6"
+    },
+    {
+      "path": "audio/100-ya-me-rasure-la-panosha.mp3",
+      "extension": "mp3",
+      "bytes": 54369,
+      "sha256": "23752d1623b136302defc683e1f80c59fff288fdb00e6f6ed6830da78b5a8158"
+    },
+    {
+      "path": "audio/101-m-e-o-w.mp3",
+      "extension": "mp3",
+      "bytes": 30891,
+      "sha256": "41edbeb32801d20f7bc0966f03e21d71359e2bd2c824c1649e5280a9f575513f"
+    },
+    {
+      "path": "audio/102-the-undertaker-bell.mp3",
+      "extension": "mp3",
+      "bytes": 68055,
+      "sha256": "1c45d5f18fa52ede20d3f44ea1ea87f61e517b2c8dfb69794d1e5799ec7ebb16"
+    },
+    {
+      "path": "audio/103-sonido-de-grillo.mp3",
+      "extension": "mp3",
+      "bytes": 253626,
+      "sha256": "147472234352118ca9dc0787b8e2924baecbb7dcf5067c149784b21684e8d829"
+    },
+    {
+      "path": "audio/104-por-fin-apareciste-malnacido-picoro.mp3",
+      "extension": "mp3",
+      "bytes": 89069,
+      "sha256": "10e2ee8d177a4eb912cddcdd3838cbd16d2a08189fcb5ebdf61d120283e97d66"
+    },
+    {
+      "path": "audio/105-hola-tururururururururururu.mp3",
+      "extension": "mp3",
+      "bytes": 140589,
+      "sha256": "8b2947371bd9bf11f63fee490460dc4393a1c32e53935cfe4eeb8ad630e72966"
+    },
+    {
+      "path": "audio/106-cat-laugh-meme-1.mp3",
+      "extension": "mp3",
+      "bytes": 58233,
+      "sha256": "ddb7d4b5141831b454ef5ccb851adaf02d601b74a594d3810906978a7e834ab8"
+    },
+    {
+      "path": "audio/107-el-se-or-de-la-noche-don-omar.mp3",
+      "extension": "mp3",
+      "bytes": 301694,
+      "sha256": "ca2522928bbde6fb84c47b82769e1c8826ff4b9e19bc43ed45d461666eca8f07"
+    },
+    {
+      "path": "audio/108-las-ma-anitas-cortas.mp3",
+      "extension": "mp3",
+      "bytes": 300434,
+      "sha256": "e392f489dff6e96ada284459bfbe107871132d17b9cf44b8eb0ad57c1be73f30"
+    },
+    {
+      "path": "audio/109-roblox-oof.mp3",
+      "extension": "mp3",
+      "bytes": 16971,
+      "sha256": "fd51f1f5b2d1293cf1466a5f5a912c05db77fde5c511a743da76211c98c0db8b"
+    },
+    {
+      "path": "audio/110-el-panadero-con-el-pan.mp3",
+      "extension": "mp3",
+      "bytes": 303914,
+      "sha256": "b0f2451939110f38e8383bd89cc6a6218b2590326dac32ef156358360ed6a184"
+    },
+    {
+      "path": "audio/111-mambo-matikanetannhauser.mp3",
+      "extension": "mp3",
+      "bytes": 15122,
+      "sha256": "2c6465963d9a11edc79bd365eee260108090b1bebf7cf6f6cd6332a84d820bed"
+    },
+    {
+      "path": "audio/112-jajaja-el-pendejo.mp3",
+      "extension": "mp3",
+      "bytes": 88136,
+      "sha256": "f74ab9c0d1370130f493bd225df900012628789f16f04c93e3d6daac50cda9c3"
+    },
+    {
+      "path": "audio/113-que-rollo-plebes.mp3",
+      "extension": "mp3",
+      "bytes": 284767,
+      "sha256": "b88938d90510216fa3b6240e5a7f40d2721d7e8eccc624a71548efbaa6e26c0c"
+    },
+    {
+      "path": "audio/114-te-voy-a-dar-un-10.mp3",
+      "extension": "mp3",
+      "bytes": 165230,
+      "sha256": "71e4ceacdcd86621d217fae6d1df1507f091215541deeb2cfa7edfc3670c3860"
+    },
+    {
+      "path": "audio/115-aaaaaaaaaaaaaaaaaaaa-lutador.mp3",
+      "extension": "mp3",
+      "bytes": 103923,
+      "sha256": "4e03396f625afc7205d732ee4406e0b31529ac72c01b970dfb3c17e54963c5dc"
+    },
+    {
+      "path": "audio/116-tengo-hambre-margarito.mp3",
+      "extension": "mp3",
+      "bytes": 44138,
+      "sha256": "66737c7489a0023785e997e2fdc1c71f131f2937fdfdb8031623ce2a3a18daf1"
+    },
+    {
+      "path": "audio/117-risa-konan.mp3",
+      "extension": "mp3",
+      "bytes": 136182,
+      "sha256": "43359a6d5c2a618df4406686edd0e2456e79be6430994439c2f0a76832b0618b"
+    },
+    {
+      "path": "audio/118-que-es-el-aura.mp3",
+      "extension": "mp3",
+      "bytes": 284923,
+      "sha256": "ae09ab8b822535942a60992157373fadbe65b204188e480f95763eed6ea0413f"
+    },
+    {
+      "path": "audio/119-ayudame-chavo.mp3",
+      "extension": "mp3",
+      "bytes": 109227,
+      "sha256": "bc234faef3403a416db6b60627951f8c02cc313a0939b4340faf4eac28593e9e"
+    },
+    {
+      "path": "audio/120-mamamarrano-mm.mp3",
+      "extension": "mp3",
+      "bytes": 34107,
+      "sha256": "534a248b0364d8f214ff94ae9a7951bcb9ab66e690eb479bcab8b411281f545e"
+    },
+    {
+      "path": "audio/121-mil-quinientos.mp3",
+      "extension": "mp3",
+      "bytes": 34304,
+      "sha256": "c6cc479424d47f8c712415ceaf6bacf6874edb5fc3f449d73a832d9babc97d77"
+    },
+    {
+      "path": "audio/122-pop-sfx.mp3",
+      "extension": "mp3",
+      "bytes": 5246,
+      "sha256": "6d0369350e1e0d5c5c1bb5e487df5d10b36d9d2d142b68b3fa9572f7acccb0ec"
+    },
+    {
+      "path": "audio/123-homero-aahh.mp3",
+      "extension": "mp3",
+      "bytes": 251875,
+      "sha256": "d0c88bb5277b90418a4b85678be7c4a61a967bf665be727a76ae65c2580dd3f5"
+    },
+    {
+      "path": "audio/124-ayy-chiquito.mp3",
+      "extension": "mp3",
+      "bytes": 40261,
+      "sha256": "d5df18967e6d7c4e61f85bb45195909c6c5c5daa4a830d9d749f818be11056b9"
+    },
+    {
+      "path": "audio/125-que-dificil-me-la-pusiste-diablo.mp3",
+      "extension": "mp3",
+      "bytes": 70875,
+      "sha256": "58c6a59d60f8afe26caacf89cd0ea7da5339369741f8c18b7cd94b3401aa8679"
+    },
+    {
+      "path": "audio/126-goku-drip.mp3",
+      "extension": "mp3",
+      "bytes": 78504,
+      "sha256": "9522268b103316acb7acd8ae69a49491c2a98fd07380eb345d688ef137aa0595"
+    },
+    {
+      "path": "audio/127-tuco-get-out.mp3",
+      "extension": "mp3",
+      "bytes": 33792,
+      "sha256": "6142bc0b94a0e62519feae5faf2f4a73a082da289b92e20dfb800f1610823b93"
+    },
+    {
+      "path": "audio/128-se-or-me-has-mirado-a-los-ojos.mp3",
+      "extension": "mp3",
+      "bytes": 165144,
+      "sha256": "f0c7c9b7a3e7a2a548b72decd0b3851485dff7744040290500598e4fc48ae98c"
+    },
+    {
+      "path": "audio/129-ay-ya-no-cabemos.mp3",
+      "extension": "mp3",
+      "bytes": 68473,
+      "sha256": "bfc86b768fe9e49761f4448c3ee3cbbaf724b2983af3ea8a266a2af5dd22de55"
+    },
+    {
+      "path": "audio/130-poncho-risa.mp3",
+      "extension": "mp3",
+      "bytes": 138965,
+      "sha256": "8a72e2e2e3ec4029f548f54a123c5d53e2e3ba155d1b156bb0f360aaf2761dfa"
+    },
+    {
+      "path": "audio/131-fart-meme-sound.mp3",
+      "extension": "mp3",
+      "bytes": 31692,
+      "sha256": "d655cb6cb19339af54b307904693e1e26b0b3e0761c2946bb7ab469004db389b"
+    },
+    {
+      "path": "audio/132-contesta-pu-etas.mp3",
+      "extension": "mp3",
+      "bytes": 91160,
+      "sha256": "12a8adcb5ade982a8f3a2e975d0c6a4e34057a7e73ae95b2331896a58cd0677d"
+    },
+    {
+      "path": "audio/133-como-dijo-sonido-mejorado.mp3",
+      "extension": "mp3",
+      "bytes": 39843,
+      "sha256": "73b8ddcad27d30673b3efc63ab8255c57ad928d4f185303cd43e2d1e48fe37b8"
+    },
+    {
+      "path": "audio/134-yes-lara-voice.mp3",
+      "extension": "mp3",
+      "bytes": 17965,
+      "sha256": "f0879588fc0bb0c3c8abada0153b95e24d93698e349141dfdbc0b83751d1cb21"
+    },
+    {
+      "path": "audio/135-quien-me-jalo-mi-cabello.mp3",
+      "extension": "mp3",
+      "bytes": 273600,
+      "sha256": "1b67097e3270d438e4edae8bc9185310d320a7aae77c2cfc7d210d9801816384"
+    },
+    {
+      "path": "audio/136-punch-sound.mp3",
+      "extension": "mp3",
+      "bytes": 25423,
+      "sha256": "ac37eec2d00a9be2613c0ec1bf334775cc6df286b555e1ff4074d448b9b4260c"
+    },
+    {
+      "path": "audio/137-correle-gordo.mp3",
+      "extension": "mp3",
+      "bytes": 135764,
+      "sha256": "badcbe67739504df384c630627877f169946d09825126c2a4a0c180f323c6a6c"
+    },
+    {
+      "path": "audio/138-aire-la-rosa-de-guadalupe.mp3",
+      "extension": "mp3",
+      "bytes": 98667,
+      "sha256": "d33f38781b2d2b44a6b2f71228b4055b5f37b684563033df79cd4aa4f660ecad"
+    },
+    {
+      "path": "audio/139-aee-epale.mp3",
+      "extension": "mp3",
+      "bytes": 89947,
+      "sha256": "06d6f8b5d60a74f7a238279a56201f33256d4ffe38324b224050888720e14297"
+    },
+    {
+      "path": "audio/140-neo-geo-coin-metal-slug-irem.mp3",
+      "extension": "mp3",
+      "bytes": 26259,
+      "sha256": "f261514c5189658de74d5d5830f1b0a57cd76643763799f69aa8b96a2e6eb5d8"
+    },
+    {
+      "path": "audio/141-ack.mp3",
+      "extension": "mp3",
+      "bytes": 100338,
+      "sha256": "6247b97b6e1614ca16325d28ad0d82dd6aee58cf73f68aca6f4f24205a228708"
+    },
+    {
+      "path": "audio/142-bonk-doge.mp3",
+      "extension": "mp3",
+      "bytes": 4081,
+      "sha256": "87b7738198a86f516e14bc2d37de8db803f50510593804daa599de87b93d4fe0"
+    },
+    {
+      "path": "audio/143-a-oliver-le-cayo-un-meteorito.mp3",
+      "extension": "mp3",
+      "bytes": 194488,
+      "sha256": "1efefa96075de9d413304b1df088a53eb09e287ae08e2b1baeccb93cd48ea52b"
+    },
+    {
+      "path": "audio/144-cumprea-os-feliz-cumplea-os-feliz.mp3",
+      "extension": "mp3",
+      "bytes": 247916,
+      "sha256": "4de047d0edc1bf1cd579234e98de292c9164f750cc8f7639d14ff35c8b8033c8"
+    },
+    {
+      "path": "audio/145-shocked-sound.mp3",
+      "extension": "mp3",
+      "bytes": 23751,
+      "sha256": "65dee4c57274f57c967529f274bdded069a6ac066cafed1005e066eea6f241de"
+    },
+    {
+      "path": "audio/146-ese-telefono-parece-carpintero.mp3",
+      "extension": "mp3",
+      "bytes": 229596,
+      "sha256": "6830b72f8f46d5fbc9bba4ef49b05852515fd7057ad811a2c6422d9a6e4f5e0d"
+    },
+    {
+      "path": "audio/147-minecraft-eating-sound.mp3",
+      "extension": "mp3",
+      "bytes": 27517,
+      "sha256": "1b0a694259b150e2a21c14118dbdc9b31802bb1b9e403a64584595ab4a4f950b"
+    },
+    {
+      "path": "audio/148-baby-laughing-meme.mp3",
+      "extension": "mp3",
+      "bytes": 106507,
+      "sha256": "1a8862951f78fa5745a126254770c133e8a5b8b33745f1b5f898d78508e095ba"
+    },
+    {
+      "path": "audio/149-suspenso-multimedios.mp3",
+      "extension": "mp3",
+      "bytes": 56772,
+      "sha256": "cf53128c1f852ced5304927d82f4dcfd447f6019289d51853a6b47eb6344d81e"
+    },
+    {
+      "path": "audio/150-ya-tomaste-cafe.mp3",
+      "extension": "mp3",
+      "bytes": 16412,
+      "sha256": "9ecf0a8357d439c8df41774d89c01f7d3debaac32d66412beafb6505b4b9f4f3"
+    },
+    {
+      "path": "audio/campana-brillante.wav",
+      "extension": "wav",
+      "bytes": 68840,
+      "sha256": "0b01e8159a3ebef76f1e83303fbdc1d997c8e61787f6980137c4943af112b1f2"
+    },
+    {
+      "path": "audio/campana-suave.wav",
+      "extension": "wav",
+      "bytes": 52964,
+      "sha256": "34568981e3d1334610d1cac624caf03dc2ec9def4708463e7df28ee695c4e6ee"
+    },
+    {
+      "path": "audio/fanfarria.wav",
+      "extension": "wav",
+      "bytes": 68840,
+      "sha256": "867175ce462888566f1fb3385b337dfcfa7b6d1c8db8fb56a12cf43078bce0fc"
+    },
+    {
+      "path": "audio/pizca.wav",
+      "extension": "wav",
+      "bytes": 11510,
+      "sha256": "6166b4175357797a1c7a5ddb52e11a974633256a41312e8b166c8b55a6618c28"
+    },
+    {
+      "path": "audio/redoble.wav",
+      "extension": "wav",
+      "bytes": 114704,
+      "sha256": "5cc58da9334c41f8a46a036c90e43a08da7d143f604633c728adb454cf033feb"
+    },
+    {
+      "path": "audio/subida.wav",
+      "extension": "wav",
+      "bytes": 31796,
+      "sha256": "c33aaa95c5754a021b98325f80db60372f53a7f363015cc9b563254b72126698"
+    },
+    {
+      "path": "audio/toque.wav",
+      "extension": "wav",
+      "bytes": 24742,
+      "sha256": "f6207eda4075316f388521e88c507bb226ee95f2752f61b6f9d9512aa8ceee70"
+    },
+    {
+      "path": "imagenes/001-sticker.webp",
+      "extension": "webp",
+      "bytes": 11104,
+      "sha256": "91c8c04387cd400c33383155878294a3fb2e0db2f2e059cffbf7ddeaa24630a9"
+    },
+    {
+      "path": "imagenes/002-sticker.webp",
+      "extension": "webp",
+      "bytes": 2066,
+      "sha256": "9ec9734f474ea4f20c62757a36d81fc130a20fe28d80bbc662f49c551da3c6f0"
+    },
+    {
+      "path": "imagenes/003-sticker.webp",
+      "extension": "webp",
+      "bytes": 189898,
+      "sha256": "191418ddd1219caa345a680b24117317d129aedce6f5c15cb24e7d038824bbda"
+    },
+    {
+      "path": "imagenes/004-sticker.webp",
+      "extension": "webp",
+      "bytes": 9564,
+      "sha256": "fb80a170cf7d72593f0ed4505a574e6d44b68e17f3cc12bc1674442ed84097c7"
+    },
+    {
+      "path": "imagenes/005-sticker.webp",
+      "extension": "webp",
+      "bytes": 19910,
+      "sha256": "1e2922b7da451ab2d421a5639072da4bb84dd3ee4ef13cfe401e309fd730c064"
+    },
+    {
+      "path": "imagenes/006-sticker.webp",
+      "extension": "webp",
+      "bytes": 641518,
+      "sha256": "2698abddb59569ab39a8005671773eb12ce70bb87c5db5aa4303f073fec57237"
+    },
+    {
+      "path": "imagenes/007-sticker.webp",
+      "extension": "webp",
+      "bytes": 561880,
+      "sha256": "c44b0fbabd85d1403b86fd1c794fb32b872f6321cfd1e7bea78f67cfd5e36b1e"
+    },
+    {
+      "path": "imagenes/008-sticker.webp",
+      "extension": "webp",
+      "bytes": 88242,
+      "sha256": "5ac2bbcf7ed48498735835fecd20b198df2472f4ccf4e12e1ab8cb47a5f18852"
+    },
+    {
+      "path": "imagenes/009-sticker.webp",
+      "extension": "webp",
+      "bytes": 13056,
+      "sha256": "8d7f0a98e6fe99f76e0a484dd1199017a8a328a1ef20d8d13bc04eed8868b562"
+    },
+    {
+      "path": "imagenes/010-sticker.webp",
+      "extension": "webp",
+      "bytes": 6072,
+      "sha256": "70203fb9745b0a9b79bb87c24f144e4b02d132a453e341af845fed896ec502fb"
+    },
+    {
+      "path": "imagenes/011-sticker.webp",
+      "extension": "webp",
+      "bytes": 47520,
+      "sha256": "b9c223c8334054d5d19c967e8243dd6660900fdf87958c804f8b19ca954c2b78"
+    },
+    {
+      "path": "imagenes/012-sticker.webp",
+      "extension": "webp",
+      "bytes": 8932,
+      "sha256": "61fbf591fdde54af1401efdd638b1de4424e9e4569e6fe14f21f85baceda8318"
+    },
+    {
+      "path": "imagenes/013-sticker.webp",
+      "extension": "webp",
+      "bytes": 17104,
+      "sha256": "bee7b42007fcc748ac282f1bdb847cda5f61b415c53165e996f0128144eb1d30"
+    },
+    {
+      "path": "imagenes/014-sticker.webp",
+      "extension": "webp",
+      "bytes": 10536,
+      "sha256": "fec1a2ace1f9c448407665fa55cbd396a545ca39120f835a3352a022004148f3"
+    },
+    {
+      "path": "imagenes/015-sticker.webp",
+      "extension": "webp",
+      "bytes": 305482,
+      "sha256": "bf33a50f7d741cb9ca05497052885bc5b5738911cacbbd1ac71c6ef3981d15f6"
+    },
+    {
+      "path": "imagenes/016-sticker.webp",
+      "extension": "webp",
+      "bytes": 99734,
+      "sha256": "d72c06f7ebe952b5091dc96d7e8e8c04381c0c816e9e4fa04a59b75173230789"
+    },
+    {
+      "path": "imagenes/017-sticker.webp",
+      "extension": "webp",
+      "bytes": 6650,
+      "sha256": "4aee5be7c69a995ad50625b0b9b721014ac66ad867200df0c5a5c7cdea88c14a"
+    },
+    {
+      "path": "imagenes/018-sticker.webp",
+      "extension": "webp",
+      "bytes": 1295564,
+      "sha256": "d80e6b218b5f258ec92fd484387c34dfb74f4a3704c71045d822712ed63bb6fa"
+    },
+    {
+      "path": "imagenes/019-sticker.webp",
+      "extension": "webp",
+      "bytes": 59592,
+      "sha256": "08991a6cfb95a3406ce6310b824403854f2fb51d0a10e8f2fc248815b32f1865"
+    },
+    {
+      "path": "imagenes/020-sticker.webp",
+      "extension": "webp",
+      "bytes": 1086,
+      "sha256": "489e10388d474d4573a6f29995f8f1be606393791e3355c1d41cb6bc16ddda3e"
+    },
+    {
+      "path": "imagenes/021-sticker.webp",
+      "extension": "webp",
+      "bytes": 1974,
+      "sha256": "ef5446b63249ef2ed7e2643ddd6df428de43168e8c45b9f49b7bc6468e266cba"
+    },
+    {
+      "path": "imagenes/022-sticker.webp",
+      "extension": "webp",
+      "bytes": 49240,
+      "sha256": "c74988fd8fa775945d87c8432b4ef02ee088baacf803f3493455033b1f15110b"
+    },
+    {
+      "path": "imagenes/023-sticker.webp",
+      "extension": "webp",
+      "bytes": 162204,
+      "sha256": "60ca18bdbf3f283aea06d237e0a1ce814ace94ccc0dfc3aaa27dc44f5bf5b949"
+    },
+    {
+      "path": "imagenes/024-sticker.webp",
+      "extension": "webp",
+      "bytes": 35956,
+      "sha256": "cf6c19638aad150954d0e9c38f4052f41345602dc4405ac3adb7751256e0b27f"
+    },
+    {
+      "path": "imagenes/025-sticker.webp",
+      "extension": "webp",
+      "bytes": 164674,
+      "sha256": "c7c2af7d26431dbf2de129c515a7ff0bfeed6ad2e74581f2ba5777a232fe6da3"
+    },
+    {
+      "path": "imagenes/026-sticker.webp",
+      "extension": "webp",
+      "bytes": 71298,
+      "sha256": "834b5916c72d5a7dd6fb3cbe4bf31e84be098de41e92b6f852223cfaa1b1fa7f"
+    },
+    {
+      "path": "imagenes/027-sticker.webp",
+      "extension": "webp",
+      "bytes": 19230,
+      "sha256": "7a5c90805d50fb75b018d00bda1dde29ef57a1c780344e3c50cde4294146a1a6"
+    },
+    {
+      "path": "imagenes/028-sticker.webp",
+      "extension": "webp",
+      "bytes": 2486,
+      "sha256": "e545a6423f39faca0fcb23fd3c6ed78fe9ef6ff94eeecc468acec69ad8930077"
+    },
+    {
+      "path": "imagenes/029-sticker.webp",
+      "extension": "webp",
+      "bytes": 2278,
+      "sha256": "aa87fe37833eac4b7578a168458a2b72f5e2b9338742424460bc2a5de933cb4c"
+    },
+    {
+      "path": "imagenes/030-sticker.webp",
+      "extension": "webp",
+      "bytes": 9556,
+      "sha256": "c996ce274d096ca655d1d9724430adb0bbee976a70bbb828ec25268827948693"
+    },
+    {
+      "path": "imagenes/031-sticker.webp",
+      "extension": "webp",
+      "bytes": 2130,
+      "sha256": "3cc3406bdbc16792cad408b1f53c7a6298cb7cf9e740b9121a7ae2b12056f8c0"
+    },
+    {
+      "path": "imagenes/032-sticker.webp",
+      "extension": "webp",
+      "bytes": 1387868,
+      "sha256": "6649985f40787f38ea505c3a37552bc69e083fd9828b20377693e167692b4240"
+    },
+    {
+      "path": "imagenes/033-sticker.webp",
+      "extension": "webp",
+      "bytes": 1934,
+      "sha256": "8f8db8f8837e934a82bc9673117a8c132a09b398814088e99cfcb501db45bf10"
+    },
+    {
+      "path": "imagenes/034-sticker.webp",
+      "extension": "webp",
+      "bytes": 270118,
+      "sha256": "ed0253709e9abfa80fd6438950108cd4854b63f82a8bd5285e9770c2f0d038ec"
+    },
+    {
+      "path": "imagenes/035-sticker.webp",
+      "extension": "webp",
+      "bytes": 89866,
+      "sha256": "11e597422cbafbf53f4fddb324fd8f0525ac049469bc5f42c14ff3a6744eb385"
+    },
+    {
+      "path": "imagenes/036-sticker.webp",
+      "extension": "webp",
+      "bytes": 54800,
+      "sha256": "3da00e2d5459563a292b292ddbcf6a0fd74d485ed4c2f120302d17b163463d4b"
+    },
+    {
+      "path": "imagenes/037-sticker.webp",
+      "extension": "webp",
+      "bytes": 36508,
+      "sha256": "e2bf13f3dc94e361e94077011d484da444e59b0d5852a3fc4024b01b703f2273"
+    },
+    {
+      "path": "imagenes/038-sticker.webp",
+      "extension": "webp",
+      "bytes": 977444,
+      "sha256": "1a0f8ccd5b60f6be605e1ca888a6daccb2dead0b460b1a15b88b13f288f90a96"
+    },
+    {
+      "path": "imagenes/039-sticker.webp",
+      "extension": "webp",
+      "bytes": 231808,
+      "sha256": "9b953e3225eda50301a723f863cdc44df3965867be0ba21e49cbd770e29769c8"
+    },
+    {
+      "path": "imagenes/040-sticker.webp",
+      "extension": "webp",
+      "bytes": 14894,
+      "sha256": "1d4e863e112d4f6892b3a3c3f57eb67e9a9370be3d71d6a243a2cf9284f8f43b"
+    },
+    {
+      "path": "imagenes/041-sticker.webp",
+      "extension": "webp",
+      "bytes": 3982,
+      "sha256": "dc18b25af729280744ed719e77cc2d7cf437f25a5f3e8ad0852ad3e075ac122d"
+    },
+    {
+      "path": "imagenes/042-sticker.webp",
+      "extension": "webp",
+      "bytes": 67010,
+      "sha256": "0fae08b368355c53a246c8bb00dbca9ee6d2fde2cb4eb102209044513f63036a"
+    },
+    {
+      "path": "imagenes/043-sticker.webp",
+      "extension": "webp",
+      "bytes": 73330,
+      "sha256": "6877d22fdea1a458e18611a96e2e5bae87495c170c3ec06f97529ab9407a1bc3"
+    },
+    {
+      "path": "imagenes/044-sticker.webp",
+      "extension": "webp",
+      "bytes": 37676,
+      "sha256": "7ea5e14e18d6c173ec86a6fa3cc8cf6d22731f5f435faacd5f93ce3104648854"
+    },
+    {
+      "path": "imagenes/045-sticker.webp",
+      "extension": "webp",
+      "bytes": 51238,
+      "sha256": "8f8d6352e2497959552a1c1d7d76b6a7c7a030fe2422644247064e47f270d7d0"
+    },
+    {
+      "path": "imagenes/046-sticker.webp",
+      "extension": "webp",
+      "bytes": 16600,
+      "sha256": "6f5423908611f745846912d9a62ad6d1ff9dc29488f8ce702a3efa3fcaed6c4e"
+    },
+    {
+      "path": "imagenes/047-sticker.webp",
+      "extension": "webp",
+      "bytes": 923524,
+      "sha256": "357e16750b4c764ee1cb03be3836a86ee14e502dbbbaac9b1e097b89fdff48e5"
+    },
+    {
+      "path": "imagenes/048-sticker.webp",
+      "extension": "webp",
+      "bytes": 60154,
+      "sha256": "3d619cad9623b65c6b747d5668d85c43a48ef63bb1379138c4e060d25997b36e"
+    },
+    {
+      "path": "imagenes/049-sticker.webp",
+      "extension": "webp",
+      "bytes": 224638,
+      "sha256": "6c6f60734d65f5dbab5b3da5ade93704605bed63da4ce3a31686f612b853d401"
+    },
+    {
+      "path": "imagenes/050-sticker.webp",
+      "extension": "webp",
+      "bytes": 181812,
+      "sha256": "636027f307f1e9f3ed4ae2c4372bd779765d644f883b5110f1766440a9d2e99e"
+    },
+    {
+      "path": "imagenes/051-sticker.webp",
+      "extension": "webp",
+      "bytes": 156190,
+      "sha256": "edb9b475152e8655a69b601dbaee28bf4769a26b03f978e1ebed9e23d907aceb"
+    },
+    {
+      "path": "imagenes/052-sticker.webp",
+      "extension": "webp",
+      "bytes": 10198,
+      "sha256": "dc7349faf04985d135662af7c343d7661e6e43ae3d1c156fdbb15a2fe3aca94a"
+    },
+    {
+      "path": "imagenes/053-sticker.webp",
+      "extension": "webp",
+      "bytes": 160794,
+      "sha256": "e44c664f57e987ead7530423c1d7d90c6f1bebccc8d5e8941a7ddb94495ff900"
+    },
+    {
+      "path": "imagenes/054-sticker.webp",
+      "extension": "webp",
+      "bytes": 6136,
+      "sha256": "1420aed36f9f8bcd68828c7cec76cf9ff7e7ec42a3bd42ece76c25b172d58fc7"
+    },
+    {
+      "path": "imagenes/055-sticker.webp",
+      "extension": "webp",
+      "bytes": 644652,
+      "sha256": "6e69a57ecb2c522c5544a4438078080e55c95601658ead966b5a3a3364fbae1c"
+    },
+    {
+      "path": "imagenes/056-sticker.webp",
+      "extension": "webp",
+      "bytes": 82514,
+      "sha256": "42dab8d7d62d2bec9f46b88698002ac4503383a3852190073e726091dccc3b20"
+    },
+    {
+      "path": "imagenes/057-sticker.webp",
+      "extension": "webp",
+      "bytes": 112322,
+      "sha256": "266c652e4206027c9321261e236614451e4a9f3dd6b7a3c582ab180589e1bcc9"
+    },
+    {
+      "path": "imagenes/058-sticker.webp",
+      "extension": "webp",
+      "bytes": 4792,
+      "sha256": "854fb93a08165f50e50cad8b431e02956a6d95aa8c69dbb6fb05f467ed0d6864"
+    },
+    {
+      "path": "imagenes/059-sticker.webp",
+      "extension": "webp",
+      "bytes": 5460,
+      "sha256": "9063fb10bec0da17ee42be85710b8ef99adfa1db583f508a7255f639ae3aa172"
+    },
+    {
+      "path": "imagenes/060-sticker.webp",
+      "extension": "webp",
+      "bytes": 55772,
+      "sha256": "707f577398088e93b7cdf1f61bc212773e16dc5f5648e226a0ed21aea77421d9"
+    },
+    {
+      "path": "imagenes/061-sticker.webp",
+      "extension": "webp",
+      "bytes": 21362,
+      "sha256": "77f8d679d0a01ac30789b3ad896bea0f6ea79f0e17a556ddb4e6884049e7b55f"
+    },
+    {
+      "path": "imagenes/062-sticker.webp",
+      "extension": "webp",
+      "bytes": 21500,
+      "sha256": "6e729f0148e701824a7fa1db36f7d5ede7b7ea8bcb43c0a61d83bb1d78f0bde1"
+    }
+  ],
+  "counts": {
+    "bytes": 28542532,
+    "mp3": 150,
+    "wav": 7,
+    "webp": 62
+  }
+}

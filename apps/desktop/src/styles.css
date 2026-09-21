@@ -771,19 +771,30 @@ main {
 
 /* --- Voz: dos vistas en la misma pestaña -------------------------------- */
 /*
- * Los diez paneles de Voz suman 1.831 px para 674 de alto. Sacarlos a otra pestaña
- * no vale: **las otras cinco estan exactamente llenas** (medido, 674/674), asi que
- * mover el problema no lo resuelve. Se reparten en dos vistas —lo que suena y lo
- * que tienes guardado— y cada una cabe entera.
+ * El reparto de «Lo que suena» es el de la orden de trabajo:
  *
- * Cada tarjeta va en su **propia celda** (`.stack`) con la vista a la que
- * pertenece, y la rejilla las reparte sola en tres columnas. Esconder las de la
- * otra vista deja que las demas se recoloquen en el hueco: repartir de otra forma
- * es cambiarle la clase a una tarjeta, no moverla de sitio en el marcado.
+ *   estado de lectura arriba, a todo el ancho
+ *   los cinco paneles de trabajo en UNA fila: cola, motor, que se lee, la voz y
+ *   como se lee
+ *   la salida de audio como franja inferior, a todo el ancho
  *
- * El orden del marcado importa y no es casual: la rejilla coloca por filas, y una
- * fila mide lo que su tarjeta mas alta. Estan puestas para que las altas caigan en
- * filas distintas —si dos de 290 cayeran juntas, esa fila sola mediria 290—.
+ * Los cinco paneles son cinco columnas iguales de 240 px (1.240 px de rejilla, cuatro
+ * huecos de 10: 5 x 240 + 40 = 1.240), que es el numero que da la orden y tambien lo
+ * que pide el contenido: a 240 px cada panel apila sus controles en vertical sin
+ * partirlos.
+ *
+ * **La salida de audio no es un sexto panel**: lleva `ancho-completo` y la rejilla la
+ * baja a su propia fila ocupando las cinco columnas. Esa es la diferencia con lo que
+ * habia —era la sexta celda de la fila, asi que caia sola a una segunda fila de
+ * paneles con **1.000 px de vacio** al lado, medido— y con el reparto en tres
+ * columnas que se probo despues, que dejaba la fila principal partida en dos.
+ *
+ * En «Voces y claves» se mantienen dos columnas: sus listas y formularios necesitan
+ * mas ancho por tarjeta y son cuatro.
+ *
+ * El orden del marcado importa y no es casual: la rejilla coloca por orden de marcado,
+ * y por eso el orden se cambia moviendo la tarjeta, nunca con `order` —quedaria al
+ * reves de como lo lee un lector de pantalla—.
  */
 .grid-panel.voz[data-vista="sonando"] .vista-voces,
 .grid-panel.voz[data-vista="voces"] .vista-sonando {
@@ -795,39 +806,747 @@ main {
   margin-top: var(--sp-3);
 }
 
-/*
- * En Voz cada tarjeta conserva **su alto natural**.
- *
- * La rejilla reparte por filas y una fila mide lo que su tarjeta mas alta; con
- * `stretch` —que es lo que hace el resto de la aplicacion— las bajas se estiran
- * hasta esa altura y les queda un hueco **dentro** del marco. Medido en la vista
- * «Lo que suena»: «Salida de audio» mide 157 px y su fila 292, asi que arrastraba
- * 135 px de vacio por dentro del borde, y «La voz» otros 77. Con `start` ese hueco
- * se queda **fuera** de las cajas, que es donde no molesta: cada panel acaba donde
- * acaba su contenido y el borde lo dice.
- *
- * Va acotado a esta pagina porque en Aportaciones el criterio es el contrario —dos
- * tablas de la misma fila con los bajos a distinta altura se leen como un
- * descuadre— y alli siguen estirandose.
- */
-.grid-panel.voz .grid-columns {
-  align-items: start;
+/* El selector mide 33 px con el relleno de serie y la orden lo quiere entre 34 y 38:
+ * un pixel mas arriba y abajo y queda en 35, que es el alto de un control de la casa
+ * sin tocar el resto del boton. */
+.grid-panel.voz > .vista-switch button {
+  padding-block: 7px;
 }
 
 /*
- * Y cada vista reparte **las columnas que necesita**, no siempre tres.
+ * En Voz las tarjetas de la fila acaban **a la misma altura**.
  *
- * «Lo que suena» tiene seis paneles: tres arriba y tres abajo llenan los 529 px
- * utiles (215 + 292 + el hueco = 517). «Voces y claves» solo tiene cuatro, y con
- * tres columnas quedaban tres arriba y **uno solo abajo a la izquierda**, con
- * media pagina vacia al lado. A dos columnas son dos filas de dos y la pagina
- * queda llena (291 + 193 + el hueco = 494 de 529).
+ * La rejilla mide una fila por su panel mas alto, y con `start` el hueco de los cortos
+ * caia **al lado**, fuera del marco: medido, 243 px de vacio bajo «Cola» y 150 bajo
+ * «Que se lee», que es lo que se lee como un descuadre. Estiradas, el aire queda
+ * dentro del marco y las cinco siluetas de la fila se leen como una rejilla.
  *
- * Es `repeat(2, ...)` y no `auto-fit`: con `auto-fit` y 1.240 px de ancho caben
- * tres columnas aunque solo haya cuatro tarjetas, que es justo lo que pasaba.
+ * Va acotado a esta pagina porque en Aportaciones el criterio es el mismo pero las
+ * alturas ya casan solas.
  */
+.grid-panel.voz .grid-columns {
+  align-items: stretch;
+}
+
+/* Las cinco columnas de la fila de trabajo. Fijas y no `auto-fit` a proposito: con
+ * `auto-fit` el numero de columnas depende del ancho y a 1.716 px —el navegador
+ * maximizado— entraba una sexta, que es justo el reparto que la orden prohibe. */
+.grid-panel.voz[data-vista="sonando"] .grid-columns {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+/*
+ * Y la tarjeta se estira **hasta llenar su celda**: se estira la tarjeta, no su
+ * contenido.
+ *
+ * Esto es lo que faltaba y no se ve en una rejilla: `align-items: stretch` estira la
+ * **celda** (`.stack`), pero dentro de la celda vive otra rejilla —la del propio
+ * `.stack`— cuyas filas son `min-content`, asi que la tarjeta se quedaba con su alto
+ * natural y el resto de la celda era aire que no se veia. Medido despues de estirar la
+ * fila: las celdas median 455 px y las tarjetas 65, 200, 135, 283 y 324 —o sea que los
+ * cinco paneles seguian acabando arriba y el hueco de debajo seguia ahi—.
+ *
+ * Con la fila en `minmax(min-content, 1fr)` la tarjeta ocupa todo el alto disponible;
+ * el minimo es `min-content` y no `0` para que una tarjeta con mucho contenido crezca
+ * en vez de recortarse. Lo de dentro no se toca: los controles miden lo que median.
+ */
+.grid-panel.voz .stack {
+  align-content: stretch;
+  grid-auto-rows: minmax(min-content, 1fr);
+}
+
+/* La salida de audio: las cinco columnas para ella sola, en su propia fila. */
+.grid-panel.voz[data-vista="sonando"] .grid-columns > .ancho-completo {
+  grid-column: 1 / -1;
+}
+
+/*
+ * La franja de audio va **pegada al borde de abajo**, no detras de la fila.
+ *
+ * Detras de la fila quedaba a 141 px del borde —medido: la rejilla acababa en 759 y el
+ * panel llega a 900— con todo el vacio debajo, que se lee como una franja que se ha
+ * quedado a medio camino. Para pegarla hay que darle a la rejilla el alto que sobra:
+ * el panel pasa a columna flexible, la rejilla se queda ese resto y se reparte en dos
+ * filas —la de los cinco paneles, que mide lo que mide, y la de la franja, que se coge
+ * todo el hueco—. La franja se alinea abajo dentro de la suya, asi que el aire queda
+ * **entre** la fila de trabajo y ella, que es donde no estorba.
+ *
+ * En «Voces y claves» la rejilla tambien se estira, pero alli no hay franja: sus cuatro
+ * tarjetas se quedan arriba (`align-content: start`) y el hueco sobrante queda debajo.
+ */
+.grid-panel.voz {
+  display: flex;
+  flex-direction: column;
+}
+
+.grid-panel.voz > .grid-columns {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.grid-panel.voz .grid-columns {
+  align-content: start;
+}
+
+.grid-panel.voz[data-vista="sonando"] .grid-columns {
+  align-content: start;
+  /* Dos filas: la de los cinco paneles y la de la franja. Cuando los cinco no caben en
+     una fila —ventana estrecha— entran filas de mas por `grid-auto-rows`, cada una con
+     su alto, y la franja se queda la ultima. */
+  grid-template-rows: min-content min-content;
+}
+
+/* Con los cinco en una fila, la fila de trabajo se coge **todo el alto que sobra**: los
+ * cinco paneles se estiran hacia abajo y su borde inferior queda pegado al de la franja
+ * de audio, con el hueco de siempre entre los dos (10 px). Antes la fila medía lo que su
+ * panel mas alto —324 px— y quedaban 141 px de vacio entre los paneles y la franja.
+ *
+ * La fila es `1fr` y no `minmax(0, 1fr)`: con el minimo `auto`, si el contenido pide
+ * mas alto del que hay la fila crece y el panel se desplaza, en vez de recortar las
+ * tarjetas por abajo. */
+@media (min-width: 1340px) {
+  .grid-panel.voz[data-vista="sonando"] .grid-columns {
+    align-content: stretch;
+    grid-template-rows: 1fr min-content;
+  }
+}
+
+.grid-panel.voz[data-vista="sonando"] .grid-columns > .ancho-completo {
+  align-self: end;
+}
+
 .grid-panel.voz[data-vista="voces"] .grid-columns {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Dos columnas: la biblioteca a la izquierda y las claves con el consumo a la
+     derecha. El 2fr/1fr es el 65/35 que pide el encargo, y sale de la rejilla y no
+     de un ancho fijo: en una ventana mas ancha las dos crecen en la misma
+     proporcion.
+
+     Las **filas** las pone la derecha: las claves miden lo suyo y el consumo se
+     queda el resto. La biblioteca se las salta y ocupa las dos (`grid-row`), asi
+     que llega hasta abajo en vez de dejar la zona negra que quedaba antes —el
+     encargo lo dice con esas palabras—. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  /* Los minimos son **0** y no `min-content` a proposito: la biblioteca abarca las dos
+     filas, asi que su contenido —cientos de tarjetas— se sumaria al minimo de cada
+     fila y haria crecer la rejilla entera hasta que la pagina se desplazara. Con el
+     minimo a cero la rejilla mide lo que hay y es la **lista** la que se desplaza por
+     dentro, que es lo que pide el encargo. */
+  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+}
+
+/* La cadena de altos hasta la lista: la celda no aporta alto minimo, la tarjeta
+ * tampoco, y el cuerpo de la biblioteca se queda el que hay. Sin esto, la tarjeta
+ * crecia con su contenido y el `overflow: hidden` del marco lo recortaba en silencio. */
+.grid-panel.voz[data-vista="voces"] .stack {
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.grid-panel.voz[data-vista="voces"] .stack > .card {
+  min-height: 0;
+}
+
+.grid-panel.voz[data-vista="voces"] .voz-columna-principal {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.grid-panel.voz[data-vista="voces"] .voz-columna-lateral {
+  grid-column: 2;
+}
+
+/* En ventana apretada las dos columnas no caben: la biblioteca primero, luego las
+ * claves y el consumo debajo, cada uno con su alto. Nunca se reducen hasta ser
+ * ilegibles. */
+@media (max-width: 1339px) {
+  .grid-panel.voz[data-vista="voces"] .grid-columns {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .grid-panel.voz[data-vista="voces"] .voz-columna-principal,
+  .grid-panel.voz[data-vista="voces"] .voz-columna-lateral {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+/* La cola es lo unico de la fila que crece solo —un directo con la voz atascada junta
+ * avisos—, asi que su lista se desplaza **por dentro** y no empuja a los otros cuatro
+ * paneles ni estira la fila: la altura de la fila la sigue poniendo «Como se lee», que
+ * es la que mas contenido tiene. El tope deja el panel entero dentro de los 290-330 px
+ * de la orden. */
+.grid-panel.voz .queue {
+  max-height: 232px;
+  overflow-y: auto;
+}
+
+/* La franja de salida de audio, **en una linea**: dispositivo activo, volumen y
+ * selector, uno al lado del otro.
+ *
+ * Apilada medía 152 px y la orden pide 90-120; en horizontal entra en una sola fila.
+ * Y el ancho ayuda: como ocupa las cinco columnas tiene 1.240 px para tres controles,
+ * asi que el que se estira es el volumen —el unico que se arrastra y el unico que
+ * agradece los pixeles— y el selector se queda con lo que mide su lista, que no mejora
+ * por ser mas ancha. */
+.salida-audio {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  /* Los 10 px de arriba y abajo son los que separan la franja de una tira apretada:
+   * con el relleno de serie medía 77 px y la orden pide 90-120, y una franja pegada al
+   * marco se lee como un descuido. En 97 entra con aire y sin crecer de mas. */
+  padding-block: var(--sp-3);
+}
+
+.salida-audio .hint {
+  margin: 0;
+}
+
+/* Dentro de la franja los mandos no llevan el margen de abajo que llevan en un panel:
+   aqui no hay nada debajo. */
+.salida-audio .control {
+  margin-bottom: 0;
+}
+
+.salida-audio .control:has(input[type="range"]) {
+  flex: 1 1 320px;
+}
+
+.salida-audio .control:has(select) {
+  flex: 0 1 auto;
+}
+
+.salida-audio .control:has(select) label {
+  flex: 0 1 auto;
+  gap: var(--sp-2);
+  justify-content: flex-start;
+}
+
+/* --- La biblioteca de voces ---------------------------------------------- */
+/*
+ * Es la tarjeta grande de «Voces y claves»: las dos pestañas —Mis voces y
+ * Explorar—, el buscador, los filtros y la rejilla. Sustituye a las cuatro cajas
+ * del mismo peso que habia antes (voces guardadas, claves, ajustes de Fish y
+ * consumo).
+ *
+ * El cuerpo es una columna flexible que **se queda el alto de la tarjeta**: la
+ * cabecera, el alta y los filtros miden lo suyo y la lista se coge el resto con su
+ * propio desplazamiento. Asi cargar cien voces no hace crecer la pagina —el
+ * encargo lo pide asi— y la zona de abajo deja de estar vacia.
+ */
+.voz-biblioteca {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+}
+
+/* La fila de arriba: las dos pestañas a la izquierda y el alta a la derecha. */
+.voz-biblioteca-cabeza {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: space-between;
+}
+
+/* El cuerpo de la lista: la rejilla a la izquierda y, si hay detalle abierto, el
+ * panel a la derecha. El detalle **convive** con la lista en vez de taparla: lo que
+ * se viene a hacer alli es escuchar muestras y comparar. */
+.voz-cuerpo {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+.voz-lista {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  /* Un poco de aire a la derecha para que la barra de desplazamiento no pise las
+     tarjetas de la ultima columna. */
+  padding-right: 2px;
+}
+
+/* La rejilla de tarjetas. `auto-fill` con un minimo de 172 px: cuatro columnas en
+ * la biblioteca de 1.440 y cinco en una ventana ancha, sin anchos puestos a mano
+ * que solo funcionen en una resolucion. */
+.voces-rejilla {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+.voces-vacio {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  justify-content: center;
+  min-height: 120px;
+  padding: var(--sp-3);
+}
+
+.voces-mas {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-1) 0;
+}
+
+/* --- La tarjeta de una voz ------------------------------------------------ */
+/*
+ * Compacta y siempre igual: imagen, nombre, idioma y acciones. La misma para las
+ * dos pestañas; lo unico que cambia es que se puede pulsar.
+ */
+.voz-tarjeta {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2);
+}
+
+/* La que esta sonando y la que esta puesta se distinguen **sin leer**: es la misma
+ * regla que el resto de la aplicacion —el color dice el estado—. */
+.voz-tarjeta.sonando {
+  border-color: var(--accent);
+}
+
+.voz-tarjeta.en-uso {
+  border-color: var(--menta, var(--accent));
+  box-shadow: inset 0 0 0 1px var(--menta, var(--accent));
+}
+
+.voz-tarjeta.atenuada {
+  opacity: 0.6;
+}
+
+.voz-imagen-boton {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: block;
+  padding: 0;
+  width: 100%;
+}
+
+.voz-imagen-boton:disabled {
+  cursor: default;
+}
+
+/* La imagen, con su proporcion fija. `cover` y no `contain`: son portadas, y una
+ * portada con franjas negras a los lados se ve peor que recortada. */
+.voz-imagen {
+  aspect-ratio: 4 / 3;
+  background: var(--panel);
+  border-radius: 6px;
+  display: block;
+  object-fit: cover;
+  overflow: hidden;
+  width: 100%;
+}
+
+.voz-imagen-vacia {
+  align-items: center;
+  border: 1px dashed var(--border);
+  color: var(--humo);
+  display: flex;
+  font-size: 11px;
+  justify-content: center;
+}
+
+.voz-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.voz-titulo {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voz-rotulo {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.voz-motor {
+  color: var(--humo);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voz-acciones {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+/* Lo que suena, en la tarjeta: el icono de pausa y una barrita. Sin animaciones
+ * mas alla de la barra: el encargo pide no recargar. */
+.voz-suena {
+  align-items: center;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 11px;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.voz-suena-barra,
+.muestra-progreso {
+  background: var(--border);
+  border-radius: 999px;
+  display: inline-block;
+  height: 3px;
+  overflow: hidden;
+  width: 54px;
+}
+
+.voz-suena-barra > span,
+.muestra-progreso > span {
+  background: var(--accent);
+  display: block;
+  height: 100%;
+}
+
+/* --- El menu ... de una voz ---------------------------------------------- */
+.voz-menu {
+  position: relative;
+}
+
+.voz-menu > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.voz-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.voz-menu-lista {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 45%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  padding: var(--sp-1);
+  position: absolute;
+  right: 0;
+  /* Por encima de las tarjetas de al lado. */
+  z-index: 5;
+  top: calc(100% + 4px);
+}
+
+.voz-menu-lista button {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+}
+
+.voz-menu-lista button.peligrosa {
+  color: var(--warn);
+}
+
+/* --- El alta por identificador ------------------------------------------- */
+.voz-importar {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+}
+
+.voz-importar-cabeza {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.voz-importar .alta-linea {
+  margin: 0;
+}
+
+.voz-comprobada {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--sp-2);
+  padding-top: var(--sp-1);
+}
+
+.voz-comprobada-imagen {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  object-fit: cover;
+  width: 120px;
+}
+
+.voz-comprobada-datos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.voz-comprobada-acciones {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* --- Los filtros ---------------------------------------------------------- */
+.voz-filtros {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.voz-buscador {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  flex: 1 1 200px;
+  font: inherit;
+  min-width: 120px;
+  padding: 5px 8px;
+}
+
+.voz-filtros-botones {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* --- El detalle ----------------------------------------------------------- */
+/*
+ * El panel de una voz: sus datos, sus muestras y —si no tiene— el boton de generar
+ * una prueba. Va al lado de la lista, con su propio desplazamiento, y en ventana
+ * apretada se pone debajo.
+ */
+.voz-detalle {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  flex-basis: 300px;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.voz-detalle-cabeza {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  padding: var(--sp-2);
+}
+
+.voz-detalle-titulo {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voz-detalle-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+
+.voz-detalle-imagen {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.voz-detalle-datos {
+  display: grid;
+  gap: 2px var(--sp-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+}
+
+.voz-detalle-datos dt {
+  color: var(--humo);
+  font-size: 11px;
+}
+
+.voz-detalle-datos dd {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-1);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.voz-detalle-muestras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.voz-muestras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.voz-muestras li {
+  align-items: baseline;
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.voz-muestras .hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1339px) {
+  .voz-cuerpo {
+    flex-direction: column;
+  }
+
+  .voz-detalle {
+    flex-basis: auto;
+    max-height: 320px;
+  }
+}
+
+/* --- La barra de lo que suena -------------------------------------------- */
+/*
+ * Va dentro de la tarjeta, pegada abajo, y solo ocupa algo cuando hay algo
+ * sonando. Es lo que hace que se sepa **que** suena aunque su tarjeta se haya
+ * quedado fuera de la parte visible de la lista.
+ */
+.muestra-barra {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  color: var(--humo);
+  display: flex;
+  font-size: 11px;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding-top: var(--sp-1);
+}
+
+.muestra-punto {
+  background: var(--accent);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.muestra-punto.cargando {
+  background: var(--ambar, var(--accent));
+}
+
+.muestra-titulo {
+  color: var(--text);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muestra-aviso {
+  color: var(--warn);
+  flex: 1 1 auto;
+}
+
+.muestra-progreso {
+  flex: 0 0 120px;
+}
+
+/* --- Los esqueletos de carga --------------------------------------------- */
+/*
+ * Mientras carga se enseña la **forma** de una tarjeta y no un «cargando» en medio
+ * del hueco: asi la lista no da un salto cuando llegan los datos.
+ */
+.voz-esqueleto {
+  pointer-events: none;
+}
+
+.voz-esqueleto-linea {
+  animation: voz-latido 1.4s ease-in-out infinite;
+  background: var(--border);
+  border-radius: 4px;
+  display: block;
+  height: 10px;
+}
+
+.voz-esqueleto-linea.corta {
+  width: 55%;
+}
+
+.voz-esqueleto .voz-imagen {
+  animation: voz-latido 1.4s ease-in-out infinite;
+  background: var(--border);
+  border: 0;
+}
+
+@keyframes voz-latido {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Por debajo de 1.340 px de ventana —unos 1.140 px de rejilla— cinco columnas ya no
+ * dan 220 px por panel y la fila pasa a tres, que es el paso que menos hueco deja: con
+ * cinco paneles son 3+2 (una celda vacia) y con cuatro serian 4+1 (tres celdas vacias,
+ * medido: 757 px de vacio al lado del ultimo). La franja de audio sigue ocupando el
+ * ancho entero. */
+@media (max-width: 1339px) {
+  .grid-panel.voz[data-vista="sonando"] .grid-columns {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
 }
 
 /* --- El anillo del saldo -------------------------------------------------- */
@@ -2015,9 +2734,10 @@ footer.stats {
 }
 
 /* La dirección es lo que mide lo que mide; la tarjeta de diseños se lleva el resto y
-   es la que cede cuando la lista no cabe, porque ya sabe desplazarse por dentro. */
+   es la que cede cuando la lista no cabe, porque ya sabe desplazarse por dentro. Los
+   juegos van abajo con su alto justo: son tres filas y no tienen por qué crecer. */
 .overlays-columnas > .stack {
-  grid-template-rows: min-content minmax(0, 1fr);
+  grid-template-rows: min-content minmax(0, 1fr) min-content;
   min-height: 0;
 }
 
@@ -2065,6 +2785,29 @@ footer.stats {
   min-height: 0;
   overflow-y: auto;
   padding: 0;
+  /* Las filas miden lo suyo y se quedan arriba: con el alto de sobra que le deja la
+     rejilla, `stretch` repartiria ese hueco entre las filas y las haria mas altas. */
+  align-content: start;
+}
+
+/* Los juegos van a **dos columnas** como los marcadores: con tres, en una sola
+   columna serian tres filas de 43 y le quitarian 55 px a la lista de marcadores, que
+   es la que tiene que enseñar ocho. En dos son dos filas y los ocho marcadores entran
+   enteros, sin barra. */
+.disenos-juegos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* El hueco de «crear un juego», que es lo siguiente que se monta: dice que existe y
+   para que es, sin inventarse todavia como se hace. */
+.juegos-alta {
+  border: 1px dashed var(--border);
+  border-radius: var(--radio);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
 }
 
 .previa-barra {
@@ -2154,8 +2897,23 @@ footer.stats {
   border-style: solid;
 }
 
+.soltar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .soltar strong {
   font-size: 13px;
+}
+
+.soltar-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.soltar-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .soltar .hint {
@@ -2312,6 +3070,10 @@ video.medio-mini {
   min-width: 0;
 }
 
+.buscar .tiny {
+  flex: 0 0 auto;
+}
+
 .buscar-cuenta {
   color: var(--muted);
   flex: 0 0 auto;
@@ -2324,6 +3086,48 @@ video.medio-mini {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+/*
+ * Lo que **está sonando** ahora mismo en el monitor.
+ *
+ * Es otra cosa que «puesto», y por eso se marca aparte: `puesto` es el medio del
+ * aviso elegido —lo que saldrá en antena— y esta marca dice qué se está oyendo al
+ * probar. Pueden coincidir, y cuando coincide se ve el nombre en claro sobre el
+ * tinte, que es lo único que hace falta distinguir de un vistazo en una lista de
+ * ciento cincuenta ficheros.
+ */
+.medios li.sonando {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.medios li.sonando .medio-nombre {
+  color: var(--text);
+}
+
+/*
+ * El botón de un sonido que ya suena: dice «Parar» y lleva un punto que late.
+ *
+ * Es el mismo latido del estado en directo —opacidad sobre un disco de 7 px, que el
+ * navegador resuelve en composición—, así que la aplicación sigue teniendo una sola
+ * animación permanente, y con «menos movimiento» se queda fijo.
+ */
+.ghost.sonando::before {
+  animation: latido 1.2s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 7px;
+  margin-right: var(--sp-1);
+  vertical-align: middle;
+  width: 7px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost.sonando::before {
+    animation: none;
+  }
+}
+
 /* Cada bloque de medios —imágenes y sonidos— se lleva **su mitad** del alto y se
    desplaza por dentro. Sin esto, los dos suman sus alturas y el marco los recorta:
    medido, 7.213 px fuera del panel. */
@@ -2332,6 +3136,16 @@ video.medio-mini {
   flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
+}
+
+/* La galería gana un poco de altura para que el dibujo sea reconocible; la lista
+   de audio conserva más espacio porque cada fila necesita nombre y acciones. */
+.medio-grupo.imagenes-grupo {
+  flex: 0.9 1 0;
+}
+
+.medio-grupo.sonidos-grupo {
+  flex: 1.1 1 0;
 }
 
 .galeria,
@@ -2395,6 +3209,13 @@ video.medio-mini {
   white-space: nowrap;
 }
 
+.medio-acciones {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--sp-1);
+}
+
 /* Un campo de formulario con su rótulo encima. El `min-width: 0` es lo que deja
    encoger la columna dentro de la rejilla en vez de empujar la tarjeta. */
 .campo {
@@ -2446,71 +3267,532 @@ video.medio-mini {
   min-width: 0;
 }
 
-/* El ritmo vertical del editor de avisos, un punto mas apretado que el de serie.
+/* El mismo par, con sitio para un tercero.
  *
- * `.campo` trae 10 px de separacion y aqui hacen falta 6: medido, el editor mide
- * 382 px de alto y su fila le da 379, asi que 3 px se quedaban fuera y el marco los
- * recortaba —el campo «Minimo», a medias—. Con 6 px de ritmo baja a ~366 y entra con
- * holgura.
- *
- * Va acotado a `.alertas-panel`, que es donde vive el editor, y no a `.campo`: el
- * resto de formularios de la aplicacion tienen sitio de sobra y no hay por que
- * apretarlos. */
-.alertas-panel .campo {
-  margin-top: var(--sp-2);
+ * Existe para el editor de avisos: el «Mínimo» ocupaba una fila entera para un número
+ * de tres cifras, y esa fila es la que paga los mandos de la animación. Con tres
+ * columnas entra junto a «Duración» y «Volumen», que es donde se lee —los tres son
+ * cifras del mismo aviso—, y el editor deja de recortar por abajo. */
+.campos-par-tres {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* La lista de avisos, el editor y los medios, en **tres columnas**.
+/* El ritmo vertical del editor de avisos, un punto mas apretado que el de serie.
  *
- * Eran cuatro filas —lista y editor, medios, salida y direccion— y el contenido
- * sumaba **1.121 px** para 674 de alto: media pagina fuera de la vista. Los medios
- * son la tercera pieza del mismo trabajo (elegir el aviso, escribirlo y darle su
- * medio), asi que van en la misma fila.
+ * `.campo` trae 10 px de separacion y aqui hacen falta 6: medido, el editor medía
+ * 382 px de alto y su fila le daba 379, asi que 3 px se quedaban fuera y el marco los
+ * recortaba —el campo «Minimo», a medias—. Con 6 px de ritmo entra con holgura.
  *
- * La lista se queda con un ancho acotado porque es un indice de cinco nombres; los
- * medios con 320 px, que es lo que pide su zona de soltar; y el editor se lleva el
- * resto, que es donde estan los campos. */
-.alertas-panel {
+ * Y desde las animaciones de permanencia hacen falta 4: el editor tiene ocho filas de
+ * mandos, y con una fila mas —la de la permanencia, que con el resplandor del borde
+ * ocupa dos— los 6 px de separacion lo dejaban 18 px fuera. Se aprieta **aqui**, que es
+ * aire entre campos y no contenido, en vez de recortar la biblioteca, que es lo que el
+ * streamer usa para trabajar.
+ *
+ * Va acotado a `.alertas-consola`, que es donde vive el editor, y no a `.campo`: el
+ * resto de formularios de la aplicacion tienen sitio de sobra y no hay por que
+ * apretarlos. */
+.alertas-consola .campo {
+  margin-top: var(--sp-1);
+}
+
+/* Y las dos filas de animacion, con el mismo ritmo. */
+.animacion-linea,
+.permanencia-linea {
+  margin-top: var(--sp-1);
+}
+
+/* La consola: los avisos, el editor y **la previa**, en tres columnas.
+ *
+ * La previa vivia detras de una pestaña —«Medios | Previa»— en la tercera columna, y
+ * ese era el error de fondo: la regla 3 del proyecto dice que el mando y su resultado
+ * se ven a la vez, y una previa que hay que abrir no previsualiza nada. Ahora esta
+ * siempre a la vista, con su mando del tamaño debajo, y los medios se han ido a su
+ * propia fila, a todo el ancho.
+ *
+ * Los avisos miden 250 px: son siete nombres que se encienden y se apagan en directo,
+ * asi que sus filas son grandes y el raíl no se estrecha. La previa mide 300, que es lo
+ * que pide un cuadrado del alto que hay —el lienzo es 1:1 y lo limita el alto, asi que
+ * una columna mas ancha solo anadiria franjas vacias a los lados—. El editor se lleva
+ * el resto, que es donde estan los campos. */
+.alertas-consola {
   align-items: stretch;
   display: grid;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) minmax(0, 320px);
+  grid-template-columns: 250px minmax(0, 1fr) 300px;
   min-height: 0;
   min-width: 0;
 }
 
-.alertas-panel > .card {
+.alertas-consola > .card {
   min-height: 0;
 }
 
-/* La tarjeta de los medios, tambien en columna: la lista tiene que poder encogerse
-   dentro y quedarse con lo que sobre, que es lo que le da el alto. */
-.alertas-panel > .card:last-child {
+/* El mando del tamaño, pegado a la previa.
+ *
+ * Vive aqui y no en el editor porque es el unico ajuste del aviso cuyo efecto se ve
+ * **mientras se mueve**: `VistaPrevia` manda la escala al marco y el aviso que ya esta
+ * en pantalla cambia de tamaño sin volver a dispararlo. En el editor, ajustar el
+ * tamaño era mover un deslizador a ciegas y pulsar Probar despues. */
+.previa-tamano {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  min-width: 0;
+}
+
+.previa-tamano label {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.previa-tamano input[type="range"] {
+  accent-color: var(--accent);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* La biblioteca, **a todo el ancho**: dar de alta a la izquierda, lo que se ve en
+ * medio y lo que suena a la derecha.
+ *
+ * Estaba en una columna de 370 px. Con 62 imagenes y 157 sonidos eso eran cinco
+ * miniaturas de 28 px y dos nombres: buscar mirando no es buscar, y la biblioteca es
+ * lo que mas se usa de la pestaña. A lo ancho, cada zona tiene el sitio que pide. */
+.biblioteca {
+  display: grid;
+  flex: 1 1 auto;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(300px, 360px);
+  /* Una sola fila que mide el alto del contenedor, y no el de su contenido: sin
+   * esto la fila se dimensiona por las 219 filas de las dos listas y la biblioteca
+   * pide 5.841 px. Con la fila acotada, son las listas las que se desplazan. */
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.bib-alta {
   display: flex;
   flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  min-width: 0;
 }
 
-/* La pagina: el aviso de arriba a todo el ancho, la fila de tres columnas en medio
- * —que es la que se lleva el alto que sobra— y la salida de audio y la direccion de
- * OBS repartidas en las dos columnas de la ultima fila.
+/* Sin medios todavia, el aviso ocupa el sitio de las dos listas: dejarlo en la
+ * primera columna lo dejaria nadando en una franja vacia de 900 px. */
+.bib-vacio {
+  align-self: center;
+  grid-column: 2 / -1;
+}
+
+.biblioteca .medio-grupo {
+  min-height: 0;
+  min-width: 0;
+}
+
+/* La tira de abajo: la salida de audio y la direccion de OBS.
  *
- * `min-content` para la ultima fila y no `1fr`: esos dos paneles tienen formularios
- * (un desplegable y un deslizador) y no se pueden recortar. El que cede es el de
- * arriba, que es el que tiene listas y ya sabe desplazarse por dentro. */
+ * Son las dos piezas que se tocan **una vez**, al montar la escena, y ocupaban dos
+ * tarjetas de media pantalla con mas hueco que contenido. Ese hueco salia de donde no
+ * sobraba —la biblioteca y la lista de avisos—, asi que ahora son una linea cada una. */
+.alertas-tira {
+  display: grid;
+  gap: var(--sp-3);
+  /* La salida de audio se lleva mas: tiene tres mandos y su estado. La direccion de
+   * OBS solo necesita el codigo y el boton de copiar. */
+  grid-template-columns: minmax(0, 1fr) 440px;
+  min-width: 0;
+}
+
+.tira-linea {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-3);
+  min-height: 24px;
+  min-width: 0;
+}
+
+.tira-rotulo {
+  color: var(--humo);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+/* Los mandos de la animacion, en **una linea**.
+ *
+ * Son cinco controles cortos —dos desplegables, dos tiempos y el ritmo— y en dos filas
+ * de campos costaban 86 px de alto. Ese alto sale de la biblioteca, que es la que peor
+ * esta, asi que van en una fila con el rotulo al lado: el mismo recurso que la tira de
+ * abajo.
+ *
+ * Los desplegables se reparten lo que sobra (`flex: 1 1 0`) en vez de llevar un ancho
+ * fijo. Asi la fila no se sale por mucho que el sistema dibuje la letra mas ancha, que
+ * es el fallo que no se ve hasta que lo ve alguien con otra configuracion. */
+.animacion-linea {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  min-width: 0;
+}
+
+.animacion-etiqueta {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Los mandos de las dos filas —animación y permanencia— con el mismo aspecto.
+ *
+ * Van juntos en una regla y no en dos por un motivo que costo un rato: las de la
+ * permanencia estuvieron sin acotar mientras las de la animacion si lo estaban, asi que
+ * los campos numericos se pintaban con el estilo del navegador —mas alto— y cada linea
+ * medía 33 px en vez de 24. La fila entera se iba a 72 y el editor recortaba por abajo. */
+.animacion-linea select,
+.animacion-linea input.animacion-ms,
+.permanencia-linea select,
+.permanencia-linea input.animacion-ms {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 3px 6px;
+}
+
+.animacion-linea select,
+.permanencia-linea select {
+  flex: 1 1 0;
+}
+
+/* El tiempo, en segundos: lo justo para «0.35». */
+.animacion-linea input.animacion-ms,
+.permanencia-linea input.animacion-ms {
+  flex: 0 0 54px;
+}
+
+/* Los mandos de la permanencia.
+ *
+ * En su propia linea porque cada efecto trae los suyos, y **envuelve**: el resplandor
+ * del borde tiene cinco mandos —color, intensidad, difuminado, velocidad y modo— y no
+ * caben en un renglon. Reservar dos filas fijas costaria 26 px de alto en todos los
+ * efectos para que los aproveche uno, y ese alto sale de la biblioteca. */
+.permanencia-linea {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  min-width: 0;
+}
+
+.permanencia-linea .permanencia-efecto {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  flex: 0 1 150px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 3px 6px;
+}
+
+.permanencia-mando {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.permanencia-mando select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+/* El color, cuadrado y del tamaño de un mando: un selector de color nativo mide lo que
+   mide su sistema, y aquí tiene que caber en el renglón como los demás. */
+.permanencia-mando input[type="color"],
+.permanencia-color {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 1px;
+  width: 30px;
+}
+
+.tira-linea select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radio);
+  color: var(--text);
+  flex: 0 1 170px;
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.tira-mando {
+  align-items: center;
+  display: flex;
+  flex: 0 1 auto;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.tira-etiqueta,
+.tira-cifra {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.tira-cifra {
+  color: var(--text);
+  font-family: var(--fuente-datos);
+  min-width: 38px;
+  text-align: right;
+}
+
+.tira-mando input[type="range"] {
+  accent-color: var(--accent);
+  flex: 0 1 84px;
+  min-width: 56px;
+}
+
+/* `0 0 auto` y `nowrap`: el interruptor **no** se encoge. Con `min-width: 0` el texto
+ * partía en dos líneas y estiraba la tira entera 15 px, que salían de la biblioteca.
+ * Quien cede es el estado de la derecha, que ya lleva `text-overflow`. */
+.tira-switch {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Los mandos de la tira, compactos: es una franja de lo que se configura **una vez**,
+ * no un formulario. Medido, el deslizador nativo medía 34 px de alto y el boton 33, y
+ * entre los dos estiraban la tira a 61 — quince px que salian de la biblioteca. */
+.tira-mando input[type="range"] {
+  height: 18px;
+}
+
+.tira-linea select {
+  padding: 2px 8px;
+}
+
+.tira-linea .copiar button {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+/* La direccion no parte en dos lineas: una URL de 60 caracteres en una celda de 440
+ * px se envolvia y estiraba la tira a 61 px. Se recorta por el final, y el `title`
+ * del codigo (ver `Copiar`) la enseña entera al pasar el raton. Se copia con el
+ * boton, no se teclea: recortarla no esconde nada que haga falta leer. */
+.tira-linea .copiar .path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El estado de la salida: confirma que el dispositivo elegido suena de verdad. Se
+ * queda con el sitio que sobra y se recorta por el final si el nombre es largo. */
+.tira-estado {
+  color: var(--muted);
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tira-estado.malo {
+  color: var(--warn);
+}
+
+/* Confirmación de borrado: ocupa el foco sin cambiar el tamaño de las tarjetas que
+   están debajo. El fondo oscuro mantiene la jerarquía de la acción y el contenido
+   sigue usando los tokens de la aplicación. */
+.dialog-fondo {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: var(--sp-5);
+  position: fixed;
+  z-index: 20;
+}
+
+.dialogo-confirmacion {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radio-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  max-width: min(440px, 100%);
+  padding: var(--sp-5);
+  width: 100%;
+}
+
+.dialogo-confirmacion:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dialogo-confirmacion h2 {
+  font-family: var(--fuente-titulo);
+  font-size: 18px;
+  margin: 0;
+}
+
+.dialogo-confirmacion p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: var(--sp-3) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.dialogo-confirmacion strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.dialogo-acciones {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  margin-top: var(--sp-5);
+}
+
+button.danger {
+  background: var(--warn);
+  color: var(--text);
+}
+
+/* La tarjeta de los medios no necesita regla propia: `.card` ya es columna flexible, y
+   lo unico que le hace falta —poder encogerse por debajo de su contenido— lo pone
+   `.grid-panel.alertas > .card:has(.biblioteca)`, arriba, junto a la rejilla. */
+
+/* La pagina de Alertas: **una sola columna** de cuatro filas.
+ *
+ * Antes eran dos columnas, con la consola ocupando las dos y las tarjetas de abajo
+ * repartiendose la ultima fila, asi que cada hija tenia que declarar su `grid-column`.
+ * Con una columna cada fila es una decision y se lee de arriba abajo: que hay armado,
+ * con que se edita, que sale en antena, de donde se elige y lo que se toca una vez.
+ *
+ * El alto: la ventana deja 674 px. La consola mide lo que miden sus tarjetas (`auto`
+ * y no `1fr`): estirada dejaba un hueco muerto de 48 px bajo la lista de avisos, que es
+ * justo el reparto al reves que se venia a arreglar. La biblioteca se queda con lo que
+ * sobra (`1fr`), porque es la que gana con cada pixel: son 62 imagenes y 157 sonidos.
+ * Y la tira mide lo que mide una linea.
+ *
+ * La biblioteca necesita ademas que **su tarjeta** pueda encogerse: `Card` lleva
+ * `min-height: min-content`, que es lo correcto para una tarjeta normal —no debe
+ * aplastarse por debajo de su cabecera— pero aqui pide el alto de las 219 filas
+ * enteras y estira la fila a 5.841 px. Medido con el banco, no a ojo. */
 .grid-panel.alertas {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: min-content minmax(0, 1fr) min-content;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: min-content auto minmax(210px, 1fr) auto;
 }
 
-.grid-panel.alertas > .hint,
-.grid-panel.alertas > .alertas-panel {
-  grid-column: 1 / -1;
+.grid-panel.alertas > .card:has(.biblioteca) {
+  min-height: 0;
 }
 
-/* En ventanas apretadas, una columna: la lista encima del editor. */
-@media (max-width: 980px) {
-  .alertas-panel {
+/* --- Lo que se lee de lejos y se toca en directo ----------------------------
+ *
+ * El minimo del proyecto son 12-13 px para lo secundario, y esta pestaña se mira
+ * desde la silla y se toca con el directo en marcha. Aqui sube un escalon todo lo que
+ * hay que leer o pulsar. Va **acotado a esta pestaña**: las otras cinco caben justo
+ * en los 674 px y moverles la letra las sacaria de la ventana. */
+.grid-panel.alertas .hint {
+  font-size: 12.5px;
+}
+
+.grid-panel.alertas > .hint {
+  font-size: 13px;
+  margin: 0;
+}
+
+.grid-panel.alertas .grupo-rotulo {
+  font-size: 12px;
+  margin-bottom: var(--sp-2);
+}
+
+/* La fila del aviso: mas alta que antes porque es lo que se enciende y se apaga en
+ * directo, y el interruptor tiene que verse sin apuntar. */
+.grid-panel.alertas .aviso {
+  padding: 8px var(--sp-3);
+}
+
+.grid-panel.alertas .aviso-nombre {
+  font-size: 14px;
+}
+
+.grid-panel.alertas .aviso-interruptor .luz {
+  height: 15px;
+  width: 15px;
+}
+
+.grid-panel.alertas .campo label {
+  font-size: 13px;
+}
+
+.grid-panel.alertas .medio-nombre {
+  font-size: 13px;
+}
+
+/* Miniaturas de verdad: a 48 px no se distingue un sticker de otro, que es justo lo
+ * que hay que hacer al elegir uno entre 62. */
+.grid-panel.alertas .galeria {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+
+.grid-panel.alertas .galeria-mini {
+  height: 62px;
+}
+
+.grid-panel.alertas .galeria-nombre {
+  font-size: 11px;
+}
+
+/* En ventanas apretadas, la consola y la biblioteca caen a una columna. Es el caso
+ * del panel servido por HTTP, donde la ventana si se redimensiona: en la aplicacion
+ * de escritorio la ventana mide 1440 y no llega aqui. */
+@media (max-width: 1180px) {
+  .grid-panel.alertas {
+    grid-template-rows: min-content auto auto auto;
+  }
+
+  .alertas-consola,
+  .biblioteca,
+  .alertas-tira {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bib-vacio {
+    grid-column: 1 / -1;
   }
 }
 
@@ -2519,15 +3801,15 @@ video.medio-mini {
    lista de avisos partida en dos rotulos, no dos paneles. La caja la pone la
    tarjeta de fuera, una sola vez.
  *
- * Se desplaza **por dentro**, y eso es nuevo: con los cinco avisos de antes cabia
- * justo, pero los tramos de regalo lo dejaron en siete y la columna mide 379 px.
- * Medido con el banco, la lista se pasaba 24 px y el marco los recortaba en
- * silencio. Es la misma excepcion que el chat de Inicio: una lista que crece se
+ * Se desplaza **por dentro** por si algun dia hay mas de siete: con siete —los tres
+ * tramos de regalo mas los cuatro de siempre— entran justos en la consola, y aqui las
+ * filas son mas altas que antes a proposito, porque se encienden y se apagan en
+ * directo. Es la misma excepcion que el chat de Inicio: una lista que crece se
  * desplaza ella, nunca la pagina.
  *
  * La tarjeta pasa a columna flexible para que la lista —y no el marco— sea lo que
  * cede cuando no cabe. */
-.alertas-panel > .card:first-child {
+.alertas-consola > .card:first-child {
   display: flex;
   flex-direction: column;
 }
@@ -2674,6 +3956,15 @@ video.medio-mini {
     gap: var(--sp-2);
   }
 
+  /* En un navegador estrecho pero todavía utilizable se mantienen las columnas que
+     quepan a 340 px; así una vista de 777 px no se desperdicia en una sola tarjeta.
+     Cuando el contenido ya no alcanza ese mínimo, `auto-fit` cae por sí solo a una
+     columna y el documento conserva su desplazamiento natural. */
+  .grid-panel.voz[data-vista="sonando"] .grid-columns,
+  .grid-panel.voz[data-vista="voces"] .grid-columns {
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  }
+
   .stack {
     gap: var(--sp-2);
   }
@@ -2784,6 +4075,22 @@ ul.claves li > * {
 .clave-acciones {
   display: flex;
   gap: var(--sp-1);
+}
+
+/* El alta, detrás de un botón.
+ *
+ * Se da de alta una vez, al montar la escena, y con el formulario siempre abierto se
+ * comía tres renglones de una tarjeta que se mira a diario: aquí lo que se mira es el
+ * **estado** de las claves. El menú de cada clave va por el mismo camino —cuatro
+ * acciones dentro de un ⋯ en vez de cuatro botones en la fila—. */
+.clave-alta-boton {
+  margin-top: var(--sp-2);
+  width: 100%;
+}
+
+/* El menú de una clave se alinea a la derecha de su fila, como el de una voz. */
+ul.claves li > .voz-menu {
+  justify-self: end;
 }
 
 /* El formulario de alta en **una linea**: el nombre es corto, el codigo largo y

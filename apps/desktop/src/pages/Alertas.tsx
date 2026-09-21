@@ -31,7 +31,18 @@ import {
   type SalidaAlertas,
   type TipoAviso,
 } from "../api";
-import { Card, Copiar, Empty, VistaPrevia } from "../components";
+import { Card, Copiar, DialogoConfirmacion, Empty, VistaPrevia } from "../components";
+import { usePreviewAudio } from "../previewAudio";
+import {
+  ANIMACIONES,
+  ANIMACION_MAXIMA_S,
+  ANIMACION_MINIMA_S,
+  PERMANENCIAS,
+  RITMOS,
+  efectoPermanencia,
+  type ParametroPermanencia,
+  nombreAnimacion,
+} from "../animaciones";
 import { t } from "../i18n/es";
 
 /** Tope del selector de archivos. Arrastrar no tiene tope: va por ruta. */
@@ -64,6 +75,31 @@ function esVideo(nombre: string): boolean {
 }
 
 /**
+ * La dirección de la previa, con la marca de «aquí **no** suena».
+ *
+ * El sonido de una alerta lo pone el **monitor** del streamer —el mismo que el
+ * botón de oír—, y el documento del overlay también sabe reproducirlo: dentro de la
+ * previa eso serían dos copias del mismo sonido, que es justo lo que se está
+ * arreglando. Con `previa=1` la página se queda muda y el audio lo lleva el
+ * coordinador, que es el único que puede garantizar que suene uno a la vez.
+ *
+ * La marca se añade solo aquí: la dirección que se pega en OBS no la lleva, y ahí
+ * el sonido del overlay **es** el que oye la audiencia.
+ */
+function urlDeLaPrevia(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const destino = new URL(url);
+    destino.searchParams.set("previa", "1");
+    return destino.toString();
+  } catch {
+    // Una dirección que no se entiende se deja tal cual: sonaría también en el
+    // marco, pero quedarse sin previa por no poder añadir un parámetro es peor.
+    return url;
+  }
+}
+
+/**
  * Texto para comparar: sin acentos y en minúsculas.
  *
  * Los ficheros se llaman como los llamó quien los subió —«¡Trae ese qlo para acá!»,
@@ -79,6 +115,38 @@ function normalizar(texto: string): string {
 }
 const DURACION_MINIMA_MS = 500;
 const DURACION_MAXIMA_MS = 60_000;
+
+/**
+ * Milisegundos a segundos, para el campo de las animaciones.
+ *
+ * La interfaz habla en segundos porque es como se piensa un tiempo que se ve: «medio
+ * segundo», no «quinientos milisegundos». El motor guarda milisegundos, que es lo que
+ * espera el temporizador. La conversión vive aquí, en un sitio, y no repartida por los
+ * cuatro campos.
+ */
+function enSegundos(ms: number): number {
+  return Math.round(ms) / 1000;
+}
+
+function enMilisegundos(segundos: string): number {
+  const valor = Number(segundos);
+  if (!Number.isFinite(valor)) return ANIMACION_MINIMA_S * 1000;
+  return Math.round(
+    Math.min(ANIMACION_MAXIMA_S, Math.max(ANIMACION_MINIMA_S, valor)) * 1000,
+  );
+}
+
+/**
+ * Cuánto puede crecer o encogerse un aviso, en porcentaje.
+ *
+ * Son los mismos topes que `ESCALA_MINIMA` y `ESCALA_MAXIMA` del motor
+ * (`alerts/mod.rs`), que es quien los hace cumplir de verdad. Aquí solo evitan que
+ * el deslizador ofrezca un valor que el motor va a rechazar al guardar. El de arriba
+ * tiene motivo: el aviso se centra en la fuente de OBS, así que por encima de 2× el
+ * medio se saldría del cuadro.
+ */
+const ESCALA_MINIMA = 25;
+const ESCALA_MAXIMA = 200;
 
 /** Los dos rótulos de grupo que existen. */
 type RotuloGrupo = "grupoRegalos" | "grupoActividad";
@@ -116,7 +184,7 @@ interface Props {
   onImportarBytes: (nombre: string, bytes: number[]) => void;
   /** Importa varios ficheros —o una carpeta— de golpe. */
   onImportarRutas: (rutas: string[]) => Promise<ImportacionMedios>;
-  onBorrarMedio: (nombre: string) => void;
+  onBorrarMedio: (nombre: string) => Promise<void>;
   onProbar: (tipo: TipoAviso) => void;
   /** Suena un medio en el monitor, sin encolar ningún aviso. */
   onOir: (nombre: string) => void;
@@ -163,14 +231,9 @@ export function Alertas({
    * y a cambio no hay que acordarse de meter la lista en las dependencias.
    */
   const [busqueda, setBusqueda] = useState("");
-  /**
-   * Qué enseña la tercera columna: los medios cargados o la previa del aviso.
-   *
-   * Dos modos y no dos tarjetas porque la página mide 674 px y está llena: la previa
-   * es lo que se mira antes de dar un aviso por bueno, y los medios lo que se mira
-   * mientras se elige. No hacen falta a la vez.
-   */
-  const [modo, setModo] = useState<"medios" | "previa">("medios");
+  const [medioPendiente, setMedioPendiente] = useState<string | null>(null);
+  const [borrandoMedio, setBorrandoMedio] = useState(false);
+  const disparadorBorrado = useRef<HTMLButtonElement | null>(null);
   const selector = useRef<HTMLInputElement | null>(null);
   // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
   const [dispositivos, setDispositivos] = useState<string[]>([]);
@@ -182,6 +245,38 @@ export function Alertas({
    * primero es el que mas se usa.
    */
   const [elegido, setElegido] = useState<TipoAviso>(TIPOS_AVISO[0]);
+  /**
+   * El coordinador del audio de prueba.
+   *
+   * De aquí sale **qué está sonando** —para pintar el botón que suena como
+   * interruptor— y por aquí pasan los dos botones que reproducen algo. Ninguna
+   * tarjeta toca un `<audio>`: piden, y el coordinador decide.
+   */
+  const preview = usePreviewAudio();
+
+  const pedirBorrado = useCallback((nombre: string, disparador: HTMLButtonElement) => {
+    disparadorBorrado.current = disparador;
+    setMedioPendiente(nombre);
+  }, []);
+
+  const cancelarBorrado = useCallback(() => {
+    if (borrandoMedio || busy) return;
+    setMedioPendiente(null);
+    disparadorBorrado.current?.focus();
+  }, [borrandoMedio, busy]);
+
+  const confirmarBorrado = useCallback(async () => {
+    const nombre = medioPendiente;
+    if (!nombre || borrandoMedio || busy) return;
+    setBorrandoMedio(true);
+    try {
+      await onBorrarMedio(nombre);
+      setMedioPendiente(null);
+      disparadorBorrado.current?.focus();
+    } finally {
+      setBorrandoMedio(false);
+    }
+  }, [borrandoMedio, busy, medioPendiente, onBorrarMedio]);
 
   useEffect(() => {
     let vivo = true;
@@ -225,6 +320,24 @@ export function Alertas({
       onGuardar({
         ...ajustes,
         [tipo]: { ...ajustes[tipo], [campo]: valor },
+      });
+    },
+    [ajustes, onGuardar],
+  );
+
+  /**
+   * Varios campos de un aviso, de una vez.
+   *
+   * Existe por la permanencia: elegir un efecto trae **sus** valores sugeridos, y
+   * mandarlos de uno en uno serían cinco viajes al motor construidos todos sobre los
+   * mismos ajustes viejos —el segundo pisaría al primero y solo sobreviviría el
+   * último—. Un solo guardado con todo dentro.
+   */
+  const cambiarVarios = useCallback(
+    (tipo: TipoAviso, parche: Partial<AjusteAviso>) => {
+      onGuardar({
+        ...ajustes,
+        [tipo]: { ...ajustes[tipo], ...parche },
       });
     },
     [ajustes, onGuardar],
@@ -347,21 +460,45 @@ export function Alertas({
   /** El nombre del aviso que se está editando. Lo usan los rótulos de «Poner». */
   const rotuloElegido = t.alertas.tipos[elegido]?.nombre ?? elegido;
 
-  return (
-    <div className="grid-panel alertas">      <p className="hint">{t.alertas.hint}</p>
+  /**
+   * Lo que está sonando de prueba, según el coordinador.
+   *
+   * Se lee aquí y no se lleva en estado propio: el turno es del coordinador —y, por
+   * debajo, del motor—, y un espejo local se quedaría diciendo «sonando» cuando el
+   * fichero ya se ha acabado.
+   */
+  const sonando = preview?.actual ?? null;
+  /** Si lo que suena es este fichero de la biblioteca. */
+  const suenaMedio = (nombre: string) =>
+    sonando?.origen === "biblioteca-sonidos" && sonando.id === nombre;
+  /** Si lo que suena es la previa del aviso que se está editando. */
+  const probando = sonando?.origen === "previa-alerta" && sonando.id === elegido;
+  /** La dirección que carga el marco de la previa: la de OBS, pero muda. */
+  const urlPrevia = urlDeLaPrevia(url);
 
-      {/* Primero lo que se configura —la lista y su editor— y despues el resto: los
-          ficheros con los que se configura, donde se oye y, al final, la direccion
-          de OBS, que se copia una vez al montar la escena. Con la direccion y los
-          medios delante, los dos grupos de avisos caian bajo el pliegue y la
-          pantalla parecia no tener lista. */}
-      <div className="alertas-panel">
+  return (
+    <div className="grid-panel alertas">
+      <p className="hint">{t.alertas.hint}</p>
+
+      {/* La consola: las tres piezas del mismo trabajo, las tres a la vista.
+          Los avisos, para saber qué está armado; el editor, para cambiarlo; y la
+          previa, para ver lo que sale en antena **mientras** se cambia.
+
+          La previa estuvo detrás de una pestaña —«Medios | Previa»— y ese era el
+          error de fondo: aquí se viene a mirar cómo queda un aviso, y la regla del
+          proyecto es que el mando y su resultado se vean a la vez
+          (`docs/interfaz.md`, regla 3). Una previa que hay que abrir no previsualiza
+          nada. */}
+      <div className="alertas-consola">
         {/* Sin rotulo de seccion a proposito: los dos encabezados de grupo dicen mas
             —y mas concreto— que un «Avisos» encima, y con el mismo tratamiento los
             dos serian dos rotulos iguales seguidos. `Card` sin `title` no pinta
-            cabecera, asi que el contenedor se queda sin la fila del rotulo. */}
+            cabecera, asi que el contenedor se queda sin la fila del rotulo.
+
+            Tampoco lleva frase de ayuda: la de arriba ya dice qué es esta pantalla y
+            que el interruptor enciende sin abrir. Una línea menos es una fila más de
+            avisos a la vista. */}
         <Card>
-          <p className="hint">{t.alertas.listaHint}</p>
           {/* El nombre del bloque no se pierde aunque no se vea: va de etiqueta del
               grupo, que es lo unico que un encabezado de grupo no puede dar. */}
           <div className="grupos-avisos" role="group" aria-label={t.alertas.lista}>
@@ -426,96 +563,138 @@ export function Alertas({
           ajuste={ajustes[elegido]}
           busy={busy}
           onCambiar={cambiar}
-          onProbar={onProbar}
+          onCambiarVarios={cambiarVarios}
           onOir={onOir}
+          sonando={suenaMedio(ajustes[elegido].sonido)}
         />
 
-        {/* Los medios, en la misma fila que la lista y el editor: es la tercera
-            pieza del mismo trabajo —elegir el aviso, escribirlo y darle su medio—,
-            y con ellos en una fila propia la pagina medía 1.121 px para 674 de
-            alto. Aqui cabe. */}
+        {/* **El overlay de verdad**, no una maqueta: es el mismo documento que carga
+            OBS, así que lo que se ve aquí es lo que sale en antena.
+
+            **El lienzo es cuadrado.** Lo era 1920×1080 —lo que suele tener la escena
+            de OBS— y sobraba sitio por los lados: un aviso se centra y su medio va
+            limitado por el **alto** (62 vh), así que en un marco ancho quedaba un
+            aviso pequeño nadando entre dos franjas negras. Cuadrado, el mismo aviso
+            ocupa la misma **proporción** del marco y no se desperdicia nada. La
+            proporción es lo único que la previa puede prometer: el tamaño real lo
+            pone la fuente de OBS, que ocupa lo que el streamer le haya dado.
+
+            **Probar y el tamaño viven aquí**, no en el editor, y es a propósito: el
+            mando está pegado a lo que cambia. Se mueve el deslizador y el aviso que ya
+            está en pantalla cambia de tamaño al momento —`VistaPrevia` se lo manda al
+            marco, que es de otro origen—, y al pulsar Probar sale así en OBS. */}
         <Card
-          title={modo === "previa" ? t.alertas.previa : t.alertas.medios}
+          title={t.alertas.previa}
           actions={
-            // Dos modos en la misma columna y no una tarjeta más: la página mide
-            // 674 px y está llena. La previa es lo que se mira **antes** de dar por
-            // bueno un aviso; los medios, lo que se mira mientras se elige, así que
-            // no hacen falta a la vez.
-            <div className="vista-switch">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={modo === "medios"}
-                className={modo === "medios" ? "active" : "ghost"}
-                onClick={() => setModo("medios")}
-              >
-                {t.alertas.mediosCorto}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={modo === "previa"}
-                className={modo === "previa" ? "active" : "ghost"}
-                onClick={() => setModo("previa")}
-              >
-                {t.alertas.previaCorto}
-              </button>
-            </div>
+            // El botón es un **interruptor**: mientras suena este aviso dice «Parar»,
+            // que es lo único que hace falta saber de un vistazo. Suena un audio de
+            // prueba a la vez —el coordinador corta el anterior—, así que no puede
+            // haber dos botones diciendo «Parar» a la vez.
+            <button
+              type="button"
+              className={probando ? "ghost sonando" : "ghost"}
+              aria-pressed={probando}
+              title={probando ? t.alertas.pararHint : t.alertas.probarHint}
+              disabled={busy}
+              onClick={() => onProbar(elegido)}
+            >
+              {probando ? t.alertas.parar : t.alertas.probar}
+            </button>
           }
         >
-          {modo === "previa" ? (
-            <>
-              {/* **El overlay de verdad**, no una maqueta: es el mismo documento que
-                  carga OBS, así que lo que se ve aquí es lo que sale en antena. Dale a
-                  Probar en el editor y sale en esta previa.
-
-                  El lienzo que se le supone son 1920×1080, que es lo que suele tener
-                  la escena de OBS: es lo único que se puede suponer, porque la página
-                  ocupa lo que le dé la fuente. */}
-              {url ? (
-                <VistaPrevia
-                  url={url}
-                  ancho={1920}
-                  alto={1080}
-                  etiqueta={t.alertas.previa}
-                  nota={t.alertas.previaNota}
-                />
-              ) : (
-                <Empty>{t.alertas.previaSinServidor}</Empty>
-              )}
-              <p className="hint">{t.alertas.previaHint}</p>
-            </>
+          {urlPrevia ? (
+            <VistaPrevia
+              url={urlPrevia}
+              ancho={1080}
+              alto={1080}
+              etiqueta={rotuloElegido}
+              nota={t.alertas.previaNota}
+              escala={ajustes[elegido].escala}
+            />
           ) : (
-            <>
-          <p className="hint">{t.alertas.mediosHint}</p>
+            <Empty>{t.alertas.previaSinServidor}</Empty>
+          )}
+
+          {/* El mando del tamaño, debajo de lo que cambia. El rótulo lleva la cifra
+              —«Tamaño · 90 %»— porque es un ajuste del aviso elegido y hay que poder
+              leerlo sin contar los pasos del deslizador. */}
+          <div className="previa-tamano">
+            <label htmlFor={`escala-${elegido}`} title={t.alertas.tamanoHint}>
+              {t.alertas.tamano} · {Math.round(ajustes[elegido].escala * 100)} %
+            </label>
+            <input
+              id={`escala-${elegido}`}
+              type="range"
+              min={ESCALA_MINIMA}
+              max={ESCALA_MAXIMA}
+              step={5}
+              value={Math.round(ajustes[elegido].escala * 100)}
+              disabled={busy}
+              title={t.alertas.tamanoHint}
+              onChange={(evento) => cambiar(elegido, "escala", Number(evento.target.value) / 100)}
+            />
+          </div>
+        </Card>
+      </div>
+
+      {/* La biblioteca, **a todo el ancho**. Estaba en una columna de 370 px, y con
+          219 ficheros eso son cinco miniaturas y dos nombres: buscar mirando no es
+          buscar. A lo ancho cada zona tiene el sitio que pide su trabajo. */}
+      <Card
+        title={t.alertas.medios}
+        actions={
+          medios.length > 0 ? (
+            <span className="buscar-cuenta" aria-live="polite">
+              {t.alertas.cuenta(encontrados.length, medios.length)}
+            </span>
+          ) : null
+        }
+      >
+        <div className="biblioteca">
+          <div className="bib-alta">
           <div
             className={encima ? "soltar encima" : "soltar"}
-            onClick={() => selector.current?.click()}
             onDragOver={(evento) => evento.preventDefault()}
           >
-            <input
-              ref={selector}
-              type="file"
-              accept={ACEPTADOS}
-              hidden
-              onChange={(evento) => {
-                void elegir(evento.target.files?.[0]);
-                // Se limpia para poder volver a elegir el mismo fichero.
-                evento.target.value = "";
+            <div
+              className="soltar-control"
+              role="button"
+              tabIndex={0}
+              aria-label={t.alertas.soltar}
+              onClick={() => selector.current?.click()}
+              onKeyDown={(evento) => {
+                if (evento.key === "Enter" || evento.key === " ") {
+                  evento.preventDefault();
+                  selector.current?.click();
+                }
               }}
-            />
-            <strong>{t.alertas.soltar}</strong>
+            >
+              <input
+                ref={selector}
+                type="file"
+                accept={ACEPTADOS}
+                hidden
+                onChange={(evento) => {
+                  void elegir(evento.target.files?.[0]);
+                  // Se limpia para poder volver a elegir el mismo fichero.
+                  evento.target.value = "";
+                }}
+              />
+              <strong>{t.alertas.soltar}</strong>
+            </div>
             <button
               type="button"
               className="ghost"
-              onClick={(evento) => {
-                evento.stopPropagation();
-                selector.current?.click();
-              }}
+              onClick={() => selector.current?.click()}
             >
               {t.alertas.elegir}
             </button>
-            <p className="hint">{t.alertas.formatos}</p>
+            {/* La lista de formatos se va al `title`: es un dato que se consulta
+                cuando un fichero no entra, no una frase que haya que leer cada vez
+                que se abre la pestaña. Aquí queda la versión de una línea. */}
+            <p className="hint" title={t.alertas.formatos}>
+              {t.alertas.formatosCorto}
+            </p>
           </div>
           {avisoMedio ? <p className="empty">{avisoMedio}</p> : null}
           {/* El recuento se enseña aunque haya ido bien: con una carpeta de cuarenta
@@ -540,7 +719,8 @@ export function Alertas({
 
           {/* El buscador, y la lista filtrada por él.
               Con ciento cincuenta ficheros, encontrar «vine boom» bajando a ojo por
-              una lista que se desplaza es peor que no tener lista. */}
+              una lista que se desplaza es peor que no tener lista. El recuento vive
+              en el rótulo de la tarjeta: decir dos veces cuántos hay es ruido. */}
           {medios.length > 0 ? (
             <div className="buscar">
               <input
@@ -551,23 +731,35 @@ export function Alertas({
                 aria-label={t.alertas.buscar}
                 onChange={(evento) => setBusqueda(evento.target.value)}
               />
+              {busqueda ? (
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  aria-label={t.alertas.limpiarBusqueda}
+                  title={t.alertas.limpiarBusqueda}
+                  onClick={() => setBusqueda("")}
+                >
+                  {t.alertas.limpiarBusqueda}
+                </button>
+              ) : null}
             </div>
           ) : null}
+        </div>
 
-          {medios.length === 0 ? (
-            <Empty>{t.alertas.vacio}</Empty>
-          ) : encontrados.length === 0 ? (
-            <Empty>{t.alertas.sinResultados(busqueda)}</Empty>
-          ) : (
-            /* **Dos bloques y no un filtro**: las imágenes arriba, en rejilla, y los
-               sonidos debajo, en lista. Cada uno con su rótulo, su cuenta y su propio
-               scroll, así que ninguno le quita el sitio al otro.
+        {medios.length === 0 ? (
+          <p className="empty bib-vacio">{t.alertas.vacio}</p>
+        ) : encontrados.length === 0 ? (
+          <p className="empty bib-vacio">{t.alertas.sinResultados(busqueda)}</p>
+        ) : (
+          /* **Dos bloques y no un filtro**: las imágenes a la izquierda, en rejilla,
+             y los sonidos a la derecha, en lista. Cada uno con su rótulo, su cuenta y
+             su propio scroll, así que ninguno le quita el sitio al otro.
 
-               Un filtro obligaba a elegir entre ver una cosa o la otra; y lo que se
-               hace al montar un aviso es justo mirar las dos —«¿qué sticker le pongo
-               y qué suena?»—. */
-            <>
-              <section className="medio-grupo">
+             Un filtro obligaba a elegir entre ver una cosa o la otra; y lo que se
+             hace al montar un aviso es justo mirar las dos —«¿qué sticker le pongo
+             y qué suena?»—. */
+          <>
+            <section className="medio-grupo imagenes-grupo">
                 <h3 className="grupo-rotulo">
                   {t.alertas.soloImagenes} · {imagenes.length}
                 </h3>
@@ -617,7 +809,7 @@ export function Alertas({
                 )}
               </section>
 
-              <section className="medio-grupo">
+              <section className="medio-grupo sonidos-grupo">
                 <h3 className="grupo-rotulo">
                   {t.alertas.soloSonidos} · {sonidos.length}
                 </h3>
@@ -628,140 +820,169 @@ export function Alertas({
                     {sonidos.map((nombre) => {
                       const puesto =
                         ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
+                      // Suena **este** fichero: el botón hace de interruptor y la fila
+                      // se marca. Es la única señal de que lo que se oye es lo que se
+                      // acaba de pulsar cuando la lista es larga.
+                      const suenaEste = suenaMedio(nombre);
                       return (
-                        <li key={nombre} className={puesto ? "puesto" : undefined}>
+                        <li
+                          key={nombre}
+                          className={claseDeSonido(puesto, suenaEste) || undefined}
+                        >
                           <span className="medio-icono suena">{t.alertas.suena}</span>
                           <span className="medio-nombre" title={nombre}>
                             {nombre}
                           </span>
-                          <button
-                            type="button"
-                            className="ghost tiny"
-                            title={t.alertas.oirHint}
-                            onClick={() => onOir(nombre)}
-                          >
-                            {t.alertas.oir}
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost tiny"
-                            title={
-                              suena(nombre)
-                                ? t.alertas.ponerSonido(rotuloElegido)
-                                : t.alertas.ponerMedio(rotuloElegido)
-                            }
-                            disabled={busy}
-                            onClick={() =>
-                              cambiar(elegido, suena(nombre) ? "sonido" : "medio", nombre)
-                            }
-                          >
-                            {puesto ? t.alertas.puesto : t.alertas.poner}
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost"
-                            title={t.alertas.borrarHint}
-                            disabled={busy}
-                            onClick={() => onBorrarMedio(nombre)}
-                          >
-                            {t.alertas.borrar}
-                          </button>
+                          <span className="medio-acciones">
+                            <button
+                              type="button"
+                              className={suenaEste ? "ghost tiny sonando" : "ghost tiny"}
+                              aria-pressed={suenaEste}
+                              aria-label={`${suenaEste ? t.alertas.parar : t.alertas.oir}: ${nombre}`}
+                              title={suenaEste ? t.alertas.pararHint : t.alertas.oirHint}
+                              onClick={() => onOir(nombre)}
+                            >
+                              {suenaEste ? t.alertas.parar : t.alertas.oir}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost tiny"
+                              aria-label={`${puesto ? t.alertas.puesto : t.alertas.poner}: ${nombre}`}
+                              title={
+                                suena(nombre)
+                                  ? t.alertas.ponerSonido(rotuloElegido)
+                                  : t.alertas.ponerMedio(rotuloElegido)
+                              }
+                              disabled={busy}
+                              onClick={() =>
+                                cambiar(elegido, suena(nombre) ? "sonido" : "medio", nombre)
+                              }
+                            >
+                              {puesto ? t.alertas.puesto : t.alertas.poner}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost tiny"
+                              aria-label={`${t.alertas.borrar}: ${nombre}`}
+                              title={t.alertas.borrarHint}
+                              disabled={busy}
+                              onClick={(evento) => pedirBorrado(nombre, evento.currentTarget)}
+                            >
+                              {t.alertas.borrar}
+                            </button>
+                          </span>
                         </li>
                       );
                     })}
                   </ul>
                 )}
               </section>
-            </>
-          )}
-            </>
-          )}
+          </>
+        )}
+        </div>
+      </Card>
+
+      {/* La salida de audio y la direccion de OBS: lo que se toca **una vez**, al
+          montar la escena.
+
+          Ocupaban dos tarjetas de media pantalla con mas hueco que contenido, y ese
+          hueco salia de donde no sobraba: de la biblioteca y de la lista de avisos.
+          Ahora son una tira de una linea cada una. El aviso de avisos descartados se
+          queda aqui porque es lo unico vivo de las dos y habla de la cola de OBS. */}
+      <div className="alertas-tira">
+        <Card>
+          <div className="tira-linea">
+            <span className="tira-rotulo">{t.alertas.salida}</span>
+            <select
+              id="salida-dispositivo"
+              aria-label={t.alertas.salidaDispositivo}
+              title={t.alertas.salidaHint}
+              value={ajustes.salida.dispositivo}
+              disabled={busy}
+              onChange={(evento) => onSalida({ dispositivo: evento.target.value })}
+            >
+              <option value="">{t.alertas.salidaSistema}</option>
+              {/* El elegido puede no estar en la lista —un cable desconectado— y sin esta
+                  opción el desplegable se quedaría en blanco sin decir por qué. */}
+              {ajustes.salida.dispositivo && !dispositivos.includes(ajustes.salida.dispositivo) ? (
+                <option value={ajustes.salida.dispositivo}>
+                  {t.alertas.salidaNoDisponible(ajustes.salida.dispositivo)}
+                </option>
+              ) : null}
+              {dispositivos.map((nombre) => (
+                <option key={nombre} value={nombre}>
+                  {nombre}
+                </option>
+              ))}
+            </select>
+
+            {/* El volumen, con su cifra al lado y no encima: en una línea, un rótulo
+                encima del mando lo convertiría en dos. */}
+            <label className="tira-mando" htmlFor="salida-volumen">
+              <span className="tira-etiqueta">{t.alertas.salidaVolumen}</span>
+              <input
+                id="salida-volumen"
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(ajustes.salida.volumen * 100)}
+                disabled={busy}
+                onChange={(evento) => onSalida({ volumen: Number(evento.target.value) / 100 })}
+              />
+              <span className="tira-cifra">{Math.round(ajustes.salida.volumen * 100)} %</span>
+            </label>
+
+            <label className="switch tira-switch" title={t.alertas.salidaEnDirectoHint}>
+              <input
+                type="checkbox"
+                checked={ajustes.salida.en_directo}
+                disabled={busy}
+                onChange={(evento) => onSalida({ en_directo: evento.target.checked })}
+              />
+              <span>{t.alertas.salidaEnDirecto}</span>
+            </label>
+
+            {/* El estado, al final y en una línea: es la confirmación de que el
+                dispositivo elegido está sonando de verdad. */}
+            <span
+              className={audioProblema ? "tira-estado malo" : "tira-estado"}
+              title={t.alertas.salidaHint}
+            >
+              {audioProblema
+                ? t.alertas.salidaMuda(audioProblema)
+                : audioDispositivo
+                  ? t.alertas.salidaActiva(audioDispositivo)
+                  : t.alertas.salidaSistemaActivo}
+            </span>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="tira-linea" title={t.alertas.direccionHint}>
+            <span className="tira-rotulo">{t.alertas.direccion}</span>
+            <Copiar texto={url} />
+            {descartados > 0 ? (
+              <span className="tira-estado malo">{t.alertas.descartados(descartados)}</span>
+            ) : null}
+          </div>
         </Card>
       </div>
 
-      {/* La salida de audio y la direccion de OBS, en la fila de abajo. Son las dos
-          piezas que se tocan una vez —al montar la escena— y no se vuelven a mirar,
-          asi que van juntas y **sin envoltorio**: la propia rejilla de la pagina las
-          coloca en las dos columnas de su ultima fila (`styles.css`,
-          `.grid-panel.alertas`). Un `div` de mas solo añadiria un nivel. */}
-
-      <Card title={t.alertas.salida}>
-        <p className="hint">{t.alertas.salidaHint}</p>
-
-        <div className="campo">
-          <label htmlFor="salida-dispositivo">{t.alertas.salidaDispositivo}</label>
-          <select
-            id="salida-dispositivo"
-            value={ajustes.salida.dispositivo}
-            disabled={busy}
-            onChange={(evento) => onSalida({ dispositivo: evento.target.value })}
-          >
-            <option value="">{t.alertas.salidaSistema}</option>
-            {/* El elegido puede no estar en la lista —un cable desconectado— y sin esta
-                opción el desplegable se quedaría en blanco sin decir por qué. */}
-            {ajustes.salida.dispositivo && !dispositivos.includes(ajustes.salida.dispositivo) ? (
-              <option value={ajustes.salida.dispositivo}>
-                {t.alertas.salidaNoDisponible(ajustes.salida.dispositivo)}
-              </option>
-            ) : null}
-            {dispositivos.map((nombre) => (
-              <option key={nombre} value={nombre}>
-                {nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo">
-          <label htmlFor="salida-volumen">
-            {t.alertas.salidaVolumen} · {Math.round(ajustes.salida.volumen * 100)} %
-          </label>
-          <input
-            id="salida-volumen"
-            type="range"
-            min={0}
-            max={100}
-            step={5}
-            value={Math.round(ajustes.salida.volumen * 100)}
-            disabled={busy}
-            onChange={(evento) => onSalida({ volumen: Number(evento.target.value) / 100 })}
-          />
-        </div>
-
-        <label className="switch" title={t.alertas.salidaEnDirectoHint}>
-          <input
-            type="checkbox"
-            checked={ajustes.salida.en_directo}
-            disabled={busy}
-            onChange={(evento) => onSalida({ en_directo: evento.target.checked })}
-          />
-          <span>{t.alertas.salidaEnDirecto}</span>
-        </label>
-
-        <p className="hint">
-          {audioProblema
-            ? t.alertas.salidaMuda(audioProblema)
-            : audioDispositivo
-              ? t.alertas.salidaActiva(audioDispositivo)
-              : t.alertas.salidaSistemaActivo}
-        </p>
-      </Card>
-
-      {/* La direccion para OBS, al final: es fontaneria de puesta en marcha —se copia
-          una vez al montar la escena y no se vuelve—, y con ella viaja el aviso de
-          avisos descartados, que es lo unico vivo que queda aqui. */}
-      <Card title={t.alertas.direccion}>
-        <ul className="direcciones">
-          <li>
-            <span className="direccion-vista">{t.alertas.title}</span>
-            <Copiar texto={url} />
-          </li>
-        </ul>
-        <p className="hint">{t.alertas.direccionHint}</p>
-        {descartados > 0 ? (
-          <p className="hint">{t.alertas.descartados(descartados)}</p>
-        ) : null}
-      </Card>
+      <DialogoConfirmacion
+        abierto={medioPendiente !== null}
+        titulo={t.alertas.borrarTitulo}
+        mensaje={
+          <>
+            {t.alertas.borrarConfirmacion} <strong title={medioPendiente ?? undefined}>{medioPendiente}</strong>
+          </>
+        }
+        confirmar={t.alertas.borrar}
+        cancelar={t.alertas.cancelar}
+        ocupado={borrandoMedio || busy}
+        onConfirmar={() => void confirmarBorrado()}
+        onCancelar={cancelarBorrado}
+      />
     </div>
   );
 }
@@ -769,6 +990,20 @@ export function Alertas({
 /** Las clases de una fila de la lista: la elegida y la que esta encendida. */
 function claseDeFila(elegida: boolean, activa: boolean): string {
   return ["aviso", elegida ? "elegido" : "", activa ? "" : "apagado"]
+    .filter((parte) => parte.length > 0)
+    .join(" ");
+}
+
+/**
+ * Las clases de una fila de sonido.
+ *
+ * `puesto` y `suena` son dos cosas distintas y pueden darse a la vez: la fila puede
+ * ser el sonido del aviso elegido **y** estar sonando ahora mismo. Van separadas
+ * porque significan cosas distintas —una es «lo que sonará en antena», la otra «lo
+ * que estás oyendo tú ahora»—, y con una sola clase no se podrían distinguir.
+ */
+function claseDeSonido(puesto: boolean, suena: boolean): string {
+  return [puesto ? "puesto" : "", suena ? "sonando" : ""]
     .filter((parte) => parte.length > 0)
     .join(" ");
 }
@@ -785,15 +1020,18 @@ function Aviso({
   tipo,
   ajuste,
   busy,
+  sonando,
   onCambiar,
-  onProbar,
+  onCambiarVarios,
   onOir,
 }: {
   tipo: TipoAviso;
   ajuste: AjusteAviso;
   busy: boolean;
+  /** Si el sonido de este aviso es el que está sonando ahora mismo. */
+  sonando: boolean;
   onCambiar: (tipo: TipoAviso, campo: keyof AjusteAviso, valor: AjusteAviso[keyof AjusteAviso]) => void;
-  onProbar: (tipo: TipoAviso) => void;
+  onCambiarVarios: (tipo: TipoAviso, parche: Partial<AjusteAviso>) => void;
   onOir: (nombre: string) => void;
 }) {
   const rotulo = t.alertas.tipos[tipo];
@@ -819,21 +1057,7 @@ function Aviso({
   }, [onCambiar, texto, tipo]);
 
   return (
-    <Card
-      title={rotulo?.nombre ?? tipo}
-      actions={
-        <button
-          type="button"
-          className="ghost"
-          title={t.alertas.probarHint}
-          disabled={busy}
-          onClick={() => onProbar(tipo)}
-        >
-          {t.alertas.probar}
-        </button>
-      }
-    >
-      <p className="hint">{rotulo?.descripcion}</p>
+    <Card title={rotulo?.nombre ?? tipo} nota={rotulo?.descripcion}>
 
       <div className="campo">
         <label htmlFor={`texto-${tipo}`}>{t.alertas.texto}</label>
@@ -846,7 +1070,11 @@ function Aviso({
           onChange={(evento) => setTexto(evento.target.value)}
           onBlur={confirmarTexto}
           onKeyDown={(evento) => {
-            if (evento.key === "Enter") confirmarTexto();
+            // `isComposing` vive en el evento **nativo**: el sintético de React no
+            // lo expone. Sin esta comprobación, escribir con un teclado que compone
+            // (japonés, coreano, y también los acentos de algunos IME) cerraría el
+            // editor al confirmar el primer carácter.
+            if (evento.key === "Enter" && !evento.nativeEvent.isComposing) confirmarTexto();
           }}
         />
         <Plantilla texto={texto} />
@@ -900,16 +1128,18 @@ function Aviso({
             </span>
             {/* Oír, al lado de lo que está puesto: elegir un sonido de una lista de
                 nombres no dice cómo suena, y había que probar la alerta entera
-                —con su texto y su medio— para averiguarlo. */}
+                —con su texto y su medio— para averiguarlo. Mientras suena, el botón
+                dice «Parar»: es el mismo sonido pulsado dos veces. */}
             {ajuste.sonido ? (
               <>
                 <button
                   type="button"
-                  className="ghost tiny"
-                  title={t.alertas.oirHint}
+                  className={sonando ? "ghost tiny sonando" : "ghost tiny"}
+                  aria-pressed={sonando}
+                  title={sonando ? t.alertas.pararHint : t.alertas.oirHint}
                   onClick={() => onOir(ajuste.sonido)}
                 >
-                  {t.alertas.oir}
+                  {sonando ? t.alertas.parar : t.alertas.oir}
                 </button>
                 <button
                   type="button"
@@ -926,7 +1156,18 @@ function Aviso({
         </div>
       </div>
 
-      <div className="campos-par">
+      {/* Los mandos del aviso: cuánto se queda, cuánto suena y a partir de cuánto
+          dispara. En **dos columnas**, o en tres cuando el aviso admite mínimo.
+
+          El mínimo ocupaba una fila entera para un número de tres cifras, y esa fila es
+          justo la que paga la animación: el editor mide 376 px de contenido y su fila le
+          da 352, así que el marco le recortaba 24 px por abajo —en silencio, que es como
+          recorta—. En vez de apretar el aire entre los campos, que es lo que se lee, se
+          aprovecha el ancho que sobraba.
+
+          El del **tamaño** no está aquí: se fue a la previa, que es donde se ve lo que
+          cambia. */}
+      <div className={admiteMinimo ? "campos-par campos-par-tres" : "campos-par"}>
         <div className="campo">
           <label htmlFor={`duracion-${tipo}`}>
             {t.alertas.duracion} · {(ajuste.duracion_ms / 1000).toFixed(1)} s
@@ -958,38 +1199,249 @@ function Aviso({
             onChange={(evento) => onCambiar(tipo, "volumen", Number(evento.target.value) / 100)}
           />
         </div>
+
+        {/* Solo donde tiene sentido: un follow no trae cantidad con la que filtrar, y un
+            campo que no hace nada es peor que no tenerlo. */}
+        {admiteMinimo ? (
+          <div className="campo">
+            <label htmlFor={`minimo-${tipo}`}>
+              {t.alertas.minimo} ·{" "}
+              {/* En un tramo de regalo el mínimo **no filtra: es la frontera**. Por
+                  debajo de él, el regalo cae al tramo de abajo, así que el rótulo
+                  tiene que decir eso y no «solo a partir de», que suena a descarte. */}
+              {tipo === "like"
+                ? t.alertas.minimoLike
+                : tipo === "gift"
+                  ? t.alertas.minimoGift
+                  : t.alertas.minimoTramo}
+            </label>
+            <input
+              id={`minimo-${tipo}`}
+              type="number"
+              min={0}
+              max={100_000}
+              value={ajuste.minimo}
+              disabled={busy}
+              onChange={(evento) =>
+                onCambiar(tipo, "minimo", Math.max(0, Number(evento.target.value) || 0))
+              }
+            />
+          </div>
+        ) : null}
       </div>
 
-      {/* El mínimo solo donde tiene sentido: un follow no trae cantidad con la que
-          filtrar, y un campo que no hace nada es peor que no tenerlo. */}
-      {admiteMinimo ? (
-        <div className="campo">
-          <label htmlFor={`minimo-${tipo}`}>
-            {t.alertas.minimo} ·{" "}
-            {/* En un tramo de regalo el mínimo **no filtra: es la frontera**. Por
-                debajo de él, el regalo cae al tramo de abajo, así que el rótulo
-                tiene que decir eso y no «solo a partir de», que suena a descarte. */}
-            {tipo === "like"
-              ? t.alertas.minimoLike
-              : tipo === "gift"
-                ? t.alertas.minimoGift
-                : t.alertas.minimoTramo}
+      {/* La animación, en **una línea**: cómo entra, cuánto tarda, cómo sale, cuánto
+          tarda y a qué ritmo.
+
+          Va en una sola fila con el rótulo al lado —como la tira de abajo— porque son
+          cinco mandos cortos. Repartidos en dos filas de campos costaban 86 px de alto,
+          y ese alto sale de la biblioteca, que es la que peor está: el editor ya mide
+          351 px y su fila le da 355. */}
+      <div className="animacion-linea">
+        <span className="tira-rotulo" title={t.alertas.animacionHint}>
+          {t.alertas.animacion}
+        </span>
+
+        <span className="animacion-etiqueta">{t.alertas.entra}</span>
+        <select
+          value={ajuste.animacion_entrada}
+          disabled={busy}
+          aria-label={t.alertas.animacionEntrada}
+          title={t.alertas.animacionEntrada}
+          onChange={(evento) => onCambiar(tipo, "animacion_entrada", evento.target.value)}
+        >
+          {ANIMACIONES.map((id) => (
+            <option key={id} value={id}>
+              {nombreAnimacion(id, "entrada")}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          className="animacion-ms"
+          min={ANIMACION_MINIMA_S}
+          max={ANIMACION_MAXIMA_S}
+          step={0.05}
+          value={enSegundos(ajuste.entrada_ms)}
+          disabled={busy}
+          aria-label={t.alertas.entradaMs}
+          title={t.alertas.entradaMs}
+          onChange={(evento) =>
+            onCambiar(tipo, "entrada_ms", enMilisegundos(evento.target.value))
+          }
+        />
+
+        <span className="animacion-etiqueta">{t.alertas.sale}</span>
+        <select
+          value={ajuste.animacion_salida}
+          disabled={busy}
+          aria-label={t.alertas.animacionSalida}
+          title={t.alertas.animacionSalida}
+          onChange={(evento) => onCambiar(tipo, "animacion_salida", evento.target.value)}
+        >
+          {ANIMACIONES.map((id) => (
+            <option key={id} value={id}>
+              {nombreAnimacion(id, "salida")}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          className="animacion-ms"
+          min={ANIMACION_MINIMA_S}
+          max={ANIMACION_MAXIMA_S}
+          step={0.05}
+          value={enSegundos(ajuste.salida_ms)}
+          disabled={busy}
+          aria-label={t.alertas.salidaMs}
+          title={t.alertas.salidaMs}
+          onChange={(evento) =>
+            onCambiar(tipo, "salida_ms", enMilisegundos(evento.target.value))
+          }
+        />
+
+        {/* El ritmo no lleva rótulo: sus opciones ya se explican solas —«Automático»,
+            «Con rebote», «Frenando»— y el hueco que ahorra se lo quedan los dos
+            desplegables de las animaciones, que sí tienen nombres largos. */}
+        <select
+          value={ajuste.ritmo}
+          disabled={busy}
+          aria-label={t.alertas.ritmo}
+          title={t.alertas.ritmoHint}
+          onChange={(evento) => onCambiar(tipo, "ritmo", evento.target.value)}
+        >
+          {RITMOS.map((ritmo) => (
+            <option key={ritmo.id} value={ritmo.id}>
+              {ritmo.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* La permanencia: lo que hace la alerta **mientras está en pantalla**, ya
+          entrada y antes de salir.
+
+          Va en su propia línea porque cada efecto trae sus propios mandos —flotar pide
+          distancia y velocidad; el resplandor pide color, intensidad, difuminado y
+          modo— y solo se pintan los del elegido. La línea **envuelve** cuando el efecto
+          tiene muchos: con cinco mandos no caben en un renglón, y reservar dos filas
+          fijas costaría alto en todos los efectos para que lo aproveche uno. */}
+      <div className="permanencia-linea">
+        <span className="tira-rotulo" title={t.alertas.permanenciaHint}>
+          {t.alertas.permanencia}
+        </span>
+
+        <select
+          className="permanencia-efecto"
+          value={ajuste.idle}
+          disabled={busy}
+          aria-label={t.alertas.permanencia}
+          title={t.alertas.permanenciaHint}
+          onChange={(evento) => onCambiarVarios(tipo, parcheDePermanencia(evento.target.value))}
+        >
+          {PERMANENCIAS.map((efecto) => (
+            <option key={efecto.id} value={efecto.id}>
+              {efecto.nombre}
+            </option>
+          ))}
+        </select>
+
+        {efectoPermanencia(ajuste.idle)?.parametros.map((parametro) => (
+          <label className="permanencia-mando" key={parametro.campo}>
+            <span className="animacion-etiqueta">
+              {/* La unidad va en el rótulo y no detrás del campo: pegada al número
+                  parece parte de él, y en un renglón con cinco mandos el hueco que
+                  ahorra es justo el que deja entrar al último. */}
+              {parametro.etiqueta}
+              {parametro.unidad ? ` ${parametro.unidad}` : ""}
+            </span>
+            {parametro.tipo === "modo" ? (
+              <select
+                value={String(ajuste[parametro.campo])}
+                disabled={busy}
+                aria-label={parametro.etiqueta}
+                onChange={(evento) => aplicarParametro(parametro, evento.target.value)}
+              >
+                {(parametro.opciones ?? []).map((opcion) => (
+                  <option key={opcion.valor} value={opcion.valor}>
+                    {opcion.nombre}
+                  </option>
+                ))}
+              </select>
+            ) : parametro.tipo === "color" ? (
+              <input
+                type="color"
+                className="permanencia-color"
+                value={String(ajuste[parametro.campo])}
+                disabled={busy}
+                aria-label={parametro.etiqueta}
+                onChange={(evento) => aplicarParametro(parametro, evento.target.value)}
+              />
+            ) : (
+              <input
+                type="number"
+                className="animacion-ms"
+                min={parametro.min}
+                max={parametro.max}
+                step={parametro.paso}
+                value={valorDeParametro(parametro)}
+                disabled={busy}
+                aria-label={parametro.etiqueta}
+                onChange={(evento) => aplicarParametro(parametro, evento.target.value)}
+              />
+            )}
           </label>
-          <input
-            id={`minimo-${tipo}`}
-            type="number"
-            min={0}
-            max={100_000}
-            value={ajuste.minimo}
-            disabled={busy}
-            onChange={(evento) =>
-              onCambiar(tipo, "minimo", Math.max(0, Number(evento.target.value) || 0))
-            }
-          />
-        </div>
-      ) : null}
+        ))}
+      </div>
     </Card>
   );
+
+  /** Lo que se enseña en el campo: los tiempos, en segundos. */
+  function valorDeParametro(parametro: ParametroPermanencia): number | string {
+    const bruto = ajuste[parametro.campo];
+    if (parametro.tipo !== "numero") return String(bruto);
+    const numero = Number(bruto);
+    return parametro.unidad === "s" ? enSegundos(numero) : numero;
+  }
+
+  /** Un mando tocado: se guarda en las unidades del motor y con sus topes. */
+  function aplicarParametro(parametro: ParametroPermanencia, bruto: string) {
+    if (parametro.tipo !== "numero") {
+      onCambiar(tipo, parametro.campo, bruto);
+      return;
+    }
+    const numero = Number(bruto);
+    const conTope = Number.isFinite(numero) ? numero : Number(parametro.sugerido);
+    const limitado = Math.min(
+      Number(parametro.max ?? 1000),
+      Math.max(Number(parametro.min ?? 0), conTope),
+    );
+    onCambiar(
+      tipo,
+      parametro.campo,
+      parametro.unidad === "s" ? Math.round(limitado * 1000) : Math.round(limitado),
+    );
+  }
+}
+
+/**
+ * Lo que hay que guardar al elegir un efecto de permanencia: el efecto **y sus valores
+ * sugeridos**.
+ *
+ * Se aplican al elegirlo y no antes, porque son un punto de partida: cada efecto tiene
+ * los suyos —flotar 8 px y 2,5 s; agitar 2 px, 0,5 s y uno cada 2 s— y arrastrar los del
+ * anterior dejaria, por ejemplo, un temblor de 8 px donde el encargo pide 2. En cuanto
+ * el streamer toca un mando, manda el suyo.
+ */
+function parcheDePermanencia(id: string): Partial<AjusteAviso> {
+  const parche: Record<string, string | number> = { idle: id };
+  for (const parametro of efectoPermanencia(id)?.parametros ?? []) {
+    parche[parametro.campo] =
+      parametro.unidad === "s"
+        ? Math.round(Number(parametro.sugerido) * 1000)
+        : parametro.sugerido;
+  }
+  return parche as Partial<AjusteAviso>;
 }
 
 /**

@@ -34,7 +34,7 @@ Todo lo de abajo está verificado contra directos reales y con la suite en verde
 | Gates de calidad automatizados (`cargo fmt`, `clippy -D warnings`, tests) y CI en Windows | ✅ |
 | Diagnóstico: logs con rotación, métricas y traza del chat en la interfaz | ✅ |
 | Overlays para OBS: servidor Axum + WebSocket, con token y **once diseños** (ocho marcadores y tres minijuegos) elegibles por vista | ✅ |
-| Alertas para OBS: medios cargados, texto con variables, sonido, cola que espera a la fuente y monitor de audio propio | ✅ |
+| Alertas para OBS: medios cargados, texto con variables, sonido, **tamaño por aviso**, **animación de entrada, permanencia y salida**, cola que espera a la fuente y monitor de audio propio | ✅ |
 | Rediseño de la interfaz: colores de la marca, secciones sin cajas y marcador arriba | ✅ |
 | Metas y recompensas | ⏳ siguientes milestones |
 
@@ -98,6 +98,26 @@ El motor Rust resuelve el runtime en este orden: `TTSDASH_TTS_SIDECAR`, un sidec
 > Si tras abrir la ventana el log **no** contiene `interfaz conectada con el motor`, la interfaz
 > no llegó a cargar: revisa el log antes de dar por bueno un arranque.
 
+### Modo servidor web
+
+La aplicacion tambien se puede servir por HTTP y usar desde el navegador. Es el
+**mismo motor** por otro canal: los comandos van por HTTP y los eventos por
+WebSocket, y los dos transportes comparten la misma implementacion (`ipc.rs`).
+
+```powershell
+.\scripts\web.ps1                 # compila la interfaz y levanta el panel
+.\scripts\web.ps1 -SinCompilar    # arranca lo que ya hay compilado
+```
+
+El panel queda en `http://127.0.0.1:8790`. Para tocar React con recarga en
+caliente **y datos reales**, deja ese servidor levantado y arranca aparte
+`npm run dev` en `apps\desktop`: Vite hace de proxy de `/api` hacia el motor.
+
+`--web` no necesita la feature `desktop` ni abre ninguna ventana, asi que ese
+binario se puede compilar y llevar a otra maquina. Escucha en `127.0.0.1` y **no
+tiene autenticacion**: leer [`docs/modo-web.md`](docs/modo-web.md) antes de
+abrirlo a la red.
+
 ### Comprobaciones
 
 ```powershell
@@ -124,7 +144,7 @@ cargo run --offline --no-default-features -- --tts-voices
 3. El **marcador** está arriba, con el tiempo de directo: primero lo que importa (regalos y diamantes) y después lo de la sesión. Un cero se queda en su sitio pero apagado, para que las cifras que sí valen sean las que se leen.
 4. En **Inicio** tienes cuatro paneles: el **chat** de la sesión, los **follows** según entran, la tabla de **seguidores** —pulsando un nombre se abre su perfil de TikTok— y **Actividad** con todo lo demás: regalos, suscripciones, compartidos y ráfagas de likes. El chat lleva búsqueda que ignora acentos, autoscroll que respeta a quien lee hacia arriba, y **silenciar a un usuario** desde su línea.
 5. En **Aportaciones** está quién sostiene el directo —tap tap, regalos, seguidores e histórico, por persona y con enlace a su perfil— y, debajo, el detalle de los regalos que han caído.
-6. En **Alertas** los avisos van en **lista y editor**: eliges uno —regalos, seguidores, suscripciones, compartidos o ráfagas de likes— y solo se abre ese; están agrupados en «Regalos y seguidores» y «Actividad». Se le carga una imagen, un GIF o un vídeo, un sonido, y se escribe el texto con variables (`{usuario} donó {regalo}`), que se ven resaltadas mientras escribes. Cada uno tiene su botón de **probar** —que **suena en tu equipo**, no solo en OBS— y hay una **salida de audio propia** para oírlas tú, con un interruptor para escucharlas también durante el directo. Los ficheros se copian a la carpeta de datos y los sirve la aplicación: no se rompen si mueves el original.
+6. En **Alertas** los avisos van en **lista, editor y biblioteca**: eliges uno —regalos, seguidores, suscripciones, compartidos o ráfagas de likes— y solo se abre ese; están agrupados en «Regalos y seguidores» y «Actividad». La biblioteca queda en la tercera columna con imágenes y audios separados, buscador, **Oír**, **Poner** y **Borrar**, además de la previa del aviso. Se le carga una imagen, un GIF o un vídeo, un sonido, y se escribe el texto con variables (`{usuario} donó {regalo}`), que se ven resaltadas mientras escribes. Cada uno tiene su botón de **probar** —que **suena en tu equipo**, no solo en OBS— y hay una **salida de audio propia** para oírlas tú, con un interruptor para escucharlas también durante el directo. Los ficheros se copian a la carpeta de datos y los sirve la aplicación: no se rompen si mueves el original.
 7. En **Overlays** eliges el diseño de cada marcador —tap tap, regalos y seguidores, uno por cada *Browser Source* de OBS— lo ves en vivo con un simulador y copias la dirección que se pega en OBS. La elección se guarda en `overlay.json`, así que **la dirección de OBS no cambia** al cambiar de diseño.
 8. En **Voz** está el lector de chat: voz, volumen, velocidad, tono, cola, filtros y el interruptor del histórico de aportaciones.
 9. El botón **Desarrollador** de la cabecera abre el diagnóstico: rutas, métricas del motor, tipos de evento reconocidos por la interfaz, la traza del chat (recibidos frente a pintados) y el contador de firmas consumidas. Se refresca a 1 Hz **solo mientras está abierto**.
@@ -137,6 +157,19 @@ cargo run --offline --no-default-features -- --tts-voices
 | Base de datos | `%LOCALAPPDATA%\TikTokStreamDashboard\data\dashboard.db` |
 | Logs | `%LOCALAPPDATA%\TikTokStreamDashboard\logs\` (rotación diaria, 14 días) |
 | Audio sintetizado | `%LOCALAPPDATA%\TikTokStreamDashboard\cache\tts\` (se poda solo: 200 MB / 7 días) |
+
+El catálogo que trae la aplicación está versionado en
+`apps/desktop/src-tauri/alertas-pack/`, separado en `imagenes/` y `audio/`. Tauri lo
+incluye como recurso de la instalación. En el primer arranque se copia de forma
+**no destructiva** a `%LOCALAPPDATA%\TikTokStreamDashboard\alertas\`: solo entran los
+ficheros que falten, no se reemplaza ningún medio local y los nombres que ya usan los
+ajustes de Alertas se conservan. En los arranques siguientes la siembra es idempotente.
+
+Los medios importados desde la pestaña Alertas siguen guardándose en AppData y no
+escriben en el checkout ni crean cambios Git. La copia actual de AppData se conserva
+durante la migración. El catálogo actual de imágenes y audios está autorizado para su
+publicación en este repositorio público; `alertas-pack/manifest.json` permite comprobar
+los tamaños y SHA-256 de cada archivo.
 
 **Nunca** en `Documents`: una carpeta sincronizada (OneDrive) con SQLite en modo WAL acaba corrompiendo la base. `TTSDASH_DATA_DIR` permite redirigir ambas rutas.
 
@@ -195,6 +228,7 @@ El objetivo del proyecto es no molestar al juego, así que la parte pesada (WebV
 | Documento | Contenido |
 |---|---|
 | `docs/interfaz.md` | Las reglas de la interfaz: qué se lee sin mirar, dónde va cada cosa y por qué |
+| `docs/modo-web.md` | El panel por HTTP (`--web`): arranque, configuración, API y seguridad |
 | `docs/decisions.md` | Decisiones D1–D22 con la evidencia que las respalda |
 | `docs/plan-review.md` | Auditoría del plan maestro: bloqueadores, correcciones y gates de rendimiento |
 | `docs/architecture-review.md` | Revisión de la arquitectura y huecos conocidos |

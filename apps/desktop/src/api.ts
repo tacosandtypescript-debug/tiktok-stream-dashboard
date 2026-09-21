@@ -4,8 +4,159 @@
 //! verdad. La interfaz pide un `snapshot` al abrirse y, a partir de ahi, solo
 //! recibe eventos. No guarda historial propio.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke as invocarTauri } from "@tauri-apps/api/core";
+import { listen as escucharTauri, type UnlistenFn } from "@tauri-apps/api/event";
+
+/**
+ * ¿Corremos dentro de la aplicación de escritorio?
+ *
+ * Tauri 2 inyecta `__TAURI_INTERNALS__` en el WebView antes de cargar el bundle,
+ * y es justo lo que mira su propia API para saber si el puente existe.
+ * Comprobarlo así —y no por la URL o el user agent— es lo que permite que **el
+ * mismo bundle** valga para la ventana y para el navegador.
+ */
+const enEscritorio = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/**
+ * Servidor del panel cuando no hay Tauri.
+ *
+ * Vacío significa «el mismo origen», que sirve en los dos montajes: tanto si la
+ * página la sirve el propio servidor del motor (`--web`) como si la sirve Vite
+ * con el proxy de `/api` puesto. Para apuntar a otro sitio se define
+ * `window.__DASH_SERVIDOR__` antes de cargar el bundle.
+ */
+function servidor(): string {
+  const configurado = (window as { __DASH_SERVIDOR__?: unknown }).__DASH_SERVIDOR__;
+  return typeof configurado === "string" ? configurado.replace(/\/+$/, "") : "";
+}
+
+/** El sobre que devuelve el servidor del panel. */
+interface Sobre<T> {
+  ok: boolean;
+  data?: T;
+  error?: string;
+}
+
+async function peticion<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const respuesta = await fetch(`${servidor()}/api/cmd/${encodeURIComponent(cmd)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args ?? {}),
+  });
+  if (!respuesta.ok) {
+    throw new Error(`el servidor del panel respondió ${respuesta.status}`);
+  }
+  const sobre = (await respuesta.json()) as Sobre<T>;
+  if (!sobre.ok) {
+    throw new Error(sobre.error ?? "el comando falló sin decir por qué");
+  }
+  return sobre.data as T;
+}
+
+async function invocarPorHttp<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  // Abrir un perfil es lo único que **no** puede hacer el servidor: la pestaña
+  // tiene que abrirla el navegador de quien está mirando, no el de la máquina
+  // donde corre el motor. El servidor valida el handle y devuelve la URL; abrirla
+  // es cosa de aquí. Sin esto, cualquiera con acceso al puerto podría lanzar un
+  // navegador en el servidor.
+  if (cmd === "abrir_perfil") {
+    const unique_id = String(args?.unique_id ?? "");
+    const url = await peticion<string>("perfil_url", { unique_id });
+    window.open(url, "_blank", "noopener,noreferrer");
+    return undefined as T;
+  }
+  return peticion<T>(cmd, args);
+}
+
+/**
+ * El puente con Rust, por el camino que haya.
+ *
+ * Los dos transportes tienen los mismos comandos, los mismos argumentos y el
+ * mismo contrato de error, así que el resto del fichero no sabe —ni tiene por qué
+ * saber— por dónde va.
+ */
+const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> =>
+  enEscritorio ? invocarTauri<T>(cmd, args) : invocarPorHttp<T>(cmd, args);
+
+/** A quién avisar cuando el canal de eventos se vuelve a abrir. */
+const reconectados = new Set<() => void>();
+
+/**
+ * Avisa cuando el canal de eventos se ha reconectado tras caerse.
+ *
+ * Un canal caído **pierde** los eventos que pasaron mientras tanto: el servidor
+ * no los reproduce. Al volver, la interfaz tiene que pedir otra vez la foto del
+ * motor para tapar el hueco; esto es lo que se lo dice.
+ *
+ * En la aplicación de escritorio no hay reconexiones que avisar: el IPC de Tauri
+ * es un canal local que no se cae.
+ */
+export function onDashReconnect(handler: () => void): () => void {
+  reconectados.add(handler);
+  return () => {
+    reconectados.delete(handler);
+  };
+}
+
+/**
+ * El canal de bajada en el navegador: un WebSocket contra el servidor del panel.
+ *
+ * Se reconecta solo, con espera creciente, porque el servidor se puede reiniciar
+ * mientras se trabaja en él —que es justo lo que se hace al tocar el motor— y la
+ * pestaña no debería quedarse muerta por eso.
+ */
+function escucharPorWebSocket(handler: (event: WireEvent) => void): Promise<UnlistenFn> {
+  let cerrado = false;
+  let socket: WebSocket | null = null;
+  let temporizador: number | undefined;
+  let espera = 500;
+  let primera = true;
+
+  const destino = () => {
+    const base = servidor();
+    if (base) return `${base.replace(/^http/, "ws")}/api/eventos`;
+    const protocolo = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocolo}//${window.location.host}/api/eventos`;
+  };
+
+  const conectar = () => {
+    if (cerrado) return;
+    const ws = new WebSocket(destino());
+    socket = ws;
+
+    ws.onopen = () => {
+      espera = 500;
+      if (!primera) reconectados.forEach((avisar) => avisar());
+      primera = false;
+    };
+
+    ws.onmessage = (mensaje) => {
+      try {
+        handler(JSON.parse(mensaje.data as string) as WireEvent);
+      } catch (error) {
+        // Un evento que no se entiende no puede tumbar el flujo entero: se
+        // aparta y se sigue con el siguiente.
+        console.error("evento ilegible del servidor del panel", error);
+      }
+    };
+
+    ws.onclose = () => {
+      if (cerrado) return;
+      temporizador = window.setTimeout(conectar, espera);
+      espera = Math.min(espera * 2, 10_000);
+    };
+
+    ws.onerror = () => ws.close();
+  };
+
+  conectar();
+
+  return Promise.resolve(() => {
+    cerrado = true;
+    if (temporizador !== undefined) window.clearTimeout(temporizador);
+    socket?.close();
+  });
+}
 
 export interface UserRef {
   id: string;
@@ -201,8 +352,40 @@ export interface AjusteAviso {
   sonido: string;
   duracion_ms: number;
   volumen: number;
+  /**
+   * Cuánto ocupa el aviso en pantalla. `1` es el tamaño de siempre.
+   *
+   * Es por tipo y no uno para todos: los tres tramos de regalo existen justo para
+   * que una rosa pase discreta y una galaxia llene la pantalla.
+   */
+  escala: number;
   /** Mínimo para disparar: diamantes en regalos, likes en ráfagas. */
   minimo: number;
+  /** Cómo entra el aviso. Identificador del catálogo de `animaciones.ts`. */
+  animacion_entrada: string;
+  /** Cómo sale. */
+  animacion_salida: string;
+  /** Cuánto tarda en entrar, en milisegundos. */
+  entrada_ms: number;
+  /** Cuánto tarda en salir, en milisegundos. */
+  salida_ms: number;
+  /** El ritmo de las dos. `auto` deja el que traiga la animación. */
+  ritmo: string;
+  /**
+   * Qué hace la alerta **mientras está en pantalla**, ya entrada y antes de salir.
+   *
+   * Es un bucle, no una transición: se repite durante todo el tiempo visible. Los
+   * parámetros que lo acompañan son compartidos entre efectos —`idle_distancia` son
+   * píxeles al flotar y un porcentaje al brillar—, y cada efecto usa los que le tocan.
+   */
+  idle: string;
+  idle_distancia: number;
+  idle_ms: number;
+  idle_intervalo_ms: number;
+  idle_brillo: number;
+  idle_color: string;
+  idle_blur: number;
+  idle_modo: string;
 }
 
 /**
@@ -216,6 +399,25 @@ export interface SalidaAlertas {
   dispositivo: string;
   volumen: number;
   en_directo: boolean;
+}
+
+/**
+ * De dónde viene el audio de previsualización que está sonando.
+ *
+ * Los nombres son los que manda Rust (`preview.rs`): son contrato, no etiquetas.
+ */
+export type OrigenPreview = "biblioteca-sonidos" | "previa-alerta" | "muestra-voz";
+
+/**
+ * Quién tiene el turno del audio de previsualización.
+ *
+ * Se enseña y se compara, pero **no se guarda** en la interfaz como si fuera
+ * estado propio: el turno es de Rust, y la interfaz solo lo refleja.
+ */
+export interface DuenioPreview {
+  origen: OrigenPreview;
+  /** Qué suena: el nombre del fichero, el tipo de aviso o la clave de la voz. */
+  id: string;
 }
 
 /** Los siete avisos, por identificador, más por dónde se oyen aquí. */
@@ -274,6 +476,14 @@ export const TIPOS_AVISO: TipoAviso[] = [
  */
 export interface OverlayDesignInfo {
   id: string;
+  /**
+   * Si es un **marcador** —la tabla de lo que ha pasado— o un **juego** —algo que se
+   * mueve con el ritmo de los taps—.
+   *
+   * Lo dice el motor y no se adivina aquí: la pestaña los enseña en dos secciones
+   * distintas, y un diseño nuevo mal clasificado saldría en la sección equivocada.
+   */
+  tipo: "marcador" | "juego";
   /** Vistas en las que se puede elegir (`tap`, `gifts`, `follows`). */
   vistas: string[];
   previa: { ancho: number; alto: number };
@@ -538,6 +748,8 @@ export interface TtsCuota {
 export interface TtsVozGuardada {
   /** Como la llama el streamer. */
   nombre: string;
+  /** Como la llama su creador en el catalogo. Se guardan los dos. */
+  titulo_original: string;
   /** El identificador de la voz en su proveedor. Unico dentro de él. */
   referencia: string;
   /** De qué motor salió: `edge` o `fish`. */
@@ -546,6 +758,36 @@ export interface TtsVozGuardada {
   idioma: string;
   /** Una línea de descripción, o vacío. **Nunca** se guarda audio. */
   descripcion: string;
+  /** Si está marcada con la estrella. Las favoritas van primero. */
+  favorito: boolean;
+  /**
+   * Nombre del fichero de portada en la caché local, o vacío.
+   *
+   * Es un **nombre de fichero**, no una URL: se sirve por el servidor de overlays
+   * (`/voces/portada/{archivo}`) y así la biblioteca sigue enseñando la voz
+   * aunque Fish no conteste.
+   */
+  portada: string;
+  autor: string;
+  /** Identificador del autor, para poder pedir «más de este autor». */
+  autor_id: string;
+  autor_avatar: string;
+  tags: string[];
+  /** Las muestras **oficiales**: direcciones a audios ya hechos, no se generan. */
+  muestras: TtsMuestraVoz[];
+  actualizado_en: string;
+}
+
+/**
+ * Una muestra ya hecha por Fish.
+ *
+ * `audio` es una dirección suya y **no se construye nunca a mano**: si no viene,
+ * la voz no tiene muestra y se ofrece generarla.
+ */
+export interface TtsMuestraVoz {
+  titulo: string;
+  texto: string;
+  audio: string;
 }
 
 /** Un modelo de Fish, con su tarifa en dolares por millon de bytes de texto. */
@@ -563,7 +805,59 @@ export interface TtsModelo {
 export type TtsReadiness = "ready" | "missing_secret" | "missing_voice" | "no_usable_key";
 
 /** En que estado esta una clave guardada. */
-export type TtsClaveEstado = "viva" | "invalida" | "agotada";
+export type TtsClaveEstado = "viva" | "invalida" | "agotada" | "apagada";
+
+/* --- La biblioteca de voces del catalogo de Fish ------------------------- */
+
+/**
+ * Una voz del catalogo de Fish, tal como la devuelve su API.
+ *
+ * Es de **solo lectura**: la aplicacion no crea, ni edita, ni borra voces en la
+ * cuenta del streamer. `id` es el `reference_id` que se le manda a la sintesis.
+ */
+export interface TtsVozFish {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  /** Portada que da la API. Puede venir vacía. */
+  portada: string;
+  /** Códigos de idioma (`es`, `en`…) tal cual los da la API. */
+  idiomas: string[];
+  tags: string[];
+  muestras: TtsMuestraVoz[];
+  autor: { id: string; nombre: string; avatar: string };
+  visibilidad: string;
+  /** `created`, `training`, `trained` o `failed`. */
+  estado: string;
+  me_gusta: number;
+  usos: number;
+  actualizado_en: string;
+}
+
+/** Una pagina del catalogo. */
+export interface TtsPaginaVoces {
+  total: number;
+  pagina: number;
+  tamano: number;
+  items: TtsVozFish[];
+}
+
+/**
+ * Lo que se le puede pedir al catalogo.
+ *
+ * Solo lo que la API confirma: buscar por titulo, un idioma, una etiqueta, un
+ * autor y si son las voces propias. `sort_by` **no** se usa: el esquema lo declara
+ * sin decir qué valores acepta.
+ */
+export interface TtsFiltrosVoces {
+  buscar?: string;
+  idioma?: string;
+  tag?: string;
+  autor?: string;
+  propios?: boolean;
+  pagina?: number;
+  tamano?: number;
+}
 
 /**
  * Una clave de la API **enmascarada**.
@@ -725,6 +1019,51 @@ export const api = {
   /** Vuelve a intentar una clave marcada como invalida o agotada. */
   ttsKeyReset: (id: number) => invoke<TtsStatus>("tts_key_reset", { id }),
 
+  /** Le pone otro nombre a una clave. */
+  ttsKeyRename: (id: number, nombre: string) =>
+    invoke<TtsStatus>("tts_key_rename", { id, nombre }),
+
+  /** Apaga una clave: deja de intentarse sin perderla. */
+  ttsKeyDisable: (id: number) => invoke<TtsStatus>("tts_key_disable", { id }),
+
+  /** Comprueba una clave contra la API. No gasta saldo ni cambia su estado. */
+  ttsKeyProbar: (id: number) => invoke<null>("tts_key_probar", { id }),
+
+  // --- La biblioteca de voces ---------------------------------------------
+
+  /** Una pagina del catalogo de Fish. */
+  ttsVocesBuscar: (filtros: TtsFiltrosVoces) =>
+    invoke<TtsPaginaVoces>("tts_voces_buscar", { filtros }),
+
+  /** Una voz del catalogo, con sus muestras oficiales. */
+  ttsVozObtener: (id: string) => invoke<TtsVozFish>("tts_voz_obtener", { id }),
+
+  /** Guarda una voz del catalogo en «Mis voces». Si ya estaba, no la duplica. */
+  ttsVozGuardar: (id: string, nombre?: string) =>
+    invoke<TtsStatus>("tts_voz_guardar", { id, nombre: nombre ?? null }),
+
+  /** Quita una voz de la lista local. **No** toca la cuenta de Fish. */
+  ttsVozQuitar: (referencia: string) =>
+    invoke<TtsStatus>("tts_voz_quitar", { referencia }),
+
+  ttsVozRenombrar: (referencia: string, nombre: string) =>
+    invoke<TtsStatus>("tts_voz_renombrar", { referencia, nombre }),
+
+  ttsVozFavorita: (referencia: string, favorito: boolean) =>
+    invoke<TtsStatus>("tts_voz_favorita", { referencia, favorito }),
+
+  /** Refresca los datos de una voz guardada preguntandoselos otra vez a Fish. */
+  ttsVocesActualizar: (referencia: string) =>
+    invoke<TtsStatus>("tts_voces_actualizar", { referencia }),
+
+  /** Genera una prueba con el motor de siempre. **Cuesta saldo.** */
+  ttsVozProbar: (referencia: string, texto?: string) =>
+    invoke<string>("tts_voz_probar", { referencia, texto: texto ?? null }),
+
+  /** Deja la portada de una voz en la cache local y devuelve su fichero. */
+  ttsVozPortada: (id: string, url: string) =>
+    invoke<string>("tts_voz_portada", { id, url }),
+
   /**
    * Activa o desactiva el histórico de aportaciones de por vida.
    *
@@ -778,9 +1117,33 @@ export const api = {
   /**
    * Suena un medio en el monitor del streamer, sin encolar ningún aviso.
    *
-   * Es el botón de oír: una lista de nombres no dice cómo suena nada.
+   * Es el botón de oír: una lista de nombres no dice cómo suena nada. Corta lo que
+   * estuviera sonando en el monitor y **pide el turno del preview**: ver
+   * `previewAudio.tsx`.
    */
   oirMedio: (nombre: string) => invoke<void>("oir_medio", { nombre }),
+
+  /**
+   * Para el audio de previsualización que esté sonando.
+   *
+   * Lo llama el coordinador antes de reproducir cualquier cosa —para que no se
+   * solapen— y cuando se corta a mano: el mismo sonido pulsado dos veces o el
+   * cambio de pestaña.
+   *
+   * Con `esperado` solo se suelta **ese** preview. Es lo que evita que una orden de
+   * parar que llega tarde apague el sonido que acaba de empezar: sin él, parar es
+   * incondicional, que es lo que se quiere cuando el streamer pulsa «Parar».
+   */
+  pararPreview: (esperado?: DuenioPreview | null) =>
+    invoke<void>("parar_preview", { esperado: esperado ?? null }),
+
+  /**
+   * Quién tiene el turno del preview, si alguien.
+   *
+   * El motor lo limpia solo cuando el sonido que encoló **ya terminó**, así que
+   * preguntarlo es también la forma de saber si sigue sonando.
+   */
+  previewEstado: () => invoke<DuenioPreview | null>("preview_estado"),
 
   /**
    * Abre el perfil de TikTok de una persona en el navegador.
@@ -791,5 +1154,8 @@ export const api = {
   abrirPerfil: (uniqueId: string) => invoke<void>("abrir_perfil", { unique_id: uniqueId }),};
 
 export function onDashEvent(handler: (event: WireEvent) => void): Promise<UnlistenFn> {
-  return listen<WireEvent>("dash://event", (message) => handler(message.payload));
+  if (enEscritorio) {
+    return escucharTauri<WireEvent>("dash://event", (message) => handler(message.payload));
+  }
+  return escucharPorWebSocket(handler);
 }

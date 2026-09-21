@@ -28,28 +28,117 @@
         flex-direction: column;
         gap: 14px;
         max-width: 80vw;
-        /* La entrada y la salida son transiciones cortas que terminan, no un
-           bucle: el plan prohibe animaciones permanentes porque cada Browser
-           Source de OBS es un renderer mas. */
-        opacity: 0;
-        transform: scale(0.86);
+        /* El tamaño que le ha dado el streamer a este aviso, aplicado de una vez a
+           todo lo que hay dentro: el medio **y** su texto.
+
+           Se hace con `zoom` y no con `max-height`/`max-width` por un motivo que se
+           vio midiendo: los `max-*` solo **recortan**, asi que en el caso mas comun
+           —un sticker de 150 px— el mando no hacia absolutamente nada, porque el
+           medio nunca llegaba al tope. `zoom` multiplica el tamaño real, y a 1 no
+           cambia nada: los avisos que ya estaban configurados salen igual que antes. */
+        zoom: var(--escala, 1);
+
+        /* --- La animacion la pone el motor, no esta hoja ---------------------
+
+           Aqui no hay ninguna animacion escrita: hay **el sitio donde empieza** el
+           aviso y cuanto tarda en llegar a su sitio. El motor de `alertas.js` escribe
+           esas tres variables con la animacion que el streamer haya elegido para este
+           aviso, y la transicion la lleva el navegador.
+
+           Se hace asi, y no con clases por animacion, porque son once animaciones por
+           dos sentidos: con clases habria veintidos combinaciones que mantener, y
+           añadir una nueva obligaria a tocar el CSS y el JS. Con variables, una
+           animacion nueva es **una linea** en el catalogo del motor.
+
+           `--ritmo` sale del catalogo de ritmos, y `auto` deja que lo ponga la propia
+           animacion: un rebote trae su rebote sin que nadie lo elija. */
+        opacity: var(--entra-opacidad, 1);
+        transform: var(--entra-transformacion, none);
+        filter: var(--entra-desenfoque, none);
+        /* `translate`, `scale` y `rotate` entran en la lista por la permanencia: son
+           las que mueven el aviso mientras esta en pantalla, y al pararla tienen que
+           **volver a su sitio** con la duracion de la salida, no de un golpe. */
         transition:
-          opacity 220ms ease-out,
-          transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+          opacity var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out),
+          transform var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out),
+          translate var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out),
+          scale var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out),
+          rotate var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out),
+          filter var(--ms-animacion, 300ms) var(--ritmo-animacion, ease-out);
+        /* Las dos capas de la permanencia —la franja del brillo y el anillo del
+           borde— se colocan sobre la caja, asi que la caja tiene que ser su
+           referencia. No llevan fondo ni borde propios: los pone el efecto que este
+           puesto, y si no hay ninguno quedan invisibles. */
+        position: relative;
       }
 
+      /* La franja de luz del brillo. */
+      .aviso-caja::before {
+        border-radius: var(--radio-tarjeta, 12px);
+        content: "";
+        inset: 0;
+        pointer-events: none;
+        position: absolute;
+        z-index: 1;
+      }
+
+      /* El anillo del borde. Va con `mask` para que sea **solo el contorno** y no un
+         rectangulo relleno: es el mismo truco que un borde degradado. */
+      .aviso-caja::after {
+        border-radius: var(--radio-tarjeta, 12px);
+        content: "";
+        inset: -6px;
+        padding: 3px;
+        pointer-events: none;
+        position: absolute;
+        -webkit-mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+      }
+
+      /* El estado final: el aviso en su sitio, sin transformacion ni desenfoque. */
       .aviso-caja.visible {
         opacity: 1;
-        transform: scale(1);
+        filter: none;
+        transform: none;
       }
 
       /* El medio nunca desborda al streamer: se le pone un tope de alto y ancho y
          se respeta la proporcion. Un GIF de 800x2000 sin esto taparia el directo
-         entero. */
+         entero.
+
+      /* El medio **nunca desborda** al streamer, y ademas todos los medios parten del
+         mismo tamaño.
+
+         Antes mandaba el tamaño natural del fichero: un sticker de 150 px salia
+         diminuto y un GIF de 1000 px enorme, y no habia forma de igualarlos salvo
+         moviendo el mando uno a uno. Ahora el punto de partida es **el mismo para
+         todos** —un 38 % del alto del lienzo— y lo que cambia es la proporcion de cada
+         fichero, que se respeta porque la altura la pone la regla y la anchura la saca
+         el navegador de la relacion de aspecto (`width: auto`).
+
+         Todo se mide **en `vh`**, y no es un detalle: asi el tamaño es el mismo en
+         cualquier lienzo de la misma altura. Mezclando `vw`, el mismo aviso saldria
+         distinto en la previa cuadrada que en una fuente de OBS de 1920x1080, y la
+         previa dejaria de decir la verdad. Los `min()` y `max()` de la derecha solo
+         entran en lienzos muy estrechos, como red.
+
+         Los topes van **divididos por la escala** porque `zoom` los multiplica
+         despues: asi siguen midiendo lo mismo **en pantalla** suba lo que suba el
+         mando, y un aviso al 200 % no se sale del cuadro. */
       .aviso-medio {
         display: none;
-        max-height: 62vh;
-        max-width: 70vw;
+        height: min(38vh, 62vw);
+        width: auto;
+        max-height: min(calc(70vh / var(--escala, 1)), 100vh);
+        max-width: min(calc(90vh / var(--escala, 1)), 92vw);
+        /* Red de seguridad: si algo forzara las dos dimensiones a la vez, `contain`
+           impide que la imagen se estire. La proporcion no se toca nunca. */
         object-fit: contain;
       }
 
@@ -68,7 +157,7 @@
         font-weight: 800;
         line-height: 1.15;
         margin: 0;
-        max-width: 70vw;
+        max-width: min(calc(70vw / var(--escala, 1)), 100vw);
         overflow-wrap: anywhere;
         padding: 14px 26px;
         text-align: center;
@@ -93,9 +182,14 @@
         right: 12px;
       }
 
+      /* Con `prefers-reduced-motion` —y en OBS se puede dar— el aviso entra y sale
+         con un fundido corto y sin moverse. Se respeta la preferencia del sistema,
+         pero **no** se quita la animacion entera: un aviso que aparece de golpe es
+         justo lo que se venia a evitar, y aqui solo molesta el movimiento. */
       @media (prefers-reduced-motion: reduce) {
         .aviso-caja {
           transform: none;
+          filter: none;
           transition: opacity 220ms linear;
         }
       }

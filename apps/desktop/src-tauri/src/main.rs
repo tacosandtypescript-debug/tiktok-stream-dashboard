@@ -75,12 +75,24 @@ fn main() {
         return;
     }
 
+    // Panel por HTTP en vez de ventana: sirve la interfaz compilada en
+    // `apps/desktop/dist`, expone los comandos del motor y empuja los eventos por
+    // WebSocket. No necesita Tauri ni la feature `desktop`, asi que este binario
+    // se puede compilar y llevar a otra maquina.
+    if args.iter().any(|arg| arg == "--web") {
+        if let Err(error) = dashboard::web::run() {
+            eprintln!("el panel web no pudo arrancar: {error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     #[cfg(feature = "desktop")]
     dashboard::run();
 
     #[cfg(not(feature = "desktop"))]
     {
-        eprintln!("Esta compilación no incluye la interfaz. Usa --self-test, --tts-test o compila con la feature `desktop`.");
+        eprintln!("Esta compilación no incluye la interfaz. Usa --web, --self-test, --tts-test o compila con la feature `desktop`.");
         let _ = dashboard::init();
     }
 }

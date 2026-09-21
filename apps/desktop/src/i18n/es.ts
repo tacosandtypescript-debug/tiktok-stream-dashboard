@@ -63,7 +63,7 @@ export const t = {
     views: {
       tap: {
         title: "Tap tap",
-        hint: "Los likes que da el público tocando la pantalla. Los minijuegos solo se pueden elegir aquí: se mueven con el ritmo de los taps.",
+        hint: "Los likes que da el público tocando la pantalla.",
       },
       gifts: {
         title: "Regalos",
@@ -74,7 +74,15 @@ export const t = {
         hint: "Quién ha empezado a seguirte en esta sesión.",
       },
     } as Record<string, { title: string; hint: string }>,
-    designs: "Diseños",
+    designs: "Marcadores",
+    games: "Juegos",
+    gamesHint:
+      "Se mueven con el ritmo de los taps, así que solo van en Tap tap: mientras haya uno puesto, esa vista no enseña el marcador.",
+    gamesTapOnly: "Tap tap",
+    gamesSoon: "Próximo paso",
+    gamesSoonHint:
+      "Los juegos nuevos se crean desde aquí: un diseño que se mueve con el ritmo de los taps. Los tres de arriba ya están montados y se pueden poner en antena.",
+    gameCreate: "+ Crear juego",
     inUse: "En antena",
     use: "Usar este",
     preview: "Vista previa",
@@ -291,7 +299,7 @@ export const t = {
    */
   alertas: {
     title: "Alertas para OBS",
-    hint: "Cada evento dispara un aviso que sale de uno en uno en pantalla, con su medio y su sonido. Es una fuente de OBS propia: pégala en un Browser Source y colócala donde quieras.",
+    hint: "Un aviso por evento: elige el texto, el medio y el sonido, y míralo aquí antes de que salga en antena.",
     direccion: "Dirección para OBS",
     direccionHint:
       "Es la fuente de las alertas. Si OBS no la tiene cargada, los avisos esperan en cola y salen al volver; si se acumulan más de veinte, se descartan los viejos.",
@@ -307,11 +315,10 @@ export const t = {
      * iguales seguidos. Se queda como nombre accesible del bloque, que es lo que un
      * encabezado de grupo no puede dar.
      *
-     * `listaHint` sí se lee: explica que el interruptor enciende sin abrir el aviso
-     * y que se edita el elegido.
+     * Ya no hay `listaHint`: la frase de arriba explica la pantalla entera y la lista
+     * se quedó sin ayuda propia para ganar una fila más de avisos a la vista.
      */
     lista: "Avisos",
-    listaHint: "Elige uno para configurarlo. El interruptor lo enciende sin abrirlo.",
     /**
      * Los dos grupos de la lista.
      *
@@ -360,6 +367,29 @@ export const t = {
     videoMudo: "el vídeo va en mudo",
     duracion: "Duración",
     volumen: "Volumen",
+    tamano: "Tamaño",
+    /* Va debajo de la previa, que es donde se ve el efecto, y por eso el rótulo ya no
+       necesita decir «en OBS»: lo dice la ayuda, que es donde cabe contarlo entero. */
+    tamanoHint:
+      "Cuánto ocupa este aviso en pantalla. Se aplica al medio y a su texto, y solo a este aviso: el tramo enorme puede ocupar más que una rosa. Al moverlo, la previa cambia al momento; al darle a Probar, sale así en OBS.",
+    animacion: "Animación",
+    animacionHint:
+      "Cómo entra y cómo sale el aviso, cuánto tarda cada cosa y a qué ritmo. El aviso se queda en pantalla lo que diga «Duración» **después** de terminar de entrar.",
+    entra: "Entra",
+    sale: "Sale",
+    animacionEntrada: "Cómo entra el aviso",
+    animacionSalida: "Cómo sale el aviso",
+    /* En segundos y no en milisegundos: es como se piensa un tiempo que se ve. */
+    entradaMs: "Segundos que tarda en entrar",
+    salidaMs: "Segundos que tarda en salir",
+    ritmo: "Ritmo de la animación",
+    ritmoHint:
+      "Cómo reparte el tiempo la animación. «Automático» deja el que traiga cada una: un rebote rebota sin tener que pedirlo.",
+    /* La permanencia: lo que hace la alerta mientras está en pantalla, entre la
+       entrada y la salida. */
+    permanencia: "Permanencia",
+    permanenciaHint:
+      "Lo que hace la alerta mientras está en pantalla, ya entrada y antes de salir. Se repite durante todo ese rato: flotar, vibrar, una luz que la cruza, un resplandor en el contorno… Cada efecto trae sus propios mandos, y al elegirlo se ponen sus valores recomendados.",
     minimo: "Mínimo",
     minimoGift: "Solo a partir de estos diamantes",
     minimoLike: "Solo a partir de estos likes",
@@ -369,9 +399,14 @@ export const t = {
     probar: "Probar",
     probarHint:
       "Encola un aviso de mentira con el texto y el medio de arriba. No pasa por el mínimo a propósito: si lo tienes alto, la prueba se quedaría muda y parecería roto.",
+    /* Probar y oír son interruptores: mientras suena eso mismo, el botón dice
+       «Parar». Un solo audio de prueba suena a la vez —el coordinador corta el
+       anterior—, así que el botón que suena es siempre el mismo que se puede parar. */
+    parar: "Parar",
+    pararHint: "Está sonando: vuelve a pulsar y se para.",
     oir: "Oír",
     oirHint:
-      "Suena aquí, en tu monitor, sin encolar ningún aviso: es la única forma de saber qué es un fichero sin tener OBS delante.",
+      "Suena aquí, en tu monitor, sin encolar ningún aviso: es la única forma de saber qué es un fichero sin tener OBS delante. Si ya está sonando otro, se corta.",
     poner: "Poner",
     puesto: "Puesto",
     ponerSonido: (aviso: string) => `Ponlo como sonido de «${aviso}».`,
@@ -380,6 +415,7 @@ export const t = {
     quitarHint: "Se lo quita a este aviso. El fichero sigue en la lista.",
     buscar: "Buscar en los medios",
     buscarPlaceholder: "Buscar…",
+    limpiarBusqueda: "Limpiar",
     soloImagenes: "Imágenes",
     soloImagenesHint: "Solo lo que se ve: imágenes, GIF y vídeos.",
     soloSonidos: "Sonidos",
@@ -395,26 +431,31 @@ export const t = {
     seVe: "Imagen",
     video: "Vídeo",
     medios: "Medios cargados",
-    mediosCorto: "Medios",
+    /* La previa ya no comparte columna con los medios —vive siempre a la vista, al
+       lado del editor—, así que no hay dos modos que nombrar: `mediosCorto`,
+       `previaCorto` y las dos frases de ayuda se han ido con la pestaña que las
+       justificaba. */
     previa: "Previa del aviso",
-    previaCorto: "Previa",
     previaNota: "el overlay de verdad",
-    previaHint:
-      "Es la misma página que carga OBS, así que lo que sale aquí es lo que sale en antena. Dale a Probar y mira cómo entra.",
     previaSinServidor:
       "El servidor de overlays todavía no ha arrancado, así que no hay nada que previsualizar.",
-    mediosHint:
-      "Arrastra ficheros a la ventana —o la carpeta entera— y entran todos de golpe. Se copian a la carpeta de datos y los sirve la propia aplicación, así que no se rompen si mueves el original.",
     soltar: "Suelta los ficheros o la carpeta aquí",
     elegir: "Elegir fichero",
     importados: (n: number) => (n === 1 ? "Entró 1 fichero." : `Entraron ${n} ficheros.`),
     fallos: (n: number) => (n === 1 ? "1 no entró:" : `${n} no entraron:`),
     borrar: "Borrar",
+    borrarTitulo: "Borrar medio",
+    borrarConfirmacion: "Se quitará de la biblioteca y de cualquier aviso que lo tenga asignado:",
+    cancelar: "Cancelar",
     borrarHint:
       "Si algún aviso lo estaba usando, se queda sin medio: no se puede apuntar a un fichero que ya no está.",
     vacio: "Todavía no has cargado ningún medio.",
     formatos:
       "Se aceptan PNG, JPG, GIF, WEBP, APNG, MP4, WEBM, MP3, OGG, WAV y M4A, hasta 48 MB.",
+    /* La lista de formatos es un dato que se consulta cuando un fichero no entra, no
+       una frase que haya que leer cada vez: vive en el `title` del aviso y aquí queda
+       lo único que hay que saber de un vistazo. */
+    formatosCorto: "Hasta 48 MB por fichero.",
     demasiadoGrande: (mb: number) =>
       `Ese fichero pasa de ${mb} MB. Para algo tan grande, arrástralo a la ventana en vez de elegirlo.`,
     guardado: "Guardado",
@@ -424,7 +465,10 @@ export const t = {
     salidaDispositivo: "Dispositivo",
     salidaSistema: "El del sistema",
     salidaVolumen: "Volumen aquí",
-    salidaEnDirecto: "Escucharlas también en directo",
+    /* Corto a proposito: va en la tira de abajo, en una linea, y «Escucharlas también
+       en directo» obligaba a partirla en dos y estiraba la tira. La explicacion larga
+       viaja en el `title` de al lado. */
+    salidaEnDirecto: "También en directo",
     salidaEnDirectoHint:
       "Apagado viene bien: en directo ya las oyes por OBS, y sonar dos veces suena peor que no sonarlas.",
     salidaActiva: (dispositivo: string) => `Sonando por ${dispositivo}.`,
@@ -562,21 +606,48 @@ export const t = {
       viva: "En pie",
       invalida: "Rechazada",
       agotada: "Sin saldo",
+      apagada: "Apagada",
     },
     keyFull: "Ya hay diez claves: quita una para añadir otra.",
     keyEmpty: "La clave no puede estar vacía.",
+    /** Las acciones de una clave, dentro del menú ⋯ de su fila. */
+    keyMenu: "Más acciones",
+    keyProbar: "Probar",
+    keyProbarHint: "Pregunta a Fish Audio con esta clave. No gasta saldo.",
+    keyProbando: "Probando…",
+    keyProbarOk: "La clave funciona.",
+    keyProbarFallo: (motivo: string) => `La clave no responde: ${motivo}`,
+    keyRenombrar: "Renombrar",
+    keyRenombrarAviso: "¿Cómo quieres llamarla?",
+    keyDesactivar: "Desactivar",
+    keyActivar: "Activar",
+    keyDesactivarHint:
+      "Deja de intentarse sin perderla: se queda guardada con su nombre y su contador.",
+    keyQuitar: "Eliminar",
+    keyQuitarAviso: "Se quita de la lista. La clave sigue siendo tuya en Fish Audio.",
+    keyAddOpen: "+ Añadir clave",
     /** Consumo: se cobra por bytes del texto enviado, así que se cuenta aquí. */
     usage: "Consumo",
-    usageHint: "El gasto de aquí abajo lo cuenta la aplicación, frase a frase.",    usageModel: (modelo: string, precio: string) =>
+    usageHint: "El gasto de aquí abajo lo cuenta la aplicación, frase a frase.",
+    usageModel: (modelo: string, precio: string) =>
       precio === "0"
         ? `Contando con ${modelo}: gratis`
         : `Contando con ${modelo}: ${precio} $ por millón de bytes`,
     usageSession: "Este directo",
-    usageTotal: "En total",
-    usageBytes: (texto: string) => `${texto} de texto`,
+    usageTotal: "En total",    usageBytes: (texto: string) => `${texto} de texto`,
     usageCalls: (texto: string) => `${texto} frases`,
     usageFree: "gratis",
     usageEmpty: "Todavía no se ha mandado nada a Fish Audio.",
+    /**
+     * Las dos mitades del consumo, separadas a propósito.
+     *
+     * Arriba lo que dice **el proveedor** (el saldo de la cuenta, que solo lo sabe
+     * Fish) y abajo lo que cuenta **la aplicación** (bytes de texto enviados por
+     * esta instalación). Mezclarlos hacía pensar que el gasto local y el saldo real
+     * salían del mismo sitio.
+     */
+    consumoProveedor: "En tu cuenta de Fish Audio",
+    consumoAplicacion: "Lo que ha gastado esta aplicación",
 
     /* El saldo de la cuenta, preguntado a la API del motor de voz. */
     saldo: "Saldo de la cuenta",
@@ -633,5 +704,120 @@ export const t = {
     simulatorHint:
       "Genera eventos falsos (comentarios, regalos con racha, likes, viewers y follows) sin conexión a TikTok. Es el mismo proveedor que usan los tests: no aparece en el flujo normal a propósito.",
     backToNative: "Volver al proveedor real",
+  },
+
+  /**
+   * La biblioteca de voces de Fish Audio.
+   *
+   * Vive aparte de `tts` porque es otra cosa: `tts` es **ejecución** —qué se lee,
+   * con qué voz, a qué volumen— y esto es **administración** —buscar voces,
+   * escucharlas, guardarlas y llevar las claves—. Los dos textos están separados
+   * para que no se dupliquen los mandos (docs/interfaz.md).
+   */
+  voces: {
+    /* Las dos pestañas de la biblioteca. */
+    biblioteca: "Biblioteca de voces",
+    misVoces: "Mis voces",
+    explorar: "Explorar Fish Audio",
+    misVocesHint: "Las que has guardado. Se quedan aquí aunque cierres la aplicación.",
+    explorarHint:
+      "El catálogo público de Fish Audio. Escucha antes de guardar: las muestras son suyas y no gastan saldo.",
+
+    /* El alta. */
+    agregar: "+ Agregar voz",
+    agregarTitulo: "Agregar una voz",
+    agregarHint:
+      "Pega el identificador de una voz de Fish o búscala en el catálogo. Primero se comprueba y se enseña; se guarda cuando tú lo digas.",
+    importarPorId: "Importar por ID",
+    referenceId: "Identificador (reference ID)",
+    referenceIdPlaceholder: "9a9cf47702da476aa4629e2506d4a857",
+    nombreOpcional: "Nombre personalizado (opcional)",
+    nombreOpcionalPlaceholder: "Voz mujer TikTok",
+    nombreOpcionalHint: "Si lo dejas vacío se usa el nombre que trae Fish. El suyo no se pierde.",
+    comprobar: "Comprobar",
+    comprobando: "Comprobando…",
+    guardarEnMisVoces: "Guardar en Mis voces",
+    cerrar: "Cerrar",
+
+    /* Buscar y filtrar. */
+    buscar: "Buscar voces…",
+    buscarPlaceholder: "Nombre de la voz",
+    filtroTodas: "Todas",
+    filtroFavoritas: "Favoritas",
+    filtroIdioma: "Idioma",
+    soloMisModelos: "Mis modelos",
+    soloMisModelosHint: "Solo las voces de tu cuenta de Fish Audio.",
+    limpiarFiltros: "Quitar filtros",
+
+    /* La rejilla y sus estados. */
+    cargarMas: "Cargar más",
+    cargando: "Cargando…",
+    cargandoMas: "Cargando más voces…",
+    sinResultados: "Ninguna voz coincide con la búsqueda.",
+    errorCargar: "No se pudo cargar el catálogo.",
+    reintentar: "Reintentar",
+    sinClave: "Para explorar el catálogo hace falta una clave de Fish Audio.",
+    sinClaveIr: "Ir a las claves",
+    sinGuardadas: "Todavía no has guardado ninguna voz.",
+    sinGuardadasHint:
+      "Explora el catálogo, escucha una muestra y pulsa «+ Guardar». Aparecerá aquí.",
+    sinFavoritas: "No has marcado ninguna voz con la estrella.",
+    cuantas: (cuantas: number, total: number) =>
+      cuantas === total ? `${total} voces` : `${cuantas} de ${total} voces`,
+    yaNoEsta: "Esta voz ya no está en el catálogo de Fish Audio.",
+
+    /* La tarjeta. */
+    escuchar: "Escuchar",
+    usar: "Usar",
+    guardar: "Guardar",
+    guardada: "Guardada",
+    yaGuardada: "Ya está en Mis voces",
+    sinMuestra: "Esta voz no trae muestra: se puede generar una prueba desde el detalle.",
+    sinImagen: "Sin imagen",
+    sonando: "Reproduciendo",
+    enUso: "La que está puesta",
+    verDetalles: "Ver detalles",
+    noDisponible: "Todavía no se puede usar",
+
+    /* El reproductor. */
+    cargandoMuestra: "Cargando la muestra…",
+    muestraError: "No se pudo reproducir la muestra.",
+    pararMuestra: "Parar",
+    muestraOficial: "Muestra de Fish Audio",
+    muestraSinTexto: "Sin texto asociado",
+
+    /* El detalle. */
+    detalles: "Detalles",
+    detallesHint: "Lo que Fish Audio sabe de esta voz.",
+    descripcion: "Descripción",
+    idioma: "Idioma",
+    autor: "Autor",
+    etiquetas: "Etiquetas",
+    identificador: "Identificador",
+    copiarId: "Copiar identificador",
+    copiado: "Copiado",
+    muestras: "Muestras",
+    sinMuestras: "Sin muestra",
+    sinMuestrasHint:
+      "Fish Audio no ha publicado ninguna muestra de esta voz. Se puede generar una prueba con tu clave, y esa sí gasta saldo.",
+    generarPrueba: "Generar prueba",
+    generandoPrueba: "Generando…",
+    generarPruebaAviso: "Generar una prueba manda texto a Fish Audio y se cobra.",
+    muestraNumero: (numero: number) => `Muestra ${numero}`,
+    actualizado: (cuando: string) => `Actualizado el ${cuando}`,
+
+    /* El menú ⋯ de una voz guardada. */
+    menu: "Más acciones",
+    editarNombre: "Editar nombre",
+    actualizarDesde: "Actualizar desde Fish Audio",
+    actualizando: "Actualizando…",
+    actualizada: "Datos actualizados",
+    eliminar: "Eliminar de Mis voces",
+    eliminarAviso: "Se quita de esta lista. En tu cuenta de Fish Audio no se toca nada.",
+    quitarFavorito: "Quitar de favoritas",
+    ponerFavorito: "Marcar como favorita",
+
+    /* Guardar desde el catálogo. */
+    guardadaAviso: "Guardada en Mis voces.",
   },
 } as const;

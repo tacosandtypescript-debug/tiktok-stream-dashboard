@@ -2,6 +2,6 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "externalBin": ["binaries/tiktok-tts-provider"],
-    "resources": ["../../../THIRD_PARTY_NOTICES.md"]
+    "resources": ["../../../THIRD_PARTY_NOTICES.md", "alertas-pack"]
   }
 }

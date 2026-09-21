@@ -20,6 +20,7 @@ use crate::feed::{
     like_is_notable, EventFeed, FeedItem, FeedKind, GiftBoard, GiftEventView, GiftTypeSummary,
     RankingBoard, RankingEntry, FEED_CAPACITY,
 };
+use crate::preview::{DuenioPreview, OrigenPreview, PreviewAudio};
 use crate::providers::{NativeProvider, ProviderConfig, SimulatedProvider, TikTokProvider};
 use crate::secreto::Secreto;
 use crate::telemetry;
@@ -54,6 +55,15 @@ pub const USUARIOS_RECORDADOS: usize = 4;
 /// Es el mismo tope que usa `desktop::abrir_perfil` para construir la direccion
 /// del perfil: lo que no vale para abrirlo tampoco vale para recordarlo.
 const MAX_USUARIO: usize = 32;
+
+/// Lo que se dice cuando el streamer pide una prueba de una voz que no trae
+/// muestras propias.
+///
+/// Es una frase corta **a proposito**: la prueba se cobra por bytes de texto, y lo
+/// que hay que comprobar es como suena la voz, no leer un parrafo. Lleva las
+/// letras que distinguen una locucion de otra —la ese, la erre y las vocales
+/// abiertas— y nada mas.
+pub const TEXTO_DE_PRUEBA: &str = "Hola, asi suena esta voz para el directo.";
 
 pub struct AppState {
     pub(crate) bus: Arc<EventBus>,
@@ -148,6 +158,12 @@ pub struct AppState {
     /// tiene que poder anadir, quitar y reactivar claves, y eso es API propia de
     /// este proveedor (el trait solo expone lo comun a todos).
     pub(crate) fish: Arc<FishAudio>,
+    /// Quien trae las imagenes de las voces del catalogo.
+    ///
+    /// Va aqui y no dentro del proveedor de voz porque una portada es una
+    /// descarga **sin credencial** —una direccion publica— y no tiene nada que ver
+    /// con el relevo de claves ni con la sintesis.
+    pub(crate) descargador: Arc<dyn crate::tts::fish_modelos::Descargador>,
     /// Ultimo consumo que se ha mandado a la base.
     ///
     /// Sirve para no escribir una fila por evento: el consumo se vuelca cuando
@@ -181,6 +197,13 @@ pub struct AppState {
     /// No es la salida de la audiencia —esa es la fuente de OBS— y por eso es un
     /// reproductor aparte del lector de voz, con su propio dispositivo y volumen.
     pub(crate) salida_alertas: RwLock<Arc<dyn crate::tts::player::AudioSink>>,
+    /// Quien tiene el turno del **audio de previsualizacion**.
+    ///
+    /// Lo comparten los tres sitios que reproducen un audio de prueba —la
+    /// biblioteca de sonidos, la previa del aviso y la muestra de una voz—, para
+    /// que solo suene uno. Ver `preview.rs`: ahi esta el por que, y por que el
+    /// turno lleva marca.
+    pub(crate) preview: PreviewAudio,
     pub(crate) instance_port: u16,
 }
 
@@ -278,6 +301,13 @@ impl AppState {
         let edge = Arc::new(EdgeTtsSidecar::new(crate::tts::default_config()));
         let fish = Arc::new(FishAudio::new(crate::tts::FishConfig::default()));
         fish.cargar(claves_guardadas, consumo_guardado);
+        // El descargador de portadas se construye con el mismo tope de tiempo que
+        // la sintesis: si Fish no contesta en ese rato, la biblioteca se queda con
+        // el placeholder en vez de esperar.
+        let descargador: Arc<dyn crate::tts::fish_modelos::Descargador> =
+            Arc::new(crate::tts::fish_modelos::DescargadorHttp::nuevo(
+                crate::tts::FishConfig::default().timeout,
+            )?);
         // El gestor nace ya con el motor que dicen los ajustes: si el streamer
         // dejo Fish puesto, el primer mensaje del chat no puede salir por el
         // sidecar.
@@ -324,6 +354,7 @@ impl AppState {
             tts,
             edge,
             fish,
+            descargador,
             ultimo_consumo: Mutex::new(None),
             db_path,
             schema_version,
@@ -335,6 +366,7 @@ impl AppState {
                     .and_then(|salida| salida.dispositivo()),
             ))),
             cola_alertas: Arc::new(crate::alerts::ColaAlertas::nueva()),
+            preview: PreviewAudio::nueva(),
             instance_port,
         })
     }
@@ -1794,6 +1826,173 @@ impl AppState {
         Ok(self.tts_status())
     }
 
+    /// Le pone otro nombre a una clave.
+    pub fn tts_key_rename(&self, id: u64, nombre: &str) -> anyhow::Result<TtsStatus> {
+        if !self.fish.renombrar(id, nombre) {
+            anyhow::bail!("no existe esa clave");
+        }
+        self.persist_tts_keys()?;
+        Ok(self.tts_status())
+    }
+
+    /// Apaga una clave: deja de intentarse sin perderla.
+    pub fn tts_key_disable(&self, id: u64) -> anyhow::Result<TtsStatus> {
+        if !self.fish.apagar(id) {
+            anyhow::bail!("no existe esa clave");
+        }
+        self.persist_tts_keys()?;
+        Ok(self.tts_status())
+    }
+
+    /// Comprueba una clave contra la API. No gasta saldo y no cambia su estado.
+    pub async fn tts_key_probar(&self, id: u64) -> anyhow::Result<()> {
+        self.fish.probar(id).await
+    }
+
+    // --- La biblioteca de voces -------------------------------------------
+
+    /// Una pagina del catalogo de voces de Fish.
+    pub async fn voces_buscar(
+        &self,
+        filtros: crate::tts::fish_modelos::FiltrosVoces,
+    ) -> anyhow::Result<crate::tts::fish_modelos::PaginaVoces> {
+        crate::tts::fish_modelos::listar(&self.fish, &filtros).await
+    }
+
+    /// Una voz del catalogo, con sus muestras oficiales.
+    pub async fn voz_obtener(&self, id: &str) -> anyhow::Result<crate::tts::fish_modelos::VozFish> {
+        crate::tts::fish_modelos::obtener(&self.fish, id).await
+    }
+
+    /// Descarga la imagen de una voz y la deja en la cache local.
+    ///
+    /// Solo se llama con voces que se **guardan** o al pedir su detalle: bajar las
+    /// portadas de todo lo que se explora seria traerse la biblioteca entera de
+    /// Fish al disco del streamer sin que lo haya pedido.
+    pub async fn voz_cachear_portada(&self, id: &str, url: &str) -> anyhow::Result<String> {
+        crate::tts::fish_modelos::cachear_portada(self.descargador.as_ref(), id, url).await
+    }
+
+    /// Guarda una voz del catalogo en «Mis voces».
+    ///
+    /// El nombre es **opcional**: sin el manda el titulo del catalogo, y con el
+    /// manda el del streamer —el original no se pierde, viaja en
+    /// `titulo_original`—. Si la voz ya estaba, no se pierde nada suyo: ni su
+    /// nombre ni su estrella.
+    pub async fn voz_guardar(&self, id: &str, nombre: &str) -> anyhow::Result<TtsStatus> {
+        let datos = self.voz_obtener(id).await?;
+        if datos.id.is_empty() {
+            anyhow::bail!("Fish Audio no devolvio ninguna voz con ese identificador");
+        }
+        let mut guardada = crate::tts::manager::VozGuardada {
+            nombre: nombre.trim().to_string(),
+            titulo_original: datos.titulo.clone(),
+            referencia: datos.id.clone(),
+            proveedor: crate::tts::fish::PROVIDER_ID.to_string(),
+            idioma: datos.idioma().to_string(),
+            descripcion: datos.descripcion.clone(),
+            favorito: false,
+            portada: String::new(),
+            autor: datos.autor.nombre.clone(),
+            autor_id: datos.autor.id.clone(),
+            autor_avatar: datos.autor.avatar.clone(),
+            tags: datos.tags.clone(),
+            muestras: datos.muestras.clone(),
+            actualizado_en: datos.actualizado_en.clone(),
+        };
+        // La portada se trae al guardar: es lo que hace que la biblioteca siga
+        // enseñando las caras cuando Fish no contesta. Si no se puede, la voz se
+        // guarda igual —sin imagen— y no se pierde nada mas.
+        if let Ok(archivo) = self.voz_cachear_portada(&datos.id, datos.imagen()).await {
+            guardada.portada = archivo;
+        }
+        self.tts.guardar_voz(&guardada);
+        self.persist_tts_settings()?;
+        Ok(self.tts_status())
+    }
+
+    /// Quita una voz de la lista local. **No** toca nada en la cuenta de Fish.
+    pub fn voz_quitar(&self, referencia: &str) -> anyhow::Result<TtsStatus> {
+        if !self.tts.quitar_voz(referencia) {
+            anyhow::bail!("esa voz no esta en la lista");
+        }
+        self.persist_tts_settings()?;
+        Ok(self.tts_status())
+    }
+
+    /// Le pone el nombre que quiere el streamer. Vacio lo devuelve al del catalogo.
+    pub fn voz_renombrar(&self, referencia: &str, nombre: &str) -> anyhow::Result<TtsStatus> {
+        if !self.tts.renombrar_voz(referencia, nombre) {
+            anyhow::bail!("esa voz no esta en la lista");
+        }
+        self.persist_tts_settings()?;
+        Ok(self.tts_status())
+    }
+
+    pub fn voz_favorita(&self, referencia: &str, favorito: bool) -> anyhow::Result<TtsStatus> {
+        if !self.tts.marcar_favorita(referencia, favorito) {
+            anyhow::bail!("esa voz no esta en la lista");
+        }
+        self.persist_tts_settings()?;
+        Ok(self.tts_status())
+    }
+
+    /// Vuelve a preguntar a Fish por una voz guardada y refresca sus datos.
+    ///
+    /// Conserva lo que es del streamer —su nombre, su estrella— y trae lo que
+    /// cambia por fuera: portada, idioma, etiquetas, descripcion y muestras.
+    pub async fn voz_actualizar(&self, referencia: &str) -> anyhow::Result<TtsStatus> {
+        let datos = self.voz_obtener(referencia).await?;
+        let portada = self
+            .voz_cachear_portada(referencia, datos.imagen())
+            .await
+            .unwrap_or_default();
+        if !self.tts.refrescar_voz(referencia, &datos, &portada) {
+            anyhow::bail!("esa voz no esta en la lista");
+        }
+        self.persist_tts_settings()?;
+        Ok(self.tts_status())
+    }
+
+    /// Genera una prueba de una voz con el motor de siempre.
+    ///
+    /// Solo se llama cuando la voz **no trae muestras**: si las trae, se reproduce
+    /// la oficial y no se gasta nada. Devuelve el nombre del fichero sintetizado,
+    /// que se sirve por el servidor de overlays como cualquier otro audio local.
+    ///
+    /// Cuesta saldo, asi que la interfaz lo dice antes de pulsarlo.
+    pub async fn voz_probar(
+        &self,
+        referencia: &str,
+        texto: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let referencia = referencia.trim();
+        if referencia.is_empty() {
+            anyhow::bail!("falta el codigo de voz");
+        }
+        let texto = texto
+            .map(str::trim)
+            .filter(|texto| !texto.is_empty())
+            .unwrap_or(TEXTO_DE_PRUEBA);
+        let peticion = crate::tts::TtsRequest {
+            // Sin frase en la cola: esto no es un aviso del directo, es una prueba
+            // que el streamer ha pedido y que no debe contarse como leida.
+            id: 0,
+            text: texto.to_string(),
+            voice: referencia.to_string(),
+            rate: "+0%".to_string(),
+            pitch: "+0Hz".to_string(),
+        };
+        let audio = self.fish.synthesize_to_file(&peticion).await?;
+        let nombre = audio
+            .path
+            .file_name()
+            .and_then(|nombre| nombre.to_str())
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("la prueba no tiene fichero"))?;
+        Ok(nombre)
+    }
+
     /// Guarda la lista de claves **entera**.
     ///
     /// Es critico: perder la clave que el streamer acaba de pegar seria perder su
@@ -1922,9 +2121,14 @@ impl AppState {
     /// Suena el aviso en **esta maquina**, si trae sonido.
     ///
     /// No es la salida de la audiencia: esa es la fuente de OBS, y por eso esto vive
-    /// aparte, con su propio dispositivo y su propio volumen. `play` encola y vuelve
-    /// —la reproduccion ocurre en el hilo de audio—, asi que se puede llamar desde el
-    /// camino de los eventos sin bloquear nada.
+    /// aparte, con su propio dispositivo y su propio volumen. `play_exclusive` corta
+    /// lo que estuviera sonando y encola —la reproduccion ocurre en el hilo de
+    /// audio—, asi que se puede llamar desde el camino de los eventos sin bloquear
+    /// nada.
+    ///
+    /// El corte, y no el encolado, es lo que hace que una lluvia de regalos se oiga:
+    /// encolando, diez regalos seguidos son diez sonidos **a la vez** en el monitor
+    /// —que es peor que oir solo el ultimo—.
     fn sonar_en_local(&self, aviso: &crate::alerts::Aviso) {
         if aviso.sonido.is_empty() {
             return;
@@ -1937,7 +2141,7 @@ impl AppState {
         let Ok(salida) = self.salida_alertas.read() else {
             return;
         };
-        if let Err(error) = salida.play(&ruta, volumen) {
+        if let Err(error) = salida.play_exclusive(&ruta, volumen) {
             tracing::warn!(%error, fichero = %aviso.sonido, "no se pudo sonar la alerta aqui");
         }
     }
@@ -1948,6 +2152,9 @@ impl AppState {
     /// nombres no dice nada de como suena, y hasta ahora habia que probar la alerta
     /// entera —con su texto y su medio— para averiguarlo. Suena por el **monitor**
     /// del streamer, el mismo que el boton de probar, no por la fuente de OBS.
+    ///
+    /// Pide el turno del preview antes de sonar: si estaba sonando otra cosa
+    /// —otro sonido, la previa de un aviso, la muestra de una voz—, deja de sonar.
     pub fn oir_medio(&self, nombre: &str) -> Result<(), String> {
         if nombre.trim().is_empty() {
             return Err("no hay ningun sonido elegido".to_string());
@@ -1960,9 +2167,78 @@ impl AppState {
             .salida_alertas
             .read()
             .map_err(|_| "el monitor de alertas no responde".to_string())?;
-        salida
-            .play(&ruta, volumen)
-            .map_err(|error| format!("no se pudo sonar: {error}"))
+        // El turno se pide **despues** de comprobar que el fichero existe: un
+        // sonido que ya no esta no puede quitarle el turno al que si suena.
+        let marca = self.preview.tomar(OrigenPreview::BibliotecaSonidos, nombre);
+        if let Err(error) = salida.play_exclusive(&ruta, volumen) {
+            self.preview.soltar(marca);
+            return Err(format!("no se pudo sonar: {error}"));
+        }
+        Ok(())
+    }
+
+    /// Para el audio de previsualizacion que este sonando.
+    ///
+    /// Es lo que pulsan el boton «oir» de un sonido que ya suena, el cambio de
+    /// pestaña y el coordinador de la interfaz antes de arrancar otra cosa. El
+    /// monitor **solo** se corta si el turno era de un preview que suena en el: si
+    /// lo tenia una muestra de voz —que suena en la interfaz— o no lo tenia nadie,
+    /// cortar el monitor mataria una alerta de verdad que estuviera sonando.
+    ///
+    /// `esperado` es el preview que quien llama cree que esta sonando. Con el, solo
+    /// se suelta **ese**: las ordenes de la interfaz pueden cruzarse —parar lo viejo
+    /// y arrancar lo nuevo— y sin esta condicion la de parar podria apagar el sonido
+    /// que acaba de empezar. Sin el, se suelta lo que haya: es el boton de parar y el
+    /// cambio de pestaña, donde lo que se quiere es silencio.
+    pub fn parar_preview(&self, esperado: Option<DuenioPreview>) {
+        let anterior = match esperado {
+            Some(esperado) => self.preview.soltar_si(&esperado),
+            None => self.preview.parar(),
+        };
+        let Some(anterior) = anterior else {
+            return;
+        };
+        if !anterior.origen.suena_en_el_motor() {
+            return;
+        }
+        if let Ok(salida) = self.salida_alertas.read() {
+            salida.stop();
+        }
+    }
+
+    /// Quien tiene el turno del preview, si alguien.
+    ///
+    /// Se limpia solo cuando el preview del motor **ya ha terminado**: el fichero
+    /// se acabo y el monitor esta mudo. Se comprueba al preguntar, y no con un hilo
+    /// vigilante por preview, por dos motivos: el estado ya se pide a menudo mientras
+    /// suena algo —un hilo por sonido de dos segundos es un hilo de mas— y
+    /// `AudioSink::wait` **bloquea el hilo de audio** hasta que la fuente termina, asi
+    /// que esperar desde fuera dejaria las ordenes de reproduccion en la cola: el
+    /// preview siguiente no podria ni empezar. `is_playing` va por el mismo canal,
+    /// pero contesta en el acto.
+    pub fn preview_estado(&self) -> Option<DuenioPreview> {
+        let actual = self.preview.actual()?;
+        if actual.origen.suena_en_el_motor() && !self.monitor_sonando() {
+            self.preview.parar();
+            return None;
+        }
+        Some(actual)
+    }
+
+    /// Si el monitor de alertas tiene algo sonando ahora mismo.
+    ///
+    /// Un monitor **degradado** —sin tarjeta de sonido, o apagado con
+    /// `TTSDASH_AUDIO`— no suena nunca: por dentro es un doble que se queda
+    /// "sonando" para siempre, asi que preguntarselo dejaria el preview marcado como
+    /// sonando hasta cerrar la aplicacion. Degradado es «no suena», que es la verdad.
+    fn monitor_sonando(&self) -> bool {
+        let Ok(salida) = self.salida_alertas.read() else {
+            return false;
+        };
+        if salida.last_error().is_some() {
+            return false;
+        }
+        salida.is_playing()
     }
 
     /// Encola un aviso de prueba y lo devuelve.
@@ -1974,7 +2250,14 @@ impl AppState {
         let ajustes = self.alertas();
         let aviso =
             crate::alerts::Aviso::demo(self.cola_alertas.siguiente_seq(), tipo, ajustes.de(tipo));
-        self.cola_alertas.encolar(aviso.clone());
+        // El turno del preview, **antes** de sonar: lo que estuviera sonando de
+        // prueba —otro sonido de la biblioteca, la muestra de una voz— se corta, y
+        // el estado del panel dice desde ya que lo que suena es este aviso.
+        self.preview.tomar(OrigenPreview::PreviaAlerta, tipo.id());
+        // `encolar_prueba` y no `encolar`: la prueba se queda esperando a la fuente de
+        // OBS aunque la previa del panel este escuchando, que es lo que hace que se
+        // pueda comprobar el tamaño en antena y no solo en el marco de la previa.
+        self.cola_alertas.encolar_prueba(aviso.clone());
         // Probar suena aqui **siempre**: es la unica forma de comprobar el sonido sin
         // tener OBS delante, que es justo cuando se esta configurando.
         self.sonar_en_local(&aviso);
@@ -2027,6 +2310,10 @@ impl AppState {
         let en_directo = ajustes.salida.en_directo;
         drop(ajustes);
         if en_directo {
+            // Una alerta de verdad tambien reclama el turno: si el streamer estaba
+            // oyendo un sonido de prueba, deja de sonar. El aviso que entra es lo
+            // que se esta viendo en pantalla, y dos audios a la vez no se entienden.
+            self.preview.parar();
             self.sonar_en_local(&aviso);
         }
         self.cola_alertas.encolar(aviso);

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   onDashEvent,
+  onDashReconnect,
   type AjustesAlertas,
   type ChatEntry,
   type FeedItem,
@@ -16,6 +17,7 @@ import {
 } from "./api";
 import { formatDuration, formatNumber } from "./components";
 import { t } from "./i18n/es";
+import { usePreviewAudio } from "./previewAudio";
 import { Aportaciones } from "./pages/Aportaciones";
 import { Alertas } from "./pages/Alertas";
 import { Chat } from "./pages/Chat";
@@ -95,6 +97,29 @@ const EMPTY_TOTALS: Totals = {
 };
 
 /**
+ * La animación de un aviso que todavía no ha dicho nada el motor.
+ *
+ * Espeja los valores de fábrica de `AjusteAviso::default` en Rust. Se escribe **una
+ * vez** y los siete avisos la comparten, igual que allí: lo que distingue a un aviso
+ * de otro es el texto, el sonido y el mínimo, no cómo entra.
+ */
+const ANIMACION_VACIA = {
+  animacion_entrada: "rebote",
+  animacion_salida: "fundido",
+  entrada_ms: 380,
+  salida_ms: 220,
+  ritmo: "auto",
+  idle: "ninguna",
+  idle_distancia: 8,
+  idle_ms: 2500,
+  idle_intervalo_ms: 0,
+  idle_brillo: 40,
+  idle_color: "#25f4ee",
+  idle_blur: 12,
+  idle_modo: "pulso",
+} as const;
+
+/**
  * Los ajustes de alertas mientras el motor no ha dicho nada.
  *
  * Todo apagado y sin texto: la página se pinta igual y no inventa una
@@ -102,13 +127,13 @@ const EMPTY_TOTALS: Totals = {
  * sustituyen por los de verdad.
  */
 const ALERTAS_VACIAS: AjustesAlertas = {
-  gift: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, minimo: 0 },
-  gift_grande: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 6000, volumen: 0.85, minimo: 0 },
-  gift_enorme: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 8000, volumen: 0.9, minimo: 0 },
-  follow: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.8, minimo: 0 },
-  subscribe: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, minimo: 0 },
-  share: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.75, minimo: 0 },
-  like: { activo: false, texto: "", medio: "", sonido: "", duracion_ms: 3500, volumen: 0.6, minimo: 0 },
+  gift: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, escala: 1, minimo: 0 },
+  gift_grande: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 6000, volumen: 0.85, escala: 1.25, minimo: 0 },
+  gift_enorme: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 8000, volumen: 0.9, escala: 1.5, minimo: 0 },
+  follow: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.8, escala: 1, minimo: 0 },
+  subscribe: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 5000, volumen: 0.8, escala: 1, minimo: 0 },
+  share: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 4000, volumen: 0.75, escala: 1, minimo: 0 },
+  like: { ...ANIMACION_VACIA, activo: false, texto: "", medio: "", sonido: "", duracion_ms: 3500, volumen: 0.6, escala: 1, minimo: 0 },
   salida: { dispositivo: "", volumen: 0.8, en_directo: false },
 };
 
@@ -144,6 +169,17 @@ const HANDLED_TYPES = new Set([
 const REPORT_INTERVAL_MS = 2000;
 
 export function App() {
+  /**
+   * El coordinador del audio de prueba.
+   *
+   * Se lee aquí porque las dos acciones que lo piden —oír un sonido y probar un
+   * aviso— viven en esta pantalla, y porque al cambiar de pestaña hay que cortar lo
+   * que esté sonando: un audio de prueba no puede quedarse de fondo mientras se
+   * mira otra cosa.
+   */
+  const preview = usePreviewAudio();
+  /** Cortar el audio de prueba. Estable, para poder usarlo como dependencia. */
+  const pararPreview = preview?.parar;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [status, setStatus] = useState("stopped");
   const [detail, setDetail] = useState<string | null>(null);
@@ -577,6 +613,21 @@ export function App() {
     };
   }, [applySnapshot]);
 
+  /**
+   * Al volver el canal de eventos, se pide otra foto del motor.
+   *
+   * Los eventos que pasaron con el canal caído no se reproducen, así que sin esto
+   * el chat y la actividad se quedarían con un hueco en silencio —y un hueco que
+   * nadie ve es peor que un error—. En la aplicación de escritorio esto no se
+   * dispara nunca: el IPC de Tauri es local y no se cae.
+   */
+  useEffect(() => onDashReconnect(() => {
+    void api
+      .snapshot()
+      .then(applySnapshot)
+      .catch((cause: unknown) => setError(String(cause)));
+  }), [applySnapshot]);
+
   // Reloj de la sesion: un ticker de 1 s **solo mientras hay conexion**, para
   // poder mostrar la duracion. Se detiene al desconectar.
   useEffect(() => {
@@ -768,6 +819,18 @@ export function App() {
   }, [tab]);
 
   /**
+   * Al cambiar de pestaña **no puede quedar sonando** un audio de prueba.
+   *
+   * Se para siempre, no solo al salir de Alertas o de Voces: el coordinador es uno, y
+   * una alerta probada sigue sonando mientras se mira otra cosa. Si no sonaba nada,
+   * parar no hace nada —y sobre todo no corta una alerta de verdad, porque el turno
+   * del preview no era suyo—. Corre también al montar, que es inofensivo.
+   */
+  useEffect(() => {
+    pararPreview?.();
+  }, [tab, pararPreview]);
+
+  /**
    * Las acciones de alertas comparten forma: marcar ocupado, pedir al motor y
    * pintar la foto que devuelve. Se escriben una vez y cada botón pasa la suya.
    *
@@ -778,7 +841,7 @@ export function App() {
   const accionAlertas = useCallback(
     (accion: () => Promise<Snapshot>) => {
       setAlertasBusy(true);
-      void accion()
+      return accion()
         .then((next) => {
           applySnapshot(next);
           setError(null);
@@ -823,9 +886,21 @@ export function App() {
     (nombre: string) => accionAlertas(() => api.borrarMedioAlerta(nombre)),
     [accionAlertas],
   );
+  /**
+   * El botón de probar de la previa.
+   *
+   * Pasa por el **coordinador del audio de prueba**, no directo al motor: probar un
+   * aviso reproduce su sonido, y eso tiene que callar lo que estuviera sonando
+   * —otro sonido de la biblioteca, la muestra de una voz—. Pulsarlo otra vez sobre
+   * el mismo aviso lo corta, como el botón de oír.
+   */
   const probarAlerta = useCallback(
-    (tipo: string) => accionAlertas(() => api.probarAlerta(tipo)),
-    [accionAlertas],
+    (tipo: string) => {
+      const probar = () => void accionAlertas(() => api.probarAlerta(tipo));
+      if (preview) preview.alternar({ origen: "previa-alerta", id: tipo, titulo: tipo, motor: probar });
+      else probar();
+    },
+    [accionAlertas, preview],
   );
   /**
    * Suena un medio en el monitor, sin encolar ningún aviso.
@@ -834,10 +909,20 @@ export function App() {
    * alertas: si el streamer pulsa oír y no suena nada, tiene que saber si es que el
    * fichero ya no está o que el monitor está mudo. Callarlo dejaría un botón que
    * parece roto.
+   *
+   * Como el de probar, va por el coordinador: es lo que hace que oír un sonido
+   * **corte** la previa del aviso que estuviera sonando, y que volver a pulsar el
+   * mismo sonido lo pare en vez de encolarlo otra vez.
    */
-  const oirMedio = useCallback((nombre: string) => {
-    void api.oirMedio(nombre).catch((cause: unknown) => setError(String(cause)));
-  }, []);
+  const oirMedio = useCallback(
+    (nombre: string) => {
+      const sonar = () =>
+        void api.oirMedio(nombre).catch((cause: unknown) => setError(String(cause)));
+      if (preview) preview.alternar({ origen: "biblioteca-sonidos", id: nombre, titulo: nombre, motor: sonar });
+      else sonar();
+    },
+    [preview],
+  );
 
   return (
     <div className="app">
@@ -1062,7 +1147,14 @@ export function App() {
             />
           ) : null}
 
-          {tab === "tts" ? <Tts initial={snapshot?.tts ?? null} /> : null}
+          {tab === "tts" ? (
+            <Tts
+              initial={snapshot?.tts ?? null}
+              // La dirección del servidor de overlays: la biblioteca de voces la
+              // necesita para las portadas cacheadas y las pruebas sintetizadas.
+              urlOverlay={snapshot?.overlay_urls?.["alerts"]}
+            />
+          ) : null}
 
           {tab === "developer" ? (
             <Developer

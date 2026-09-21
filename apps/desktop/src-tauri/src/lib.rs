@@ -22,11 +22,14 @@ pub mod chat;
 pub mod core;
 pub mod database;
 pub mod feed;
+pub mod ipc;
 pub mod overlay;
+pub mod preview;
 pub mod providers;
 pub mod secreto;
 pub mod telemetry;
 pub mod tts;
+pub mod web;
 
 #[cfg(feature = "desktop")]
 mod desktop;

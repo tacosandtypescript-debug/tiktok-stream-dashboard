@@ -4,6 +4,7 @@
 //! eventos hacia la interfaz. Todo el motor vive en `crate::app`, que no depende
 //! de Tauri y por tanto se puede probar sin compilarlo.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use tauri::{Emitter, Manager, State};
 
 use crate::app::{AppState, Snapshot};
 use crate::core::MetricsSnapshot;
+use crate::ipc::ImportacionMedios;
 use crate::providers::TikTokProvider;
 
 /// Se pone a `true` la primera vez que la interfaz pide un snapshot.
@@ -45,28 +47,20 @@ fn ui_receiving() {
 
 /// Abre el perfil de TikTok de una persona en el navegador del sistema.
 ///
-/// El handle llega de la interfaz, asi que **no se puede confiar en el**: se
-/// valida caracter a caracter y la URL se construye aqui, no en el WebView. Sin
-/// esto, un `unique_id` con `../` o con un esquema pegado (`javascript:`) seria
-/// una via para abrir cualquier cosa desde el renderer, y la CSP del WebView no
-/// protege de un `start` del sistema operativo.
+/// El handle llega de la interfaz, asi que **no se puede confiar en el**: lo
+/// valida `crate::ipc::perfil_url`, que es la misma funcion que usa el servidor
+/// web, y la URL se construye en Rust, no en el WebView. Sin esto, un `unique_id`
+/// con `../` o con un esquema pegado (`javascript:`) seria una via para abrir
+/// cualquier cosa desde el renderer, y la CSP del WebView no protege de un `start`
+/// del sistema operativo.
 ///
 /// Se usa `cmd /C start` en lugar de anadir `tauri-plugin-opener` porque es una
 /// sola llamada: no merece una dependencia mas ni un permiso nuevo en las
 /// capabilities.
 #[tauri::command]
 fn abrir_perfil(unique_id: String) -> Result<(), String> {
-    let handle = unique_id.trim().trim_start_matches('@');
-    let valido = !handle.is_empty()
-        && handle.len() <= 32
-        && handle
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_');
-    if !valido {
-        return Err(format!("handle de TikTok no valido: {unique_id}"));
-    }
+    let url = crate::ipc::perfil_url(&unique_id)?;
 
-    let url = format!("https://www.tiktok.com/@{handle}");
     #[cfg(target_os = "windows")]
     let resultado = std::process::Command::new("cmd")
         .args(["/C", "start", "", &url])
@@ -167,71 +161,17 @@ fn importar_medio_alerta_bytes(
     Ok(state.snapshot())
 }
 
-/// Lo que salio de importar varios ficheros de golpe.
-#[derive(serde::Serialize)]
-pub struct ImportacionMedios {
-    /// Cuantos entraron.
-    pub importados: usize,
-    /// Los que no, ya con su motivo escrito. Se enseñan: un fichero que se queda
-    /// fuera en silencio es un fichero que el streamer cree que tiene y no tiene.
-    pub fallos: Vec<String>,
-    /// El estado nuevo, para que la interfaz no tenga que pedirlo aparte.
-    pub snapshot: Snapshot,
-}
-
 /// Copia **varios** ficheros al almacen de una vez.
 ///
-/// Es lo que hace usable traerse una carpeta de sonidos: de uno en uno, entre
-/// abrir el dialogo, elegir y esperar, se hace eterno. Recorre el mismo
-/// `importar_desde_ruta` que el de a uno, asi que la validacion —lista blanca de
-/// formatos, tope de tamano, nombre saneado— es **exactamente** la misma: por aqui
-/// no entra nada que no entrara por alli.
-///
-/// Una **carpeta** se abre y se importa lo que haya dentro, sin bajar a
-/// subcarpetas: es lo que permite soltar de una vez la carpeta entera donde el
-/// streamer guarda sus sonidos. Un fichero que falla **no tira los demas**: en una
-/// carpeta siempre hay uno que no vale, y perder los otros nueve por ese seria peor
-/// que no tener la funcion.
+/// Recorre `crate::ipc::importar_medios`, que es el mismo codigo que usa el
+/// servidor web: la validacion —lista blanca de formatos, tope de tamano, nombre
+/// saneado— es **exactamente** la misma por los dos caminos.
 #[tauri::command]
 fn importar_medios_alerta(
     state: State<'_, Arc<AppState>>,
     rutas: Vec<String>,
 ) -> Result<ImportacionMedios, String> {
-    let almacen = crate::alerts::Almacen::nuevo();
-    let mut importados = 0;
-    let mut fallos = Vec::new();
-
-    for ruta in rutas {
-        let camino = std::path::Path::new(&ruta);
-        // Una carpeta se abre; un fichero se importa. Se mira antes de importar
-        // porque `importar_desde_ruta` rechazaria la carpeta con «no es un fichero»
-        // y el streamer no sabria por que.
-        let dentro: Vec<std::path::PathBuf> = if camino.is_dir() {
-            match std::fs::read_dir(camino) {
-                Ok(entradas) => entradas
-                    .filter_map(|entrada| entrada.ok())
-                    .map(|entrada| entrada.path())
-                    // Solo ficheros: una subcarpeta se ignora en vez de fallar, para
-                    // que soltar una carpeta con carpetas dentro no llene la lista de
-                    // errores que no lo son.
-                    .filter(|p| p.is_file())
-                    .collect(),
-                Err(error) => {
-                    fallos.push(format!("{ruta}: no se pudo abrir la carpeta ({error})"));
-                    continue;
-                }
-            }
-        } else {
-            vec![camino.to_path_buf()]
-        };
-
-        for fichero in dentro {
-            match almacen.importar_desde_ruta(&fichero) {
-                Ok(_) => importados += 1,
-                Err(error) => fallos.push(format!("{}: {error}", fichero.display())),
-            }
-        }
-    }
+    let (importados, fallos) = crate::ipc::importar_medios(&rutas);
 
     Ok(ImportacionMedios {
         importados,
@@ -272,6 +212,28 @@ fn probar_alerta(state: State<'_, Arc<AppState>>, tipo: String) -> Result<Snapsh
     Ok(state.snapshot())
 }
 
+/// Para el audio de previsualizacion que este sonando.
+///
+/// Es el otro extremo del boton de oir —el mismo sonido pulsado dos veces—, el
+/// cambio de pestaña y el paso previo del coordinador antes de arrancar otra cosa:
+/// ningun audio de prueba puede quedarse sonando de fondo, y dos no pueden sonar a
+/// la vez. Con `esperado` solo se suelta ese preview, para no apagar el que haya
+/// empezado entretanto.
+#[tauri::command]
+fn parar_preview(state: State<'_, Arc<AppState>>, esperado: Option<crate::preview::DuenioPreview>) {
+    state.parar_preview(esperado);
+}
+
+/// Quien tiene el turno del audio de previsualizacion, si alguien.
+///
+/// El coordinador de la interfaz lo pregunta mientras suena algo para saber cuando
+/// termino —un preview del motor se limpia solo al acabarse el fichero— y para no
+/// pintar como sonando algo que ya no suena.
+#[tauri::command]
+fn preview_estado(state: State<'_, Arc<AppState>>) -> Option<crate::preview::DuenioPreview> {
+    state.preview_estado()
+}
+
 /// La interfaz informa de cuantos eventos de cada tipo ha reconocido y pintado.
 ///
 /// Distingue "los eventos llegan al WebView" de "la interfaz sabe pintarlos".
@@ -282,19 +244,10 @@ fn ui_events(state: State<'_, Arc<AppState>>, counts: std::collections::HashMap<
 
 /// Traza del chat: mensaje recibido por la interfaz o lista ya pintada.
 ///
-/// `dom` es una medida del WebView ("ul 320/920 top=0 | main ..."): dice que
-/// elemento desplaza de verdad la lista, que es justo lo que no se puede ver
-/// desde Rust ni desde la base de datos.
-#[derive(Debug, Default, serde::Deserialize)]
-struct UiChatPayload {
-    received_seq: Option<u64>,
-    rendered_len: Option<u64>,
-    rendered_seq: Option<u64>,
-    dom: Option<String>,
-}
-
+/// El tipo vive en `crate::ipc` porque el servidor web recibe el mismo cuerpo
+/// JSON y tiene que interpretarlo igual.
 #[tauri::command]
-fn ui_chat(state: State<'_, Arc<AppState>>, payload: UiChatPayload) {
+fn ui_chat(state: State<'_, Arc<AppState>>, payload: crate::ipc::UiChatPayload) {
     state.note_ui_chat(
         payload.received_seq,
         payload.rendered_len,
@@ -316,34 +269,13 @@ fn ui_error(message: String) {
 // TTS
 // ---------------------------------------------------------------------------
 
-/// Cambios de configuracion del lector de voz. Todo opcional: solo se aplica lo
-/// que la interfaz envia.
-#[derive(Debug, Default, serde::Deserialize)]
-struct TtsPatch {
-    enabled: Option<bool>,
-    volume: Option<f32>,
-    rate: Option<String>,
-    pitch: Option<String>,
-    /// Plantilla de lo que se lee para un mensaje de chat.
-    chat_template: Option<String>,
-    /// Plantilla de lo que se lee para un regalo.
-    gift_template: Option<String>,
-    /// Plantilla de lo que se lee para un seguidor nuevo.
-    follow_template: Option<String>,
-    voice_es: Option<String>,
-    voice_en: Option<String>,
-    read_gifts: Option<bool>,
-    read_follows: Option<bool>,
-    /// Motor de voz (edge-tts o Fish Audio).
-    provider: Option<crate::tts::VoiceProvider>,
-    /// Codigo de voz de Fish (`reference_id`).
-    fish_reference_id: Option<String>,
-    /// Modelo de Fish.
-    fish_model: Option<String>,
-    /// Las voces de Fish guardadas con su nombre, **la lista entera**: la
-    /// interfaz manda el resultado despues de anadir o quitar, que es quien sabe
-    /// cual acaba de tocar el streamer.
-    fish_voces: Option<Vec<crate::tts::manager::VozGuardada>>,
+/// Cambios de configuracion del lector de voz.
+///
+/// El tipo vive en `crate::ipc`: los dos transportes mandan el mismo parche y lo
+/// aplican con `crate::ipc::aplicar_patch_tts`.
+#[tauri::command]
+fn tts_update(state: State<'_, Arc<AppState>>, patch: crate::ipc::TtsPatch) -> Result<(), String> {
+    crate::ipc::aplicar_patch_tts(&state, patch)
 }
 
 #[tauri::command]
@@ -364,62 +296,6 @@ async fn tts_cuota(
 ) -> Result<Option<crate::tts::cuota::CuotaStatus>, String> {
     let tts = state.tts.clone();
     Ok(tts.cuota().await)
-}
-
-#[tauri::command]
-fn tts_update(state: State<'_, Arc<AppState>>, patch: TtsPatch) -> Result<(), String> {
-    use crate::tts::voices::Language;
-
-    // El motor **primero**: la voz de las frases siguientes depende de cual este
-    // puesto, y cambiar el motor descarta lo que estaba en cola.
-    if let Some(provider) = patch.provider {
-        state.set_voice_provider(provider);
-    }
-    if let Some(enabled) = patch.enabled {
-        state.tts.set_enabled(enabled);
-    }
-    if let Some(volume) = patch.volume {
-        state.tts.set_volume(volume);
-    }
-    if let Some(rate) = patch.rate {
-        state.tts.set_rate(&rate);
-    }
-    if let Some(pitch) = patch.pitch {
-        state.tts.set_pitch(&pitch);
-    }
-    if let Some(value) = patch.read_gifts {
-        state.tts.set_read_gifts(value);
-    }
-    if let Some(value) = patch.read_follows {
-        state.tts.set_read_follows(value);
-    }
-    if let Some(plantilla) = patch.chat_template {
-        state.tts.set_chat_template(&plantilla);
-    }
-    if let Some(plantilla) = patch.gift_template {
-        state.tts.set_gift_template(&plantilla);
-    }
-    if let Some(plantilla) = patch.follow_template {
-        state.tts.set_follow_template(&plantilla);
-    }
-    if let Some(voice) = patch.voice_es {
-        state.tts.set_voice(Language::Es, &voice);
-    }
-    if let Some(voice) = patch.voice_en {
-        state.tts.set_voice(Language::En, &voice);
-    }
-    if let Some(voice) = patch.fish_reference_id {
-        state.tts.set_fish_voice(&voice);
-    }
-    if let Some(model) = patch.fish_model {
-        state.tts.set_fish_model(&model);
-    }
-    if let Some(voces) = patch.fish_voces {
-        state.tts.set_fish_voces(&voces);
-    }
-    state
-        .persist_tts_settings()
-        .map_err(|error| format!("no se pudieron guardar los ajustes TTS: {error:#}"))
 }
 
 /// Guarda una clave de la API de voz.
@@ -470,32 +346,149 @@ fn tts_action(
     action: String,
     value: Option<String>,
 ) -> Result<(), String> {
-    match action.as_str() {
-        "pause" => state.tts.pause(),
-        "resume" => state.tts.resume(),
-        "skip" => state.tts.skip(),
-        "clear" => {
-            state.tts.clear();
-        }
-        "remove" => {
-            let id: u64 = value
-                .as_deref()
-                .ok_or("falta el identificador")?
-                .parse()
-                .map_err(|_| "identificador inválido")?;
-            state.tts.remove(id);
-        }
-        "mute" => {
-            let user = value.as_deref().ok_or("falta el usuario")?;
-            state.tts.mute_user(user);
-        }
-        "unmute" => {
-            let user = value.as_deref().ok_or("falta el usuario")?;
-            state.tts.unmute_user(user);
-        }
-        other => return Err(format!("acción desconocida: {other}")),
-    }
-    Ok(())
+    crate::ipc::accion_tts(&state, &action, value.as_deref())
+}
+
+/// Le pone otro nombre a una clave.
+#[tauri::command]
+fn tts_key_rename(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    nombre: String,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .tts_key_rename(id, &nombre)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Apaga una clave: deja de intentarse sin perderla.
+#[tauri::command]
+fn tts_key_disable(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .tts_key_disable(id)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Comprueba una clave contra la API. No gasta saldo ni cambia su estado.
+#[tauri::command]
+async fn tts_key_probar(state: State<'_, Arc<AppState>>, id: u64) -> Result<(), String> {
+    state
+        .tts_key_probar(id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Una pagina del catalogo de voces de Fish Audio.
+#[tauri::command]
+async fn tts_voces_buscar(
+    state: State<'_, Arc<AppState>>,
+    filtros: crate::tts::fish_modelos::FiltrosVoces,
+) -> Result<crate::tts::fish_modelos::PaginaVoces, String> {
+    state
+        .voces_buscar(filtros)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Una voz del catalogo, con sus muestras oficiales.
+#[tauri::command]
+async fn tts_voz_obtener(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<crate::tts::fish_modelos::VozFish, String> {
+    state
+        .voz_obtener(&id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Guarda una voz del catalogo en «Mis voces».
+#[tauri::command]
+async fn tts_voz_guardar(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    nombre: Option<String>,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .voz_guardar(&id, nombre.as_deref().unwrap_or_default())
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Quita una voz de la lista local. No toca la cuenta de Fish.
+#[tauri::command]
+fn tts_voz_quitar(
+    state: State<'_, Arc<AppState>>,
+    referencia: String,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .voz_quitar(&referencia)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Le pone el nombre que quiere el streamer.
+#[tauri::command]
+fn tts_voz_renombrar(
+    state: State<'_, Arc<AppState>>,
+    referencia: String,
+    nombre: String,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .voz_renombrar(&referencia, &nombre)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Marca o desmarca la estrella de una voz guardada.
+#[tauri::command]
+fn tts_voz_favorita(
+    state: State<'_, Arc<AppState>>,
+    referencia: String,
+    favorito: bool,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .voz_favorita(&referencia, favorito)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Refresca los datos de una voz guardada preguntandoselos otra vez a Fish.
+#[tauri::command]
+async fn tts_voces_actualizar(
+    state: State<'_, Arc<AppState>>,
+    referencia: String,
+) -> Result<crate::tts::manager::TtsStatus, String> {
+    state
+        .voz_actualizar(&referencia)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Genera una prueba de una voz con el motor de siempre. **Cuesta saldo.**
+#[tauri::command]
+async fn tts_voz_probar(
+    state: State<'_, Arc<AppState>>,
+    referencia: String,
+    texto: Option<String>,
+) -> Result<String, String> {
+    state
+        .voz_probar(&referencia, texto.as_deref())
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Deja la portada de una voz en la cache local y devuelve su fichero.
+#[tauri::command]
+async fn tts_voz_portada(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    url: String,
+) -> Result<String, String> {
+    state
+        .voz_cachear_portada(&id, &url)
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 /// Voces que ofrece el catalogo curado del proyecto, para el selector de la
@@ -648,23 +641,35 @@ pub fn run() {
 }
 
 fn launch(instance_port: u16) {
-    // Los sonidos del pack, **antes** de que nadie lea los ajustes de alertas.
-    //
-    // El orden importa: los ajustes de fabrica apuntan a estos ficheros, y el
-    // `sanear` que corre al guardar quita toda referencia que no este en el
-    // almacen. Sembrando despues, una instalacion nueva se quedaria sin sonido en
-    // el primer guardado y el aviso saldria mudo sin que nada fallara.
-    //
-    // Va aqui y **no** en `AppState::new`: los tests construyen el estado con una
-    // base temporal, pero `data_dir()` sigue apuntando a la carpeta de verdad, asi
-    // que sembrar alli escribiria en el equipo del streamer en cada `cargo test`.
-    let sembrados = crate::alerts::Almacen::nuevo().sembrar_pack();
-    if sembrados > 0 {
-        tracing::info!(sembrados, "sonidos de las alertas puestos en el almacen");
-    }
-
     let app = tauri::Builder::default()
         .setup(move |app| {
+            // Los medios del pack se siembran **antes** de que nadie lea los
+            // ajustes de alertas: los valores de fábrica apuntan a estos nombres y
+            // `AppState::new` puede sanear referencias que no existan todavía.
+            //
+            // En desarrollo se lee el checkout; en una release, el recurso que
+            // Tauri copió junto al ejecutable. Siempre se copia a AppData y nunca
+            // se escribe de vuelta en el checkout.
+            let origen_pack = ruta_pack_alertas(app.handle());
+            if !origen_pack.is_dir() {
+                tracing::error!(
+                    origen = %origen_pack.display(),
+                    "no existe el pack de medios de Alertas; se continúa sin sembrarlo"
+                );
+            } else {
+                let reporte = crate::alerts::Almacen::nuevo().sembrar_pack_desde(&origen_pack);
+                tracing::info!(
+                    origen = %origen_pack.display(),
+                    copiados = reporte.copied,
+                    existentes = reporte.skipped_existing,
+                    rechazados = reporte.rejected.len(),
+                    "pack de medios de Alertas procesado"
+                );
+                for rechazado in reporte.rejected {
+                    tracing::warn!(fichero = %rechazado, "medio rechazado del pack de Alertas");
+                }
+            }
+
             let state = Arc::new(AppState::new(instance_port).map_err(|e| e.to_string())?);
             // El setup corre en el hilo principal sin runtime de Tokio, asi que
             // se usa el runtime de Tauri (que si es Tokio por dentro).
@@ -758,6 +763,8 @@ fn launch(instance_port: u16) {
             oir_medio,
             borrar_medio_alerta,
             probar_alerta,
+            parar_preview,
+            preview_estado,
             abrir_perfil,
             ui_receiving,
             ui_events,
@@ -773,6 +780,18 @@ fn launch(instance_port: u16) {
             tts_key_add,
             tts_key_remove,
             tts_key_reset,
+            tts_key_rename,
+            tts_key_disable,
+            tts_key_probar,
+            tts_voces_buscar,
+            tts_voz_obtener,
+            tts_voz_guardar,
+            tts_voz_quitar,
+            tts_voz_renombrar,
+            tts_voz_favorita,
+            tts_voces_actualizar,
+            tts_voz_probar,
+            tts_voz_portada,
             connect,
             start_simulation,
             use_native_provider,
@@ -797,4 +816,30 @@ fn launch(instance_port: u16) {
             tracing::info!("aplicación cerrada");
         }
     });
+}
+
+/// Resuelve el origen de fábrica sin convertirlo en el almacén de runtime.
+///
+/// El recurso empaquetado es la ruta canónica en release. En debug el directorio
+/// de recursos puede no existir todavía, por eso se usa directamente el pack del
+/// checkout. El fallback de release permite ejecutar un binario no empaquetado
+/// desde el mismo checkout para diagnóstico.
+fn ruta_pack_alertas(app: &tauri::AppHandle) -> PathBuf {
+    let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("alertas-pack");
+
+    #[cfg(debug_assertions)]
+    {
+        let _ = app;
+        fallback
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        app.path()
+            .resource_dir()
+            .ok()
+            .map(|directorio| directorio.join("alertas-pack"))
+            .filter(|directorio| directorio.is_dir())
+            .unwrap_or(fallback)
+    }
 }

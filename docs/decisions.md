@@ -456,6 +456,38 @@ Dos cosas que cazo el ciclo rapido, y las dos valen como leccion:
 - **`TipoAviso` estaba definido como `keyof AjustesAlertas`.** Al anadir `salida`, el campo habria pasado a ser un **sexto tipo de aviso** y la pagina habria pintado una tarjeta de mas, vacia y sin un solo error. Un `keyof` sobre una estructura que crece es una trampa: se cambio por una lista explicita.
 - **La pagina se caia** con `Cannot read properties of null (reading 'map')` si la lista de dispositivos llegaba vacia. Lo vio el banco de la interfaz, no el compilador: el tipo decia `string[]` y por el cable puede llegar cualquier cosa.
 
+## D24 · Un solo audio de prueba a la vez (2026-09-20)
+
+Habia **tres** sitios que reproducen un audio al pulsar algo: el boton **Oir** de la biblioteca de sonidos de Alertas, el boton **Probar** de la previa —los dos por el monitor del streamer, o sea en Rust— y la **muestra de una voz**, que suena en un `<audio>` de la interfaz. Y el fallo medido era exacto:
+
+```
+Oír sonido A           → suena A
+Oír sonido B           → suena B, pero A sigue sonando por debajo
+Probar alerta          → suena la alerta, y A sigue sonando por debajo
+```
+
+La causa del primer caso no era el estado de la interfaz: `RodioSink::play` **encola** en el mismo `Sink` de `rodio`, que mezcla las fuentes. Encolar es lo correcto para el **lector de voz** —dos frases del chat se leen una detras de otra—, asi que el arreglo no es cambiar `play`, es tener un camino que reemplace.
+
+Lo que se hizo, en tres capas:
+
+| Capa | Que hace |
+|---|---|
+| `tts/player.rs` | `AudioSink::play_exclusive`: corta y encola **en la misma orden** del hilo de audio |
+| `preview.rs` | el **turno** del audio de prueba: quien lo pide, se lo quita al anterior; con marca para que un final tardio no suelte el turno de otro |
+| `previewAudio.tsx` | el coordinador de la interfaz: un unico `<audio>`, y el estado visual de lo que suena |
+
+**El corte viaja en la misma orden que el encolado.** Partirlo en un `stop()` y luego un `play()` deja un hueco por el que se cuelan dos clics rapidos, y el resultado es justo el fallo que se estaba arreglando. Va como una variante de la orden (`PlayExclusive`) para que el hilo de audio pare y encole sin soltar el turno, y `FallbackSink` la releva tal cual: si `rodio` sabe hacerlo atomico, el envoltorio no puede romperlo.
+
+**El turno lleva marca.** Cada toma se numera, y el final de un audio solo suelta si su numero sigue siendo el vigente. Sin esto, «Oir A → Oir B» y el final de A dos segundos despues dejaria el turno vacio mientras suena B: el estado visual diria que no suena nada y el siguiente clic empezaria de cero.
+
+**El motor sigue siendo la fuente de verdad de lo que suena por el monitor.** La interfaz no adivina la duracion de un fichero: mientras suena un preview del motor le pregunta a `preview_estado`, que contesta quien tiene el turno **y lo suelta solo** cuando el monitor ya no tiene nada encolado. Un monitor **degradado** —sin tarjeta, o apagado con `TTSDASH_AUDIO`— contesta que no suena nunca: su reproductor es un doble que se quedaria «sonando» para siempre, y eso dejaria el boton clavado en «Parar» hasta cerrar la aplicacion.
+
+**La previa del panel va muda.** El documento del overlay tambien sabe reproducir el sonido del aviso —en OBS **es** el audio de la audiencia—, asi que dentro de la previa serian dos copias del mismo aviso: la del marco y la del monitor. La pestana de Alertas le anade `previa=1` a la direccion del marco y ahi el `<audio>` del overlay no se usa. La direccion que se pega en OBS **no** lleva la marca, y alli el audio del overlay sigue siendo el que oye el publico.
+
+**Al cambiar de pestaña se para.** Lo hace `App` en un solo sitio y no cada pagina al desmontarse: el coordinador es uno, y una alerta probada sigue sonando mientras se mira otra cosa. Si no sonaba nada, parar no hace nada —y sobre todo no corta una alerta **de verdad**, porque `parar_preview` solo toca el monitor cuando el turno era de un preview que suena en el: una alerta real que este sonando en ese momento no se cae por cambiar de pestaña—.
+
+Lo que queda **fuera** a proposito: el **lector de voz** (lo que se lee del chat). No es un preview, y cortarlo porque alguien prueba un sonido seria parar el directo para configurarlo. Sigue encolando, que es lo suyo.
+
 ## Pendiente y sin resolver: el desplazamiento inicial de la pestana Overlays
 
 Medido: al abrir **Overlays**, su panel aparece desplazado 76 px, que es **exactamente su maximo** (982 de contenido, 906 de alto). O sea, abajo del todo, con la direccion que hay que copiar fuera de la vista.
@@ -466,3 +498,56 @@ Se probaron dos cosas y **ninguna funciono**, asi que no se dejan en el arbol:
 2. Desactivar el anclaje de desplazamiento (`overflow-anchor: none`), pensando que la vista previa al crecer empujaba el panel.
 
 La causa esta **sin encontrar**. Queda anotado en `TODO.md` en vez de tapado con un arreglo que no arregla.
+
+## La biblioteca de voces: lo que se lee de Fish Audio y lo que no
+
+La vista «Voces y claves» es una **biblioteca**: se exploran voces, se escuchan sus
+muestras, se guardan y se administran las claves. Todo lo que se le pide al proveedor
+sale de **endpoints que su esquema confirma** (`https://api.fish.audio/openapi.json`,
+contrastado con los tipos de su SDK), y nada se inventa:
+
+| se usa | para que |
+|---|---|
+| `GET /model` con `title`, `language`, `tag`, `author_id`, `self`, `page_size`, `page_number` | el catalogo, con sus filtros y su paginacion |
+| `GET /model/{id}` | comprobar un identificador pegado y refrescar una voz guardada |
+| `samples[].audio` del propio modelo | **escuchar sin generar**: son audios ya hechos |
+| `POST /v1/tts` (el de siempre) | solo cuando la voz **no trae muestra**, y avisando de que se cobra |
+| `GET /wallet/self/package` | el saldo, que ya se usaba |
+
+**`sort_by` no se usa**: el esquema lo declara como una cadena sin decir que valores
+acepta, y mandar uno inventado es pedirle a la API algo que no esta escrito en ningun
+sitio. Los idiomas del desplegable salen de las voces cargadas, no de una lista de codigos
+supuesta.
+
+Tres cosas que solo se ven hablando con la API de verdad, y que quedan escritas porque
+costaron encontrarlas:
+
+- **`cover_image` viene relativo** (`coverimage/<id>`), no como direccion completa. Los
+  medios publicos de Fish se sirven desde `https://public-platform.r2.fish.audio/`
+  —comprobado contra su propia web, que devuelve esa portada con un 200 y `image/jpeg`—.
+  Sin resolverlo, el navegador pide `coverimage/<id>` **al panel** y la biblioteca se queda
+  sin caras.
+- **Las muestras van firmadas y caducan en una hora.** Por eso no se guardan como si
+  fueran para siempre: antes de reproducir una voz guardada se le pide la direccion buena
+  al catalogo —leer no gasta saldo— y lo guardado queda de respaldo. Y suenan **desde la
+  direccion de Fish**, sin pasar por el motor, asi que hicieron falta `media-src 'self'
+  https:` en el CSP de la aplicacion de escritorio: `img-src` ya dejaba ver las portadas
+  —que son imagenes—, pero el audio remoto se habria quedado mudo sin decirlo.
+- **La respuesta trae `total` e `items`**, y una voz puede venir con `_id` o con `id`: el
+  mapeo acepta los dos y no revienta si falta cualquier campo. Un catalogo ajeno no puede
+  tumbar una pantalla por una respuesta rara.
+
+**La clave sigue sin salir del motor.** El catalogo se lee con el **mismo relevo de
+claves** que la sintesis —un 401 marca la clave y pasa a la siguiente, un 429 reintenta la
+misma—, asi que el catalogo hereda lo que ya estaba probado en vez de tener su propia
+copia. Y las claves se pueden **probar** sin gastar saldo y sin que probar cambie su
+estado: una clave que falla por un corte de red no es una clave invalida.
+
+**Guardar una voz del catalogo no toca la cuenta de Fish.** Se guarda la **referencia**:
+su identificador, su nombre original, su portada en cache y sus muestras. «Eliminar de Mis
+voces» quita la fila local y nada mas. La aplicacion **solo lee** modelos: no crea, ni
+edita, ni borra nada en la cuenta del streamer.
+
+**Lo local manda sobre lo del catalogo.** Al refrescar una voz se traen portada,
+descripcion, idioma, etiquetas y muestras, y se conservan **su nombre y su estrella**. Un
+nombre propio es del streamer: una actualizacion de datos no puede pisarlo.

@@ -62,6 +62,23 @@ pub trait AudioSink: Send + Sync {
     /// Reproduce un fichero. Devuelve el control en cuanto esta encolado; la
     /// reproduccion ocurre en el hilo de audio.
     fn play(&self, file: &Path, volume: f32) -> anyhow::Result<()>;
+    /// Reproduce un fichero **cortando antes lo que estuviera sonando**.
+    ///
+    /// Existe por los previews —el boton «oir» de la biblioteca de sonidos y el
+    /// de probar de las alertas—: ahi encolar seria **sumar**, y dos previews a
+    /// la vez es justo lo que no puede pasar. El lector de voz sigue usando
+    /// `play`, que encola la frase siguiente: en una locucion, sumar es lo
+    /// correcto.
+    ///
+    /// El defecto corta y luego reproduce. Ya garantiza "uno a la vez", pero no
+    /// es atomico: entre el corte y el encolado cabe otra reproduccion.
+    /// `RodioSink` lo hace **atomico** mandando las dos cosas en la misma orden
+    /// del hilo de audio, que es lo que hace falta cuando dos clics seguidos
+    /// pueden cruzarse.
+    fn play_exclusive(&self, file: &Path, volume: f32) -> anyhow::Result<()> {
+        self.stop();
+        self.play(file, volume)
+    }
     /// Corta la reproduccion en curso (accion "saltar").
     fn stop(&self);
     /// Volumen 0.0..=1.0; fuera de rango se recorta.
@@ -103,6 +120,10 @@ enum Command {
     /// orden ya no es la vigente, un "saltar" se ha cruzado con ella y la frase
     /// no debe sonar.
     Play(PathBuf, u64),
+    /// Como `Play`, pero cortando antes lo que suene. Las dos cosas —corte y
+    /// encolado— las hace el hilo de audio, en el mismo turno, asi que dos
+    /// previews seguidos no pueden solaparse por muy rapido que se pulse.
+    PlayExclusive(PathBuf, u64),
     IsPlaying(Sender<bool>),
     /// Espera a que termine lo que suena y responde. Siempre responde; el
     /// llamante decide si le interesa bloquearse cuando no hay nada sonando.
@@ -263,7 +284,8 @@ impl Worker {
     fn run(self) {
         while let Ok(command) = self.commands.recv() {
             match command {
-                Command::Play(path, generation) => self.play(&path, generation),
+                Command::Play(path, generation) => self.play(&path, generation, false),
+                Command::PlayExclusive(path, generation) => self.play(&path, generation, true),
                 Command::IsPlaying(reply) => {
                     let _ = reply.send(self.device.is_playing());
                 }
@@ -286,10 +308,18 @@ impl Worker {
     }
 
     /// Encola una frase, salvo que un corte la haya cancelado.
-    fn play(&self, path: &Path, generation: u64) {
+    ///
+    /// `exclusivo` corta lo que este sonando **aqui dentro**, en el mismo turno
+    /// del hilo de audio que el encolado. Es la unica forma de que "uno a la vez"
+    /// valga tambien con dos ordenes seguidas: hechas desde fuera —un `stop()`
+    /// del llamante y luego un `play()`— cabria una tercera en medio.
+    fn play(&self, path: &Path, generation: u64, exclusivo: bool) {
         if !self.control.is_current(generation) {
             tracing::debug!(file = %path.display(), "frase cancelada por un corte");
             return;
+        }
+        if exclusivo {
+            self.device.stop();
         }
         if let Err(error) = self.device.append(path) {
             tracing::warn!(%error, file = %path.display(), "no se pudo reproducir el audio");
@@ -552,6 +582,14 @@ impl AudioSink for RodioSink {
         self.send(Command::Play(file.to_path_buf(), generation))
     }
 
+    /// Igual que `play`, pero el corte viaja **en la misma orden**: cuando el
+    /// hilo de audio la atiende, para y encola sin soltar el turno.
+    fn play_exclusive(&self, file: &Path, volume: f32) -> anyhow::Result<()> {
+        self.control.set_volume(volume);
+        let generation = self.control.generation();
+        self.send(Command::PlayExclusive(file.to_path_buf(), generation))
+    }
+
     fn stop(&self) {
         // Primero se marca el corte y despues se para el reproductor: cualquier
         // `Play` que ya este en el canal queda invalidado por la generacion
@@ -810,6 +848,12 @@ impl AudioSink for FallbackSink {
         self.inner.play(file, volume)
     }
 
+    /// Se releva tal cual: si el sink de dentro sabe hacerlo atomico —`rodio`—,
+    /// el envoltorio no puede romperlo partiendo la orden en dos.
+    fn play_exclusive(&self, file: &Path, volume: f32) -> anyhow::Result<()> {
+        self.inner.play_exclusive(file, volume)
+    }
+
     fn stop(&self) {
         self.inner.stop();
     }
@@ -881,6 +925,9 @@ mod tests {
         waiting: bool,
         /// Esperas que termino un `stop()`.
         cuts: u64,
+        /// Cortes pedidos, con espera o sin ella. Es lo que distingue una
+        /// reproduccion que **encola** de una que **reemplaza**.
+        stops: u64,
         appended: Vec<PathBuf>,
     }
 
@@ -935,6 +982,7 @@ mod tests {
 
         fn stop(&self) {
             let mut state = self.lock();
+            state.stops += 1;
             if state.waiting {
                 state.cuts += 1;
             }
@@ -1111,6 +1159,55 @@ mod tests {
             "un stop cancela el play pendiente"
         );
         assert!(control.is_current(control.generation()));
+    }
+
+    /// Un preview **reemplaza** lo que sonaba; no se suma.
+    ///
+    /// Era el fallo de «oir A, oir B y seguir sonando A»: los dos previews
+    /// entraban en la misma cola de `rodio` y sonaban a la vez. El corte viaja en
+    /// la misma orden que el encolado, asi que el segundo no puede colarse.
+    #[test]
+    fn un_preview_reemplaza_lo_que_sonaba() {
+        let fake = FakeDevice::new();
+        let sink = Arc::new(RodioSink::with_fake(fake.clone()).expect("hilo de audio"));
+        let campana = temporal("campana.mp3");
+        let redoble = temporal("redoble.mp3");
+
+        // El primero corta tambien: no se da por hecho que el monitor estuviera
+        // mudo, porque puede haber sonado cualquier cosa antes.
+        sink.play_exclusive(&campana, 1.0)
+            .expect("la orden se acepta");
+        assert!(fake.wait_until(|state| state.appended.len() == 1));
+        assert_eq!(fake.lock().stops, 1, "un preview corta por delante");
+
+        sink.play_exclusive(&redoble, 1.0)
+            .expect("la orden se acepta");
+        assert!(fake.wait_until(|state| state.appended.len() == 2));
+        assert_eq!(fake.lock().stops, 2, "el segundo preview corta el primero");
+        assert_eq!(
+            fake.lock().appended,
+            vec![campana, redoble],
+            "los dos se encolaron, pero el primero ya estaba cortado"
+        );
+        assert!(sink.is_playing(), "el segundo esta sonando");
+    }
+
+    /// Lo contrario, y por eso hay dos caminos: el lector de voz **encola**.
+    ///
+    /// Dos frases seguidas se leen una detras de otra; pisar la primera seria
+    /// comerse parte del chat.
+    #[test]
+    fn el_lector_de_voz_sigue_encolando() {
+        let fake = FakeDevice::new();
+        let sink = Arc::new(RodioSink::with_fake(fake.clone()).expect("hilo de audio"));
+
+        sink.play(&temporal("frase-1.mp3"), 1.0)
+            .expect("la orden se acepta");
+        sink.play(&temporal("frase-2.mp3"), 1.0)
+            .expect("la orden se acepta");
+
+        assert!(fake.wait_until(|state| state.appended.len() == 2));
+        assert_eq!(fake.lock().stops, 0, "encolar no corta nada");
     }
 
     #[test]

@@ -44,11 +44,28 @@ pub struct Tamano {
     pub alto: u32,
 }
 
+/// Que clase de overlay es un diseno.
+///
+/// La interfaz los enseña en **dos secciones distintas** —marcadores y juegos— porque
+/// no se eligen igual: un marcador dice lo que ha pasado y un juego se mueve con el
+/// ritmo de los taps. Sin este dato, el frontal tendria que adivinar cual es cual por
+/// el identificador, y un diseno nuevo mal adivinado saldria en la seccion equivocada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TipoDiseno {
+    /// Un marcador: la tabla de lo que ha pasado en esa vista.
+    Marcador,
+    /// Un juego: se mueve con el ritmo de los taps.
+    Juego,
+}
+
 /// Un diseno del catalogo.
 pub struct Diseno {
     /// Identificador estable. Viaja en la URL (`?diseno=`) y se guarda en
     /// `overlay.json`, asi que **no se puede renombrar** sin migrar.
     pub id: &'static str,
+    /// Si es un marcador o un juego.
+    pub tipo: TipoDiseno,
     /// Vistas en las que este diseno tiene sentido.
     ///
     /// No todos valen para todo: los minijuegos se mueven con el **ritmo** de los
@@ -73,6 +90,7 @@ pub struct Diseno {
 pub const CATALOGO: &[Diseno] = &[
     Diseno {
         id: "marcador",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -82,6 +100,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "carriles",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -91,6 +110,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "cintas",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -100,6 +120,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "anillos",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -109,6 +130,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "columnas",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -118,6 +140,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "fichas",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -127,6 +150,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "sin-fondo",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -136,6 +160,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "franja",
+        tipo: TipoDiseno::Marcador,
         vistas: &VISTAS,
         previa: Tamano {
             ancho: 420,
@@ -151,6 +176,7 @@ pub const CATALOGO: &[Diseno] = &[
     // no puede pasar.
     Diseno {
         id: "pelotas",
+        tipo: TipoDiseno::Juego,
         vistas: &SOLO_TAP,
         previa: Tamano {
             ancho: 1080,
@@ -160,6 +186,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "duelo",
+        tipo: TipoDiseno::Juego,
         vistas: &SOLO_TAP,
         previa: Tamano {
             ancho: 1080,
@@ -169,6 +196,7 @@ pub const CATALOGO: &[Diseno] = &[
     },
     Diseno {
         id: "esgrima",
+        tipo: TipoDiseno::Juego,
         vistas: &SOLO_TAP,
         previa: Tamano {
             ancho: 1080,
@@ -217,6 +245,8 @@ fn de_fabrica(vista: &str) -> &'static Diseno {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DisenoInfo {
     pub id: &'static str,
+    /// Marcador o juego: la interfaz los enseña en secciones distintas.
+    pub tipo: TipoDiseno,
     /// Vistas en las que se puede elegir.
     pub vistas: &'static [&'static str],
     /// Lienzo del diseno, para escalar la vista previa.
@@ -228,6 +258,7 @@ pub fn catalogo() -> Vec<DisenoInfo> {
         .iter()
         .map(|diseno| DisenoInfo {
             id: diseno.id,
+            tipo: diseno.tipo,
             vistas: diseno.vistas,
             previa: diseno.previa,
         })
@@ -428,6 +459,54 @@ mod tests {
         assert!(
             !json.contains("<!doctype"),
             "el HTML no viaja en el snapshot: {json}"
+        );
+    }
+
+    /// Un juego es un juego **y** se mueve solo con los taps; un marcador vale para
+    /// las tres vistas.
+    ///
+    /// Es la invariante que sostiene las dos secciones de la interfaz: si un juego se
+    /// declarara marcador saldria en la seccion equivocada, y si un juego admitiera
+    /// regalos se podria elegir en una vista donde no hay nada que lo mueva.
+    #[test]
+    fn los_juegos_son_juegos_y_solo_van_con_los_taps() {
+        let juegos: Vec<&Diseno> = CATALOGO
+            .iter()
+            .filter(|diseno| diseno.tipo == TipoDiseno::Juego)
+            .collect();
+        assert!(
+            !juegos.is_empty(),
+            "si no queda ningun juego, esta comprobacion deja de comprobar"
+        );
+        for juego in &juegos {
+            assert_eq!(
+                juego.vistas, &SOLO_TAP,
+                "{} es un juego y tiene que moverse solo con los taps",
+                juego.id
+            );
+        }
+
+        for marcador in CATALOGO
+            .iter()
+            .filter(|diseno| diseno.tipo == TipoDiseno::Marcador)
+        {
+            assert_eq!(
+                marcador.vistas, &VISTAS,
+                "{} es un marcador: tiene que valer para las tres vistas",
+                marcador.id
+            );
+        }
+
+        // Y los tipos viajan a la interfaz, que es quien separa las secciones.
+        let info = catalogo();
+        let juego = info
+            .iter()
+            .find(|diseno| diseno.id == juegos[0].id)
+            .expect("el juego tiene que estar en el catalogo publicado");
+        let json = serde_json::to_string(juego).expect("deberia serializar");
+        assert!(
+            json.contains("\"tipo\":\"juego\""),
+            "el tipo no viaja en el snapshot: {json}"
         );
     }
 }

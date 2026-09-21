@@ -174,6 +174,13 @@ pub enum EstadoClave {
     Invalida,
     /// Se quedo sin saldo o sin cuota (402): hay que pasar a la siguiente.
     Agotada,
+    /// La apago el streamer desde la interfaz.
+    ///
+    /// Es distinto de `Invalida` a proposito: una clave rechazada es un hecho del
+    /// servicio y una apagada es una decision suya —una clave de otra cuenta que
+    /// no quiere que se toque todavia—, y el relevo no tiene por que saber cual de
+    /// las dos es para saltarsela: le basta con que no este `Viva`.
+    Apagada,
 }
 
 impl EstadoClave {
@@ -182,6 +189,7 @@ impl EstadoClave {
             EstadoClave::Viva => "viva",
             EstadoClave::Invalida => "invalida",
             EstadoClave::Agotada => "agotada",
+            EstadoClave::Apagada => "apagada",
         }
     }
 
@@ -190,6 +198,7 @@ impl EstadoClave {
         match texto {
             "invalida" => EstadoClave::Invalida,
             "agotada" => EstadoClave::Agotada,
+            "apagada" => EstadoClave::Apagada,
             _ => EstadoClave::Viva,
         }
     }

@@ -43,6 +43,7 @@ use super::consumo::ConsumoStatus;
 use super::filters::limpiar;
 use super::filters::{FilterConfig, FilterOutcome, Filters, RejectReason};
 use super::fish;
+use super::fish_modelos::MuestraVoz;
 use super::plantilla;
 use super::player::AudioSink;
 use super::provider::{
@@ -132,6 +133,13 @@ impl VoiceProvider {
 pub struct VozGuardada {
     /// Como la llama el streamer. No tiene por que ser unico.
     pub nombre: String,
+    /// Como la llama **su creador** en el catalogo.
+    ///
+    /// Se guardan los dos a proposito: el streamer puede ponerle «Voz mujer
+    /// TikTok» a una voz que en Fish se llama «Camila», y las dos cosas son
+    /// ciertas. El suyo manda al enseñarla; este es el que vuelve a aparecer si
+    /// borra el suyo, y el que permite reconocerla en el catalogo.
+    pub titulo_original: String,
     /// El identificador de la voz en su proveedor (`reference_id` en Fish, el id
     /// del catalogo en edge-tts). **Si** es unico dentro del proveedor.
     pub referencia: String,
@@ -146,6 +154,25 @@ pub struct VozGuardada {
     /// streamer. Vacio cuando no hay. **No** se guarda audio de ningun tipo: lo
     /// que se reutiliza es la referencia, no lo que dijo.
     pub descripcion: String,
+    /// Si el streamer la ha marcado con la estrella. Las favoritas van primero.
+    pub favorito: bool,
+    /// Nombre de fichero de la portada **en la cache local**, no una URL.
+    ///
+    /// Es a proposito: si mañana Fish tarda o la imagen desaparece, la biblioteca
+    /// sigue enseñando la voz en vez de romperse, que es justo lo que pide el
+    /// encargo. Vacio cuando no se pudo traer ninguna.
+    pub portada: String,
+    /// Quien hizo la voz, y su identificador para poder pedir «mas de este autor».
+    pub autor: String,
+    pub autor_id: String,
+    /// Avatar del autor, por si algun dia no hay portada cacheada.
+    pub autor_avatar: String,
+    pub tags: Vec<String>,
+    /// Las muestras **oficiales**: son URLs a audios ya hechos, asi que no hay que
+    /// guardar audio. Se refrescan al actualizar desde Fish.
+    pub muestras: Vec<MuestraVoz>,
+    /// Cuando la actualizo Fish por ultima vez, tal cual lo dice su API.
+    pub actualizado_en: String,
 }
 
 /// Ajustes de Fish Audio que **no son secretos**.
@@ -266,6 +293,50 @@ impl TtsSettings {
             ajustes.chat_template = plantilla::CHAT_SOLO_MENSAJE.to_string();
         }
         Ok(ajustes)
+    }
+}
+
+/// Completa una voz ya guardada con lo que traiga el catalogo, **sin pisar lo del
+/// streamer**.
+///
+/// Es la regla que hace que guardar dos veces la misma voz no sea peligroso: su
+/// nombre y su estrella son suyos y no se tocan nunca; lo que viene de Fish solo
+/// rellena lo que falta. Sin esto, guardar desde el catalogo una voz que ya tenia
+/// nombre le pondria el titulo de Fish encima.
+fn completar_sin_pisar(guardada: &mut VozGuardada, catalogo: &VozGuardada) {
+    let vacio = |texto: &str| texto.trim().is_empty();
+    if vacio(&guardada.nombre) {
+        guardada.nombre = catalogo.titulo_original.clone();
+    }
+    if vacio(&guardada.titulo_original) {
+        guardada.titulo_original = catalogo.titulo_original.clone();
+    }
+    if vacio(&guardada.idioma) {
+        guardada.idioma = catalogo.idioma.clone();
+    }
+    if vacio(&guardada.descripcion) {
+        guardada.descripcion = catalogo.descripcion.clone();
+    }
+    if vacio(&guardada.portada) {
+        guardada.portada = catalogo.portada.clone();
+    }
+    if vacio(&guardada.autor) {
+        guardada.autor = catalogo.autor.clone();
+    }
+    if vacio(&guardada.autor_id) {
+        guardada.autor_id = catalogo.autor_id.clone();
+    }
+    if vacio(&guardada.autor_avatar) {
+        guardada.autor_avatar = catalogo.autor_avatar.clone();
+    }
+    if guardada.tags.is_empty() {
+        guardada.tags = catalogo.tags.clone();
+    }
+    if guardada.muestras.is_empty() {
+        guardada.muestras = catalogo.muestras.clone();
+    }
+    if vacio(&guardada.actualizado_en) {
+        guardada.actualizado_en = catalogo.actualizado_en.clone();
     }
 }
 
@@ -994,10 +1065,32 @@ impl TtsManager {
             .iter()
             .map(|voz| VozGuardada {
                 nombre: voz.nombre.trim().to_string(),
+                titulo_original: voz.titulo_original.trim().to_string(),
                 referencia: voz.referencia.trim().to_string(),
                 proveedor: voz.proveedor.trim().to_string(),
                 idioma: voz.idioma.trim().to_string(),
                 descripcion: voz.descripcion.trim().to_string(),
+                // Lo que viene del catalogo se conserva tal cual: aqui solo se
+                // recorta el aire de los textos. Perder la portada o las muestras
+                // al renombrar una voz seria perder trabajo que ya estaba hecho.
+                favorito: voz.favorito,
+                portada: voz.portada.trim().to_string(),
+                autor: voz.autor.trim().to_string(),
+                autor_id: voz.autor_id.trim().to_string(),
+                autor_avatar: voz.autor_avatar.trim().to_string(),
+                tags: voz
+                    .tags
+                    .iter()
+                    .map(|tag| tag.trim().to_string())
+                    .filter(|tag| !tag.is_empty())
+                    .collect(),
+                muestras: voz
+                    .muestras
+                    .iter()
+                    .filter(|muestra| muestra.suena())
+                    .cloned()
+                    .collect(),
+                actualizado_en: voz.actualizado_en.trim().to_string(),
             })
             // Una voz sin referencia no se puede usar, y la misma referencia dos
             // veces solo hace dudar de cual esta puesta. La clave del conjunto
@@ -1016,6 +1109,142 @@ impl TtsManager {
     pub fn set_fish_model(&self, model: &str) {
         self.write_settings().fish.model = model.trim().to_string();
         self.aplicar_ajustes_al_proveedor();
+    }
+
+    /// Las voces guardadas, como estan.
+    pub fn voces_guardadas(&self) -> Vec<VozGuardada> {
+        self.read_settings().fish.voces.clone()
+    }
+
+    /// Guarda una voz en la lista, **sin repetirla**.
+    ///
+    /// Es idempotente a proposito: guardar dos veces la misma voz —desde el
+    /// catalogo, desde el importador por identificador, o pulsando dos veces— deja
+    /// la lista igual. La clave es proveedor + referencia, que es lo que distingue
+    /// una voz de otra: dos motores pueden usar el mismo identificador.
+    ///
+    /// Si ya estaba, **se conserva lo que el streamer puso** (su nombre y su
+    /// estrella) y se completa con lo que venga del catalogo que falte: su nombre
+    /// es suyo y una actualizacion de datos no puede pisarlo. Devuelve `true` si
+    /// era nueva.
+    pub fn guardar_voz(&self, voz: &VozGuardada) -> bool {
+        let referencia = voz.referencia.trim();
+        if referencia.is_empty() {
+            return false;
+        }
+        let proveedor = voz.proveedor.trim();
+        let mut ajustes = self.write_settings();
+        let existente = ajustes
+            .fish
+            .voces
+            .iter_mut()
+            .find(|otra| otra.proveedor == proveedor && otra.referencia == referencia);
+        match existente {
+            Some(guardada) => {
+                completar_sin_pisar(guardada, voz);
+                false
+            }
+            None => {
+                let mut nueva = voz.clone();
+                nueva.referencia = referencia.to_string();
+                nueva.proveedor = proveedor.to_string();
+                // Las nuevas van **las primeras**: es la que se acaba de guardar y
+                // la que el streamer espera encontrar arriba.
+                ajustes.fish.voces.insert(0, nueva);
+                true
+            }
+        }
+    }
+
+    /// Quita una voz de la lista local. **No** toca nada en la cuenta del motor.
+    pub fn quitar_voz(&self, referencia: &str) -> bool {
+        let referencia = referencia.trim();
+        let mut ajustes = self.write_settings();
+        let antes = ajustes.fish.voces.len();
+        ajustes
+            .fish
+            .voces
+            .retain(|voz| voz.referencia != referencia);
+        antes != ajustes.fish.voces.len()
+    }
+
+    /// Le pone el nombre que quiere el streamer. Vacio lo devuelve al del catalogo.
+    pub fn renombrar_voz(&self, referencia: &str, nombre: &str) -> bool {
+        let referencia = referencia.trim();
+        let mut ajustes = self.write_settings();
+        match ajustes
+            .fish
+            .voces
+            .iter_mut()
+            .find(|voz| voz.referencia == referencia)
+        {
+            Some(voz) => {
+                voz.nombre = nombre.trim().to_string();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Marca o desmarca la estrella de una voz guardada.
+    pub fn marcar_favorita(&self, referencia: &str, favorito: bool) -> bool {
+        let referencia = referencia.trim();
+        let mut ajustes = self.write_settings();
+        match ajustes
+            .fish
+            .voces
+            .iter_mut()
+            .find(|voz| voz.referencia == referencia)
+        {
+            Some(voz) => {
+                voz.favorito = favorito;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Refresca lo que dice el catalogo de una voz ya guardada.
+    ///
+    /// Se trae lo que cambia por fuera —portada, idioma, etiquetas, descripcion,
+    /// muestras— y **no toca** lo que es del streamer: su nombre, su estrella y la
+    /// configuracion local. Es la diferencia entre «actualizar los datos» y
+    /// «perder mi trabajo», y por eso vive aqui y no en la interfaz.
+    pub fn refrescar_voz(
+        &self,
+        referencia: &str,
+        datos: &super::fish_modelos::VozFish,
+        portada: &str,
+    ) -> bool {
+        let referencia = referencia.trim();
+        let mut ajustes = self.write_settings();
+        match ajustes
+            .fish
+            .voces
+            .iter_mut()
+            .find(|voz| voz.referencia == referencia)
+        {
+            Some(voz) => {
+                // La descripcion es del catalogo, no del streamer: se refresca
+                // entera. Su nombre vive en `nombre`, que no se toca aqui.
+                voz.descripcion = datos.descripcion.clone();
+                if !datos.titulo.is_empty() {
+                    voz.titulo_original = datos.titulo.clone();
+                }
+                voz.idioma = datos.idioma().to_string();
+                voz.tags = datos.tags.clone();
+                voz.muestras = datos.muestras.clone();
+                voz.autor = datos.autor.nombre.clone();
+                voz.autor_id = datos.autor.id.clone();
+                voz.autor_avatar = datos.autor.avatar.clone();
+                voz.actualizado_en = datos.actualizado_en.clone();
+                if !portada.is_empty() {
+                    voz.portada = portada.to_string();
+                }
+                true
+            }
+            None => false,
+        }
     }
 
     /// La plantilla del chat: lo que se lee por cada mensaje.
@@ -1593,6 +1822,10 @@ impl TtsManager {
     fn voices(&self) -> (String, String) {
         let settings = self.settings.read().unwrap_or_else(|e| e.into_inner());
         (settings.voice_es.clone(), settings.voice_en.clone())
+    }
+
+    fn read_settings(&self) -> std::sync::RwLockReadGuard<'_, TtsSettings> {
+        self.settings.read().unwrap_or_else(|e| e.into_inner())
     }
 
     fn write_settings(&self) -> std::sync::RwLockWriteGuard<'_, TtsSettings> {
@@ -2650,7 +2883,6 @@ mod tests {
             sink.clone() as Arc<dyn AudioSink>,
         ));
         manager.start();
-
         for index in 1..=3u64 {
             manager.handle_event(&chat(index, &index.to_string(), "una frase cualquiera"));
         }
@@ -3204,5 +3436,194 @@ mod tests {
         assert!(seen.order_sources.len() <= SEEN_CAPACITY);
         // Lo mas antiguo se ha desalojado.
         assert!(!seen.contains("7", "frase 0", Some("msg-0"), ahora));
+    }
+
+    // -----------------------------------------------------------------------
+    // La biblioteca de voces
+    // -----------------------------------------------------------------------
+
+    /// Un gestor **sin arrancar**: estas pruebas son de lo que se guarda, no de
+    /// lo que se lee, y arrancarlo solo traeria una tarea de fondo que apagar.
+    fn gestor_con_voces(voces: Vec<VozGuardada>) -> Arc<TtsManager> {
+        let mut ajustes = settings();
+        ajustes.fish.voces = voces;
+        let bus = Arc::new(EventBus::new(16, Arc::new(Metrics::default())));
+        Arc::new(TtsManager::new(
+            ajustes,
+            FakeProvider::new() as SharedTtsProvider,
+            bus,
+            Arc::new(NullSink::new()) as Arc<dyn AudioSink>,
+        ))
+    }
+
+    fn voz_de_catalogo(referencia: &str, titulo: &str) -> VozGuardada {
+        VozGuardada {
+            referencia: referencia.to_string(),
+            proveedor: "fish-audio".to_string(),
+            titulo_original: titulo.to_string(),
+            idioma: "es".to_string(),
+            descripcion: "una descripcion del catalogo".to_string(),
+            portada: format!("{referencia}.webp"),
+            autor: "kato".to_string(),
+            autor_id: "u1".to_string(),
+            tags: vec!["female".to_string()],
+            muestras: vec![MuestraVoz {
+                titulo: "Sample 1".into(),
+                texto: "hola".into(),
+                audio: "https://cdn.fish/s1.mp3".into(),
+            }],
+            actualizado_en: "2026-09-01T00:00:00Z".to_string(),
+            ..VozGuardada::default()
+        }
+    }
+
+    /// Guardar la misma voz dos veces no la duplica y **no pierde lo del
+    /// streamer**: ni el nombre que le puso ni su estrella.
+    #[test]
+    fn guardar_dos_veces_no_duplica_ni_pisa_el_nombre() {
+        let gestor = gestor_con_voces(vec![]);
+        assert!(gestor.guardar_voz(&voz_de_catalogo("abc", "Camila")));
+        assert_eq!(gestor.voces_guardadas().len(), 1);
+
+        // El streamer le pone su nombre y la marca.
+        assert!(gestor.renombrar_voz("abc", "Voz mujer TikTok"));
+        assert!(gestor.marcar_favorita("abc", true));
+
+        // Y la vuelve a guardar desde el catalogo, que trae otro titulo.
+        let mut otra_vez = voz_de_catalogo("abc", "Camila");
+        otra_vez.nombre = String::new();
+        assert!(!gestor.guardar_voz(&otra_vez), "ya estaba");
+
+        let voces = gestor.voces_guardadas();
+        assert_eq!(voces.len(), 1, "no se duplica");
+        assert_eq!(voces[0].nombre, "Voz mujer TikTok", "su nombre es suyo");
+        assert!(voces[0].favorito, "su estrella tambien");
+        assert_eq!(voces[0].titulo_original, "Camila");
+    }
+
+    /// Una voz nueva entra la primera y **con el titulo del catalogo** cuando el
+    /// streamer no le pone nombre: la tarjeta tiene algo que enseñar.
+    #[test]
+    fn una_voz_nueva_entra_la_primera() {
+        let gestor = gestor_con_voces(vec![voz_de_catalogo("vieja", "Vieja")]);
+        let mut nueva = voz_de_catalogo("nueva", "Nueva");
+        nueva.nombre = String::new();
+        assert!(gestor.guardar_voz(&nueva));
+        let voces = gestor.voces_guardadas();
+        assert_eq!(voces[0].referencia, "nueva");
+        assert_eq!(voces[1].referencia, "vieja");
+        assert_eq!(voces[0].portada, "nueva.webp", "con su portada cacheada");
+    }
+
+    /// Actualizar desde Fish trae lo de fuera y **no toca** lo del streamer.
+    #[test]
+    fn actualizar_trae_lo_de_fuera_y_respeta_lo_del_streamer() {
+        let mut guardada = voz_de_catalogo("abc", "Camila");
+        guardada.nombre = "Mi voz".to_string();
+        guardada.favorito = true;
+        let gestor = gestor_con_voces(vec![guardada]);
+
+        let datos = super::super::fish_modelos::VozFish {
+            id: "abc".into(),
+            titulo: "Camila (nueva)".into(),
+            descripcion: "descripcion nueva".into(),
+            idiomas: vec!["en".into()],
+            tags: vec!["male".into()],
+            autor: super::super::fish_modelos::AutorVoz {
+                nombre: "otro".into(),
+                ..Default::default()
+            },
+            portada: "https://cdn/otra.webp".into(),
+            ..Default::default()
+        };
+        assert!(gestor.refrescar_voz("abc", &datos, "abc-v2.webp"));
+
+        let voz = &gestor.voces_guardadas()[0];
+        assert_eq!(voz.nombre, "Mi voz", "su nombre no se toca");
+        assert!(voz.favorito, "su estrella tampoco");
+        assert_eq!(voz.idioma, "en", "el idioma si viene del catalogo");
+        assert_eq!(voz.tags, vec!["male".to_string()]);
+        assert_eq!(voz.descripcion, "descripcion nueva");
+        assert_eq!(voz.portada, "abc-v2.webp");
+        assert_eq!(voz.titulo_original, "Camila (nueva)");
+        assert_eq!(voz.autor, "otro");
+    }
+
+    /// Quitar una voz la quita de la lista local y **no toca** nada mas.
+    #[test]
+    fn quitar_una_voz_no_toca_las_demas() {
+        let gestor = gestor_con_voces(vec![
+            voz_de_catalogo("abc", "Camila"),
+            voz_de_catalogo("def", "Otra"),
+        ]);
+        assert!(gestor.quitar_voz("abc"));
+        let voces = gestor.voces_guardadas();
+        assert_eq!(voces.len(), 1);
+        assert_eq!(voces[0].referencia, "def");
+        assert!(!gestor.quitar_voz("abc"), "la segunda vez ya no esta");
+    }
+
+    /// Renombrar con el campo vacio la devuelve al titulo del catalogo: el
+    /// streamer puede arrepentirse de su nombre sin perder la voz.
+    #[test]
+    fn renombrar_vacio_vuelve_al_titulo_del_catalogo() {
+        let mut guardada = voz_de_catalogo("abc", "Camila");
+        guardada.nombre = "Mi voz".to_string();
+        let gestor = gestor_con_voces(vec![guardada]);
+        assert!(gestor.renombrar_voz("abc", "   "));
+        let voces = gestor.voces_guardadas();
+        assert_eq!(voces[0].nombre, "");
+        assert_eq!(voces[0].titulo_original, "Camila");
+        assert!(!gestor.renombrar_voz("no-existe", "x"));
+    }
+
+    /// Una voz guardada antes de que existieran los campos nuevos se sigue
+    /// leyendo: es lo que hace que actualizar la aplicacion no borre nada.
+    #[test]
+    fn una_voz_guardada_antes_se_lee_igual() {
+        let viejo = serde_json::json!({
+            "nombre": "Camila",
+            "referencia": "abc",
+            "proveedor": "fish-audio",
+            "idioma": "es",
+            "descripcion": "de antes"
+        });
+        let voz: VozGuardada = serde_json::from_value(viejo).expect("se lee");
+        assert_eq!(voz.nombre, "Camila");
+        assert_eq!(voz.referencia, "abc");
+        assert!(!voz.favorito);
+        assert!(voz.portada.is_empty());
+        assert!(voz.muestras.is_empty());
+        assert!(voz.titulo_original.is_empty());
+    }
+
+    #[test]
+    fn el_guardado_de_voces_rechaza_lo_que_no_sirve() {
+        let gestor = gestor_con_voces(vec![]);
+        let sin_referencia = VozGuardada {
+            nombre: "Sin codigo".into(),
+            proveedor: "fish-audio".into(),
+            ..VozGuardada::default()
+        };
+        assert!(
+            !gestor.guardar_voz(&sin_referencia),
+            "sin referencia no vale"
+        );
+        assert!(gestor.voces_guardadas().is_empty());
+
+        // Y la misma referencia de dos motores distintos son dos voces.
+        let de_fish = VozGuardada {
+            referencia: "compartida".into(),
+            proveedor: "fish-audio".into(),
+            ..VozGuardada::default()
+        };
+        let de_edge = VozGuardada {
+            referencia: "compartida".into(),
+            proveedor: "edge".into(),
+            ..VozGuardada::default()
+        };
+        assert!(gestor.guardar_voz(&de_fish));
+        assert!(gestor.guardar_voz(&de_edge));
+        assert_eq!(gestor.voces_guardadas().len(), 2);
     }
 }

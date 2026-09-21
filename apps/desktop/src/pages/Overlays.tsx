@@ -67,6 +67,7 @@ function urlDePrevia(base: string, vista: string, diseno: string): string {
 
 export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Props) {
   const [vista, setVista] = useState<Vista>("tap");
+  const [creando, setCreando] = useState(false);
 
   if (base === null) {
     return (
@@ -78,17 +79,36 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
     );
   }
 
-  const deLaVista = disenos.filter((diseno) => diseno.vistas.includes(vista));
+  /* Marcadores y juegos van en **secciones distintas** porque no se eligen igual: un
+     marcador dice lo que ha pasado y se elige por vista; un juego se mueve con el
+     ritmo de los taps y solo va en Tap tap. Antes eran once filas en la misma lista y
+     no había forma de saber cuál era cuál salvo por el nombre. */
+  const marcadores = disenos.filter((diseno) => diseno.tipo === "marcador");
+  const juegos = disenos.filter((diseno) => diseno.tipo === "juego");
+
+  const deLaVista = marcadores.filter((diseno) => diseno.vistas.includes(vista));
   const elegido = seleccion[vista];
   const actual = deLaVista.find((diseno) => diseno.id === elegido) ?? deLaVista[0];
+
+  /* La previa sigue a lo último que se eligió: si el juego está puesto, enseña el
+     juego —que vive en el hueco de Tap tap— aunque la lista de marcadores esté en
+     otra vista. Si no, la previa diría una cosa y la antena otra. */
+  const juegoPuesto = juegos.find((diseno) => diseno.id === seleccion.tap);
+  const previa = juegoPuesto && vista === "tap" ? juegoPuesto : actual;
+
+  /** Elige un juego para Tap tap y deja la previa enseñándolo. */
+  const ponerJuego = (id: string) => {
+    setVista("tap");
+    onChoose("tap", id);
+  };
 
   return (
     <div className="grid-panel overlays">
       <p className="hint">{t.overlay.hint}</p>
 
-      {/* Dos columnas: a la izquierda lo que se configura —las direcciones y la
-          lista de diseños— y a la derecha **la previa, con la columna entera para
-          ella**.
+      {/* Dos columnas: a la izquierda lo que se configura —las direcciones, los
+          marcadores y los juegos— y a la derecha **la previa, con la columna entera
+          para ella**.
           Antes la previa iba dentro de la tarjeta de diseños, al lado de la lista, y
           las dos se estorbaban: la previa de un marcador mide 420x524, así que
           empujaba la tarjeta a 706 px de alto y la página entera a 950 para 674 de
@@ -110,6 +130,10 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
           </Card>
 
           <Card title={t.overlay.designs}>
+            {/* Sin aviso propio de la sección: las pestañas ya dicen qué vista es cada
+                una y debajo va el aviso de la vista elegida. El renglón que había aquí
+                repetía eso mismo y le quitaba a la lista los 34 px que le faltaban
+                para enseñar los ocho marcadores sin barra. */}
             <div className="vista-switch" role="tablist">
               {VISTAS.map((cual) => (
                 <button
@@ -161,19 +185,77 @@ export function Overlays({ base, urls, seleccion, disenos, busy, onChoose }: Pro
               <p className="empty">{t.overlay.empty}</p>
             )}
           </Card>
+
+          {/* La sección de juegos: los que hay —que se pueden poner en antena— y el
+              sitio desde donde se crearán los nuevos. Un juego ocupa el hueco de Tap
+              tap, así que se dice: mientras haya uno puesto, esa vista no enseña el
+              marcador. */}
+          <Card
+            title={t.overlay.games}
+            actions={
+              <button
+                type="button"
+                className="ghost"
+                aria-expanded={creando}
+                onClick={() => setCreando((abierto) => !abierto)}
+              >
+                {t.overlay.gameCreate}
+              </button>
+            }
+          >
+            <p className="hint">{t.overlay.gamesHint}</p>
+
+            {juegos.length > 0 ? (
+              <ul className="disenos disenos-juegos">
+                {juegos.map((juego) => {
+                  const rotulo = rotuloDe(juego.id);
+                  const puesto = seleccion.tap === juego.id;
+                  return (
+                    <li key={juego.id} className={puesto ? "diseno activo" : "diseno"}>
+                      <span className="diseno-texto">
+                        <strong>{rotulo.nombre}</strong>
+                        <span>{rotulo.resumen}</span>
+                      </span>
+                      {puesto ? (
+                        <span className="etiqueta">{t.overlay.inUse}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={busy}
+                          onClick={() => ponerJuego(juego.id)}
+                        >
+                          {t.overlay.use}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="empty">{t.overlay.empty}</p>
+            )}
+
+            {creando ? (
+              <div className="juegos-alta">
+                <span className="tira-rotulo">{t.overlay.gamesSoon}</span>
+                <p className="hint">{t.overlay.gamesSoonHint}</p>
+              </div>
+            ) : null}
+          </Card>
         </div>
 
-        {actual ? (
+        {previa ? (
           /* Sin rótulo de sección a propósito: la barra de la propia previa ya dice
              que es la vista previa y qué diseño está enseñando, y un rótulo encima
              sería la misma palabra dos veces. */
           <Card>
             <VistaPrevia
-              url={urlDePrevia(base, vista, actual.id)}
-              ancho={actual.previa.ancho}
-              alto={actual.previa.alto}
+              url={urlDePrevia(base, vista, previa.id)}
+              ancho={previa.previa.ancho}
+              alto={previa.previa.alto}
               etiqueta={t.overlay.preview}
-              nota={`${t.overlay.simulator} · ${actual.id}`}
+              nota={`${t.overlay.simulator} · ${previa.id}`}
             />
             <p className="hint">{t.overlay.previewHint}</p>
           </Card>

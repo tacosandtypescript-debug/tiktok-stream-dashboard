@@ -18,6 +18,41 @@ Los ficheros se **copian** a `%LOCALAPPDATA%\TikTokStreamDashboard\alertas\`. A 
 ahí puedes mover o borrar los originales: en OBS no se rompe nada, porque lo que se sirve
 es la copia.
 
+## Pack de fábrica y medios personales
+
+Los siete sonidos propios y el catálogo actual autorizado para publicar viven en el
+repositorio dentro de:
+
+```text
+apps/desktop/src-tauri/alertas-pack/
+├── imagenes/
+└── audio/
+```
+
+Ese directorio es un **pack versionado de instalación**, no el almacén que la
+aplicación consulta durante el directo. Tauri lo incluye como recurso en la release;
+al primer arranque la aplicación lo siembra en AppData de forma no destructiva:
+
+- copia solo los ficheros que todavía no existan;
+- no reemplaza un fichero local, aunque tenga el mismo nombre;
+- rechaza nombres, extensiones, ficheros vacíos o tamaños fuera de las reglas de
+  importación y deja el motivo en el log sin frenar las demás copias;
+- puede ejecutarse en cada arranque porque la segunda pasada es idempotente.
+
+La configuración de Alertas sigue guardando **nombres de archivo**, no rutas absolutas.
+Por eso los nombres del pack no se renombran al sembrarlos y las referencias existentes
+continúan resolviendo la misma biblioteca. El manifiesto `alertas-pack/manifest.json`
+registra la ruta relativa, extensión, tamaño y SHA-256 de cada archivo para revisar que
+una migración no alteró bytes.
+
+Los medios que importes después desde la pestaña Alertas siguen viviendo únicamente en
+AppData. Arrastrar un fichero no escribe en el checkout ni genera cambios Git: el
+repositorio es el origen de instalación y AppData es el almacén de uso.
+
+El catálogo actual de imágenes y audios fue autorizado expresamente para publicarse en
+este repositorio público. No se borra la copia existente de AppData durante la
+migración.
+
 ## De dónde sacarlos
 
 - **[myinstants.com](https://www.myinstants.com/)** — el banco de memes más conocido.

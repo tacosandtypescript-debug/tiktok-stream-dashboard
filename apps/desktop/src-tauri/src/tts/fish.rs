@@ -254,6 +254,121 @@ pub trait ClienteTts: Send + Sync {
     fn pedir<'a>(&'a self, peticion: PeticionTts<'a>) -> BoxFuture<'a, RespuestaHttp>;
 }
 
+// ---------------------------------------------------------------------------
+// Lo que solo se lee
+// ---------------------------------------------------------------------------
+
+/// Lo que devuelve una llamada de **solo lectura** a la API.
+///
+/// Es un tipo aparte del de sintesis a proposito: alli lo que viene son bytes de
+/// audio y aqui un JSON, y mezclarlos obligaria a que cada sitio comprobara cual
+/// de las dos cosas le ha llegado.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RespuestaApi {
+    Json(serde_json::Value),
+    /// La API contesto con un error HTTP, con su codigo y su mensaje.
+    Error {
+        status: u16,
+        mensaje: String,
+    },
+    /// No se pudo hablar con el servicio (red, DNS, timeout), o la respuesta no
+    /// era JSON. No es culpa de la clave.
+    Servicio(String),
+}
+
+/// Quien hace las llamadas de solo lectura: el catalogo de voces.
+///
+/// Va aparte del transporte de sintesis —igual que el cliente del saldo— porque
+/// son dos cosas distintas: una manda texto y cobra, la otra solo mira. Y es un
+/// trait para poder probar el catalogo **sin red**.
+pub trait ClienteApi: Send + Sync {
+    fn obtener<'a>(&'a self, url: &'a str, clave: &'a Secreto) -> BoxFuture<'a, RespuestaApi>;
+}
+
+/// Construye (una sola vez) el cliente HTTPS compartido de un transporte.
+///
+/// El cliente se crea **en el primer uso**: `AppState::open` corre fuera del
+/// runtime de Tokio (en el setup de Tauri) y construirlo ahi es pedir problemas.
+/// Se crea uno por transporte y se reutiliza: abrir uno por peticion tiraria el
+/// pool de conexiones.
+fn cliente_http(celda: &OnceLock<reqwest::Client>, timeout: Duration) -> Result<reqwest::Client> {
+    if let Some(cliente) = celda.get() {
+        return Ok(cliente.clone());
+    }
+    let cliente = reqwest::Client::builder()
+        .timeout(timeout)
+        // Sin tope de conexion, una red que traga paquetes deja la lectura
+        // colgada hasta el timeout total. Con el, se falla en 10 s y la cola
+        // sigue con la frase siguiente.
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent(concat!(
+            "tiktok-stream-dashboard/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .build()
+        .context("construyendo el cliente HTTPS de Fish Audio")?;
+    // Si otra tarea se adelanto, se usa el suyo: los dos valen.
+    let _ = celda.set(cliente.clone());
+    Ok(cliente)
+}
+
+/// Cliente real de solo lectura: `reqwest` con rustls, el mismo que la sintesis.
+pub struct ClienteHttpApi {
+    timeout: Duration,
+    cliente: OnceLock<reqwest::Client>,
+}
+
+impl ClienteHttpApi {
+    pub fn nuevo(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            cliente: OnceLock::new(),
+        }
+    }
+}
+
+impl ClienteApi for ClienteHttpApi {
+    fn obtener<'a>(&'a self, url: &'a str, clave: &'a Secreto) -> BoxFuture<'a, RespuestaApi> {
+        Box::pin(async move {
+            let cliente = match cliente_http(&self.cliente, self.timeout) {
+                Ok(cliente) => cliente,
+                // `error` viene de `.context(...)`, sin la clave dentro.
+                Err(error) => return RespuestaApi::Servicio(format!("Fish Audio: {error}")),
+            };
+
+            let respuesta = match cliente
+                .get(url)
+                // La clave va en la cabecera y **solo** aqui.
+                .bearer_auth(clave.exponer())
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send()
+                .await
+            {
+                Ok(respuesta) => respuesta,
+                // El `Display` de `reqwest` puede arrastrar la peticion (y con
+                // ella la cabecera), asi que se descarta y se dice solo donde
+                // fallo.
+                Err(_) => return RespuestaApi::Servicio(describe_error_red(url)),
+            };
+
+            let status = respuesta.status().as_u16();
+            if !respuesta.status().is_success() {
+                let mensaje = leer_mensaje(respuesta).await;
+                return RespuestaApi::Error { status, mensaje };
+            }
+
+            match respuesta.json::<serde_json::Value>().await {
+                Ok(valor) => RespuestaApi::Json(valor),
+                // Un 200 que no es JSON es una anomalia del servicio, no de la
+                // clave: se dice como tal y el relevo no gasta ninguna.
+                Err(_) => {
+                    RespuestaApi::Servicio(format!("Fish Audio: la respuesta de {url} no era JSON"))
+                }
+            }
+        })
+    }
+}
+
 /// Cliente real: `reqwest` con rustls (que el proyecto ya usa).
 ///
 /// El cliente HTTP se crea **en el primer uso**: `AppState::open` corre fuera del
@@ -274,24 +389,7 @@ impl ClienteHttp {
     }
 
     fn cliente(&self) -> Result<reqwest::Client> {
-        if let Some(cliente) = self.cliente.get() {
-            return Ok(cliente.clone());
-        }
-        let cliente = reqwest::Client::builder()
-            .timeout(self.timeout)
-            // Sin tope de conexion, una red que traga paquetes deja la lectura
-            // colgada hasta el timeout total. Con el, se falla en 10 s y la cola
-            // sigue con la frase siguiente.
-            .connect_timeout(Duration::from_secs(10))
-            .user_agent(concat!(
-                "tiktok-stream-dashboard/",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .build()
-            .context("construyendo el cliente HTTPS de Fish Audio")?;
-        // Si otra tarea se adelanto, se usa el suyo: los dos valen.
-        let _ = self.cliente.set(cliente.clone());
-        Ok(cliente)
+        cliente_http(&self.cliente, self.timeout)
     }
 }
 
@@ -468,6 +566,9 @@ pub struct FishAudio {
     /// porque son dos cosas distintas —una manda texto y cobra, la otra solo
     /// mira— y asi las pruebas pueden falsear una sin tocar la otra.
     cuota_cliente: Arc<dyn ClienteCuota>,
+    /// Quien lee el catalogo de voces. Misma razon que el anterior: es una
+    /// llamada de solo lectura y no puede compartir camino con la que cobra.
+    api: Arc<dyn ClienteApi>,
     /// Lo ultimo que se pregunto del saldo y cuando, para no repetirlo.
     saldo: Mutex<Saldo>,
     estado: RwLock<FishEstado>,
@@ -543,10 +644,23 @@ impl FishAudio {
         transporte: Arc<dyn ClienteTts>,
         cuota_cliente: Arc<dyn ClienteCuota>,
     ) -> Self {
+        let api = Arc::new(ClienteHttpApi::nuevo(config.timeout));
+        Self::con_todo(config, transporte, cuota_cliente, api)
+    }
+
+    /// Con los tres transportes puestos. Es lo que usan las pruebas del catalogo,
+    /// que falsean la lectura sin tocar ni la red ni la sintesis.
+    pub fn con_todo(
+        config: FishConfig,
+        transporte: Arc<dyn ClienteTts>,
+        cuota_cliente: Arc<dyn ClienteCuota>,
+        api: Arc<dyn ClienteApi>,
+    ) -> Self {
         Self {
             config,
             transporte,
             cuota_cliente,
+            api,
             saldo: Mutex::new(Saldo::default()),
             estado: RwLock::new(FishEstado {
                 claves: Vec::new(),
@@ -669,6 +783,70 @@ impl FishAudio {
     /// no a un log ni a la interfaz.
     pub fn claves_para_persistir(&self) -> Vec<ClaveGuardada> {
         self.leer_estado().claves.clone()
+    }
+
+    /// Le pone otro nombre a una clave.
+    ///
+    /// El nombre es lo unico que distingue dos claves de la misma cuenta en la
+    /// lista —la pista enmascarada puede coincidir—, asi que poder corregirlo
+    /// importa. Vacio vuelve a numerarla, como al darla de alta.
+    pub fn renombrar(&self, posicion: u64, nombre: &str) -> bool {
+        let mut estado = self.lock_estado();
+        let indice = posicion as usize;
+        if indice >= estado.claves.len() {
+            return false;
+        }
+        let nombre = nombre.trim();
+        estado.claves[indice].nombre = if nombre.is_empty() {
+            format!("Clave {}", indice + 1)
+        } else {
+            nombre.to_string()
+        };
+        true
+    }
+
+    /// Apaga una clave: deja de intentarse hasta que el streamer la encienda.
+    ///
+    /// No es lo mismo que quitarla: la clave sigue guardada, con su nombre y su
+    /// contador. Y no es lo mismo que una rechazada: `Invalida` lo dijo el
+    /// servicio, `Apagada` lo decide el streamer. El relevo no necesita saber la
+    /// diferencia —las dos dejan de estar `Viva`—, pero la interfaz si.
+    pub fn apagar(&self, posicion: u64) -> bool {
+        let mut estado = self.lock_estado();
+        let indice = posicion as usize;
+        if indice >= estado.claves.len() {
+            return false;
+        }
+        estado.claves[indice].estado = EstadoClave::Apagada;
+        // Si la que se apago era la activa, el relevo tiene que elegir otra **ya**:
+        // dejarla apuntada haria que la siguiente sintesis la intentara.
+        estado.activa = estado.claves.iter().position(ClaveGuardada::esta_viva);
+        drop(estado);
+        self.olvidar_saldo();
+        true
+    }
+
+    /// Comprueba una clave concreta contra la API, **sin gastar saldo**.
+    ///
+    /// Se pregunta por el saldo de la cuenta —la llamada mas barata que hay— con
+    /// esa clave: si contesta, la clave vale. No se toca su estado a proposito:
+    /// probar no es usar, y marcar una clave por un corte de red seria mentir
+    /// sobre ella.
+    pub async fn probar(&self, posicion: u64) -> Result<()> {
+        let clave = {
+            let estado = self.leer_estado();
+            estado
+                .claves
+                .get(posicion as usize)
+                .map(|clave| clave.secreto.clone())
+        };
+        let Some(clave) = clave else {
+            bail!("no existe esa clave");
+        };
+        match self.cuota_cliente.pedir(&clave).await {
+            Ok(_) => Ok(()),
+            Err(motivo) => bail!("{motivo}"),
+        }
     }
 
     /// El consumo y el estado de las claves, para la interfaz.
@@ -969,6 +1147,96 @@ impl FishAudio {
         }
     }
 
+    /// Una llamada autenticada de **solo lectura**, con el mismo relevo de claves
+    /// que la sintesis.
+    ///
+    /// Es la unica puerta del catalogo de voces a la API: quien quiera leer algo de
+    /// Fish pasa por aqui, y asi hereda lo que ya esta probado —el 401 marca la
+    /// clave y pasa a la siguiente, el 402 la marca agotada, el 429 y el 5xx
+    /// reintentan **la misma**— sin copiarlo en cada sitio.
+    ///
+    /// Una lectura **no cobra**: no se apunta consumo ni se toca el contador de
+    /// bytes de ninguna clave. Solo se cuentan las llamadas, que es lo que dice el
+    /// estado del motor.
+    pub async fn get_json(&self, url: &str) -> Result<serde_json::Value> {
+        let (total_claves, hay_viva) = {
+            let estado = self.leer_estado();
+            (
+                estado.claves.len(),
+                estado.claves.iter().any(ClaveGuardada::esta_viva),
+            )
+        };
+        if total_claves == 0 {
+            bail!("Fish Audio: no hay ninguna clave guardada");
+        }
+        if !hay_viva {
+            bail!("Fish Audio: ninguna clave se puede usar; marca una como valida o pon otra");
+        }
+
+        let tope = total_claves * (self.config.max_reintentos as usize + 2) + 1;
+        let mut indice = self.seleccionar();
+        let mut reintentos = 0u32;
+        let mut ultimo: Option<String> = None;
+
+        for _ in 0..tope {
+            let Some(actual) = indice else { break };
+            let Some((clave, _modelo, _nombre)) = self.datos_de(actual) else {
+                break;
+            };
+
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            match self.api.obtener(url, &clave).await {
+                RespuestaApi::Json(valor) => return Ok(valor),
+                RespuestaApi::Servicio(motivo) => {
+                    self.failures.fetch_add(1, Ordering::Relaxed);
+                    if reintentos < self.config.max_reintentos {
+                        self.esperar(reintentos, &TtsCancellation::new()).await?;
+                        reintentos += 1;
+                        continue;
+                    }
+                    bail!("{motivo}");
+                }
+                RespuestaApi::Error { status, mensaje } => {
+                    let detalle = describe_error_http(status, &mensaje);
+                    match clase_de(status) {
+                        Clase::Clave => {
+                            self.failures.fetch_add(1, Ordering::Relaxed);
+                            self.marcar(actual, EstadoClave::Invalida);
+                            reintentos = 0;
+                            ultimo = Some(detalle);
+                            indice = self.siguiente(actual);
+                        }
+                        Clase::Saldo => {
+                            self.failures.fetch_add(1, Ordering::Relaxed);
+                            self.marcar(actual, EstadoClave::Agotada);
+                            reintentos = 0;
+                            ultimo = Some(detalle);
+                            indice = self.siguiente(actual);
+                        }
+                        Clase::Ritmo | Clase::Servicio => {
+                            if reintentos < self.config.max_reintentos {
+                                self.esperar(reintentos, &TtsCancellation::new()).await?;
+                                reintentos += 1;
+                                continue;
+                            }
+                            self.failures.fetch_add(1, Ordering::Relaxed);
+                            bail!("{detalle}");
+                        }
+                        // Un 400 en una lectura es la peticion: no se arregla
+                        // cambiando de clave.
+                        Clase::Peticion => bail!("{detalle}"),
+                    }
+                }
+            }
+        }
+
+        bail!(
+            "{}",
+            ultimo
+                .unwrap_or_else(|| { "Fish Audio: no queda ninguna clave utilizable".to_string() })
+        )
+    }
+
     /// Sintetiza a fichero, reutilizando la cache si la frase ya se dijo.
     pub async fn synthesize_to_file_with_cancel(
         &self,
@@ -1147,6 +1415,64 @@ impl ClienteTts for TransporteFalso {
         Box::pin(async move {
             siguiente.unwrap_or_else(|| {
                 RespuestaHttp::Servicio("el guion de la prueba se quedo sin respuestas".into())
+            })
+        })
+    }
+}
+
+/// Un guion de respuestas para las lecturas: devuelve los JSON en orden y apunta
+/// con que clave y con que URL se llamo. No toca la red.
+#[cfg(test)]
+#[derive(Default)]
+pub struct ApiFalsa {
+    guion: std::sync::Mutex<std::collections::VecDeque<RespuestaApi>>,
+    claves: std::sync::Mutex<Vec<String>>,
+    urls: std::sync::Mutex<Vec<String>>,
+}
+
+#[cfg(test)]
+impl ApiFalsa {
+    pub fn nueva(respuestas: Vec<RespuestaApi>) -> Arc<Self> {
+        Arc::new(Self {
+            guion: std::sync::Mutex::new(respuestas.into()),
+            ..Self::default()
+        })
+    }
+
+    /// Las claves con las que se llamo, en orden. Son valores de mentira.
+    pub fn claves(&self) -> Vec<String> {
+        self.claves
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Las URL que se pidieron, en orden. Es lo que comprueba que los filtros
+    /// viajan como parametros de consulta y no pegados a mano.
+    pub fn urls(&self) -> Vec<String> {
+        self.urls.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+#[cfg(test)]
+impl ClienteApi for ApiFalsa {
+    fn obtener<'a>(&'a self, url: &'a str, clave: &'a Secreto) -> BoxFuture<'a, RespuestaApi> {
+        self.claves
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(clave.exponer().to_string());
+        self.urls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(url.to_string());
+        let siguiente = self
+            .guion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front();
+        Box::pin(async move {
+            siguiente.unwrap_or_else(|| {
+                RespuestaApi::Servicio("el guion de la prueba se quedo sin respuestas".into())
             })
         })
     }
@@ -1714,5 +2040,167 @@ mod tests {
             .unwrap_or_default()
             .to_string();
         assert!(!nombre.starts_with(&edge));
+    }
+
+    /// Proveedor con dos claves de mentira y un guion de **lecturas**.
+    fn con_lecturas(respuestas: Vec<RespuestaApi>) -> (FishAudio, Arc<ApiFalsa>) {
+        let api = ApiFalsa::nueva(respuestas);
+        let provider = FishAudio::con_todo(
+            config(),
+            TransporteFalso::nuevo(vec![]),
+            Arc::new(crate::tts::cuota::ClienteHttpCuota::nuevo()),
+            api.clone(),
+        );
+        provider.cargar(
+            vec![
+                ClaveGuardada::nueva(0, "la de marzo", Secreto::new("clave-AAA")),
+                ClaveGuardada::nueva(1, "la del canal", Secreto::new("clave-BBB")),
+            ],
+            Consumo::default(),
+        );
+        (provider, api)
+    }
+
+    #[tokio::test]
+    async fn una_lectura_sin_claves_no_llama_a_la_api() {
+        let api = ApiFalsa::nueva(vec![]);
+        let provider = FishAudio::con_todo(
+            config(),
+            TransporteFalso::nuevo(vec![]),
+            Arc::new(crate::tts::cuota::ClienteHttpCuota::nuevo()),
+            api.clone(),
+        );
+        let error = provider
+            .get_json("https://api.fish.audio/model")
+            .await
+            .expect_err("sin claves no se lee");
+        assert!(error.to_string().contains("no hay ninguna clave"));
+        assert!(api.claves().is_empty(), "no puede gastar una llamada");
+    }
+
+    /// El catalogo hereda el relevo: un 401 marca la clave y sigue con la
+    /// siguiente, sin reintentar la que ya se sabe que no vale.
+    #[tokio::test]
+    async fn un_401_en_una_lectura_cambia_de_clave() {
+        let (provider, api) = con_lecturas(vec![
+            RespuestaApi::Error {
+                status: 401,
+                mensaje: "Invalid API key".into(),
+            },
+            RespuestaApi::Json(serde_json::json!({ "total": 0, "items": [] })),
+        ]);
+        let json = provider
+            .get_json("https://api.fish.audio/model")
+            .await
+            .expect("la segunda clave deberia valer");
+        assert_eq!(json["total"], 0);
+        assert_eq!(api.claves(), vec!["clave-AAA", "clave-BBB"]);
+        let uso = provider.uso();
+        assert_eq!(uso.claves[0].estado, "invalida");
+        assert_eq!(uso.claves[1].estado, "viva");
+    }
+
+    /// Un 429 es ritmo: se reintenta **la misma** clave. Cambiar aqui quemaria otra
+    /// por un problema que no es suyo.
+    #[tokio::test]
+    async fn un_429_en_una_lectura_reintenta_la_misma_clave() {
+        let (provider, api) = con_lecturas(vec![
+            RespuestaApi::Error {
+                status: 429,
+                mensaje: "Too many requests".into(),
+            },
+            RespuestaApi::Json(serde_json::json!({ "total": 1, "items": [] })),
+        ]);
+        provider
+            .get_json("https://api.fish.audio/model")
+            .await
+            .expect("al segundo intento la misma clave sirve");
+        assert_eq!(api.claves(), vec!["clave-AAA", "clave-AAA"]);
+        assert_eq!(provider.uso().claves[0].estado, "viva");
+    }
+
+    /// Leer **no cobra**: ni bytes, ni llamadas facturadas. El contador de bytes es
+    /// lo que se manda a sintetizar, y una lectura no manda texto.
+    #[tokio::test]
+    async fn una_lectura_no_apunta_consumo() {
+        let (provider, _) = con_lecturas(vec![RespuestaApi::Json(
+            serde_json::json!({ "total": 0, "items": [] }),
+        )]);
+        provider
+            .get_json("https://api.fish.audio/model")
+            .await
+            .expect("deberia leer");
+        let uso = provider.uso();
+        assert_eq!(uso.total.total_bytes, 0);
+        assert_eq!(uso.total.total_llamadas, 0);
+        assert_eq!(uso.claves[0].bytes, 0);
+        assert_eq!(uso.claves[0].llamadas, 0);
+    }
+
+    /// Un 400 en una lectura es la peticion: no se arregla cambiando de clave, asi
+    /// que no se gasta ninguna otra.
+    #[tokio::test]
+    async fn un_400_en_una_lectura_no_gasta_mas_claves() {
+        let (provider, api) = con_lecturas(vec![RespuestaApi::Error {
+            status: 400,
+            mensaje: "bad request".into(),
+        }]);
+        let error = provider
+            .get_json("https://api.fish.audio/model")
+            .await
+            .expect_err("un 400 no se arregla solo");
+        assert!(error.to_string().contains("400"), "{error}");
+        assert_eq!(api.claves(), vec!["clave-AAA"]);
+    }
+
+    /// Una clave apagada por el streamer **no se intenta nunca** y no se pierde:
+    /// sigue en la lista, con su nombre y su contador.
+    #[tokio::test]
+    async fn una_clave_apagada_no_se_elige_y_no_se_pierde() {
+        let (provider, api) = con_lecturas(vec![
+            RespuestaApi::Error {
+                status: 503,
+                mensaje: "sobrecargado".into(),
+            },
+            RespuestaApi::Error {
+                status: 503,
+                mensaje: "sobrecargado".into(),
+            },
+            RespuestaApi::Error {
+                status: 503,
+                mensaje: "sobrecargado".into(),
+            },
+        ]);
+        assert!(provider.apagar(0));
+        let uso = provider.uso();
+        assert_eq!(uso.claves.len(), 2, "apagarla no la quita");
+        assert_eq!(uso.claves[0].estado, "apagada");
+        assert!(!uso.claves[0].en_uso);
+        assert!(uso.claves[1].en_uso, "la activa pasa a la que queda");
+        assert_eq!(uso.vivas(), 1);
+
+        // Y cualquier llamada usa la viva: la apagada no se toca ni una vez.
+        let _ = provider.get_json("https://api.fish.audio/model").await;
+        assert!(
+            api.claves().iter().all(|clave| clave == "clave-BBB"),
+            "se intento la apagada: {:?}",
+            api.claves()
+        );
+
+        // Volver a encenderla la devuelve a la rotacion.
+        assert!(provider.reactivar(0));
+        assert_eq!(provider.uso().claves[0].estado, "viva");
+    }
+
+    #[test]
+    fn renombrar_una_clave_la_numera_si_se_queda_sin_nombre() {
+        let (provider, _) = con_lecturas(vec![]);
+        assert!(provider.renombrar(1, "  la del canal  "));
+        assert_eq!(provider.uso().claves[1].nombre, "la del canal");
+        assert!(provider.renombrar(1, "   "));
+        assert_eq!(provider.uso().claves[1].nombre, "Clave 2");
+        assert!(!provider.renombrar(7, "x"), "la que no existe no se toca");
+        assert!(!provider.apagar(7));
+        assert!(!provider.reactivar(7));
     }
 }
