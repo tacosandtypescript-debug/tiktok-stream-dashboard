@@ -1886,14 +1886,17 @@ mod tests {
         assert_eq!(almacen.listar().len(), 0, "la carpeta nace vacia");
         let primera =
             almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
-        assert_eq!(primera.copied, 219, "la primera vez entra todo el pack");
         assert_eq!(primera.skipped_existing, 0);
+        // El motivo va primero a proposito: si un nombre del pack se sale de las
+        // reglas de importacion —un tallo de mas de 48 caracteres, por ejemplo— el
+        // fallo se lee entero en vez de llegar como un «397 != 398» sin explicacion.
         assert!(
             primera.rejected.is_empty(),
             "pack rechazado: {:?}",
             primera.rejected
         );
-        assert_eq!(almacen.listar().len(), 219);
+        assert_eq!(primera.copied, 398, "la primera vez entra todo el pack");
+        assert_eq!(almacen.listar().len(), 398);
 
         let ajustes = AjustesAlertas::de_fabrica();
         for tipo in TipoAviso::TODOS {
@@ -1911,7 +1914,7 @@ mod tests {
         let segunda =
             almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
         assert_eq!(segunda.copied, 0, "la segunda vez, ninguno");
-        assert_eq!(segunda.skipped_existing, 219);
+        assert_eq!(segunda.skipped_existing, 398);
 
         // Y uno propio con el mismo nombre se respeta.
         let mio = dir.join(pack::PIZCA);
@@ -1919,7 +1922,7 @@ mod tests {
         let tercera =
             almacen.sembrar_pack_desde(&Path::new(env!("CARGO_MANIFEST_DIR")).join("alertas-pack"));
         assert_eq!(tercera.copied, 0);
-        assert_eq!(tercera.skipped_existing, 219);
+        assert_eq!(tercera.skipped_existing, 398);
         assert_eq!(std::fs::read(&mio).unwrap(), b"lo mio", "no se pisa");
 
         let _ = std::fs::remove_dir_all(&dir);
