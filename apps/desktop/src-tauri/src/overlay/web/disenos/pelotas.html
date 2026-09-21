@@ -97,23 +97,281 @@
         // --- Tamano de las pelotas -------------------------------------------
         //
         // El radio sale de la RAIZ del valor, asi que lo proporcional es el
-        // **area**, que es lo que el ojo compara. El presupuesto es una fraccion
-        // del area de la franja: dar a cada una lo que pidiera sin mirar el
-        // conjunto dejaba el lienzo al 94% y no habia hueco para rebotar.
+        // **area**, que es lo que el ojo compara. Quien tiene mas taps es el mas
+        // grande y las diferencias relativas salen de ahi: eso no se toca.
 
-        const RADIO_MIN = 30;
-        const RADIO_MAX = ZONA_ALTO * 0.26; // 124,8 px
+        /**
+         * Escala global del conjunto: reduce el tamano de **todas** por igual.
+         *
+         * Multiplicar todos los radios por el mismo numero no cambia quien es mas
+         * grande ni cuanto —las proporciones entre usuarios son las mismas—, solo
+         * cambia cuanto ocupan. Se baja porque con muchos taps el nº1 se comia la
+         * franja: tapaba a las demas y no dejaba sitio para que la fisica corriera.
+         */
+        const ESCALA_PELOTAS = 0.8;
+
+        /**
+         * Radio minimo y maximo, en px.
+         *
+         * El maximo son los 124,8 de antes por 0,8 —la misma escala— para que
+         * `radio / RADIO_MAX`, que es lo que gobierna el peso del movimiento, la
+         * masa relativa y la profundidad del pintado, siga valiendo exactamente lo
+         * mismo con las pelotas mas pequenas.
+         *
+         * El minimo baja de 30 a 26, y no mas: por debajo el aro se come la foto y
+         * la inicial deja de leerse. Un poco menos de diferencia de tamano entre el
+         * primero y el ultimo es preferible a una pelota que no se distingue.
+         */
+        const RADIO_MIN = 26;
+        const RADIO_MAX = 100;
         const AREA_FRACCION = 0.22;
         const TOPE = 12;
+
+        /**
+         * Radio a partir del cual una pelota lleva etiqueta (nombre y cifra).
+         *
+         * Baja con la escala: con el umbral fijo en 52, al encoger el conjunto la
+         * misma persona que antes enseñaba su nombre dejaria de enseñarlo. Lo que
+         * tiene que cambiar con el tamano es el tamano, no la informacion.
+         */
+        const RADIO_ETIQUETA = 52 * ESCALA_PELOTAS;
 
         // --- Movimiento ------------------------------------------------------
 
         const VELOCIDAD_MINIMA = 130;
         const VELOCIDAD_MAXIMA = 900;
+        // Cuanto mas deprisa vuelve una pelota a su crucero.
+        //
+        // Con la prisa de antes (1) los choques mandaban sobre el control: la
+        // velocidad media real era 1,42x el crucero y el jitter un 55%, porque el
+        // impulso de un choque entra **despues** del control y solo se recortaba
+        // en el fotograma siguiente.
+        //
+        // Medido por dos caminos. En el port (`.tooling/sonda-fisica-pelotas.mjs`)
+        // el jitter baja al 51-53% y el tiempo por encima del doble del crucero,
+        // del 13% al 8%. Sobre el fichero de verdad, con tres semillas
+        // (`.tooling/verificar-diseno-pelotas.mjs`): jitter maximo 81% -> 73%,
+        // tiempo por encima del doble del crucero 26% -> 20%, velocidad maxima
+        // 500 -> 463 px/s.
+        //
+        // El empujon no se pierde: el pico de una racha pasa de 10,5x a 9,7x su
+        // crucero, y lo que tarda en volver al crucero no cambia (880 -> 908 ms).
+        // Lo que el publico mira dura lo mismo.
+        const PRISA_CONTROL = 4;
         const EMPUJON_VELOCIDAD = 620;
+        /**
+         * Amplitud de la sacudida de una racha, por `sqrt(dt)`.
+         *
+         * El 310 sale de repartir los 2400 que se usaban con `dt`: 2400/60 = 40, y
+         * 40 / sqrt(1/60) = 310. A 60 fps empuja igual que antes y a cualquier otro
+         * ritmo empuja lo que toca.
+         */
+        const SACUDIDA = 310;
         const EMPUJON_MS = 2600; // cuanto dura la efervescencia
         const RAFAGA_MS = 2500; // ventana en la que se mide el ritmo
         const TAPS_RAFAGA = 4; // taps en una vuelta que cuentan como rafaga
+
+        // --- Constantes de la fisica -----------------------------------------
+        //
+        // Todas juntas y ninguna por pelota: la restitucion y la friccion son del
+        // diseno, no de cada bola, y tenerlas aqui es lo que permite ajustarlas
+        // mirando el overlay en vez de bucear entre el estado.
+
+        /** Restitucion de la pared. 1 = no se pierde nada; ver `rebotarEnBordes`. */
+        const RESTITUCION_PARED = 1;
+        /** Restitucion entre dos pelotas. Un pelo por debajo de 1 y ya no vibran. */
+        const RESTITUCION_PAR = 0.96;
+        /** Friccion tangencial, muy baja, y su tope (rozamiento de Coulomb). */
+        const FRICCION = 0.07;
+        const FRICCION_TOPE = 0.06;
+        /** Cuanto giro aporta un roce. */
+        const GIRO_PARED = 0.045;
+        const GIRO_CHOQUE = 0.7;
+        /**
+         * Tope del angulo **dibujado**, en radianes (0,18 = 10,3 grados).
+         *
+         * La velocidad angular puede ser mayor; lo que no puede es acabar con la
+         * cara del usuario boca abajo.
+         */
+        const ANGULO_MAX = 0.18;
+        /**
+         * El angulo vuelve solo a la vertical, como un muñeco de resorte.
+         *
+         * Sin esto la pelota se quedaba **inclinada para siempre**: el tope le ponia
+         * la velocidad angular a cero y ya no habia nada que la devolviera. Ahora un
+         * golpe la ladea, se pasa un poco y vuelve a su sitio: el giro es un gesto,
+         * no un estado.
+         */
+        const ANGULO_MUELLE = 35;
+        const ANGULO_AMORTIGUACION = 6;
+        /** Tope de la velocidad angular: un mordisco no puede dar un latigazo. */
+        const GIRO_MAX = 6;
+        /** Muelle del radio: rigidez y amortiguacion (sube y rebota un poco). */
+        const RADIO_MUELLE = 90;
+        const RADIO_AMORTIGUACION = 13;
+        /** Muelle del squash: mas rigido y mas amortiguado, porque es visual. */
+        const SQUASH_MUELLE = 260;
+        const SQUASH_AMORTIGUACION = 22;
+        const SQUASH_MAX = 0.3;
+        const SQUASH_MIN = -0.15;
+        /** Cuanto dura el rastro de una racha, en ms, y cuantos puntos como mucho. */
+        const RASTRO_MS = 150;
+        const RASTRO_MAX = 26;
+
+        // --- Energia de taps --------------------------------------------------
+        //
+        // Los taps **acumulan** energia en vez de dar un empujon suelto: un tap
+        // cuenta poco, varios seguidos cuentan mas y una racha llena la pelota. Esa
+        // energia es la que decide la fuerza del impulso, el pulso visual, las
+        // chispas, la deformacion y la onda de choque, asi que un solo numero
+        // gobierna todo lo que se siente al tocar.
+        //
+        // La subida va con la **raiz** de los taps de la vuelta: el tap 20 no puede
+        // valer 20 veces el primero, o el que se pica una vez se lleva la franja.
+
+        /** Tope de energia. */
+        const ENERGIA_MAX = 8;
+        /** Cuanto sube por la raiz de cada tap, y cuanto tarda en caer (segundos). */
+        const ENERGIA_POR_TAP = 1;
+        const ENERGIA_TAU = 1.8;
+        /** Micro impulso de un tap suelto: se tiene que notar, no mover. */
+        const EMPUJON_MICRO = 46;
+
+        // --- Onda de choque ---------------------------------------------------
+        //
+        // De una racha fuerte sale una onda que empuja a las **vecinas**, con menos
+        // fuerza cuanto mas lejos. No es una explosion: en su vida entera (260 ms)
+        // la onda mete del orden de una velocidad de crucero a quien la pilla al
+        // lado, y a la mitad de distancia, la mitad.
+        const ONDA_MS = 260;
+        const ONDA_RADIO = 300;
+        const ONDA_FUERZA = 1500;
+        const ONDA_MINIMA = 0.45; // energia relativa a partir de la cual hay onda
+        const ONDAS_MAX = 6;
+        /** Anti-atasco: cada cuanto puede empujar (ms) y cuanto empuja (px/s). */
+        const ATASCO_MS = 600;
+        const EMPUJON_ATASCO = 26;
+        /** Trayectoria recta: a partir de cuanto tiempo se corrige y cuanto gira. */
+        const RECTA_MS = 3000;
+        const RECTA_GIRO = 0.08;
+
+        // --- Anti-atasco y trayectorias ---------------------------------------
+        //
+        // Dos correctores que **no** sustituyen a nada: el solver de choques y el
+        // control de crucero siguen haciendo su trabajo, y esto solo toca los dos
+        // casos que se quedan fuera de lo que ellos saben arreglar.
+
+        /**
+         * Anti-atasco: cuando una pelota lleva mucho rato sin moverse **y** su
+         * velocidad es casi cero, se le da un empujon minimo hacia donde esta mas
+         * hueco.
+         *
+         * Es el caso de dos o tres pelotas apretadas en una esquina que se sostienen
+         * unas a otras: el solver las separa, el crucero las empuja, y ahi se quedan
+         * vibrando. El empujon (26 px/s, menos que el crucero de la mas pequena) se
+         * aplica como mucho una vez cada 600 ms y solo si en ese tiempo no se ha
+         * movido 3 px, asi que no se puede notar.
+         */
+        function desatascar(p) {
+          const a = p.atasco;
+          const movida = Math.hypot(p.x - a.x, p.y - a.y);
+          const v = Math.hypot(p.vx, p.vy);
+          const { crucero } = limitesDe(p);
+
+          if (a.desde === 0 || movida > 3 || v > crucero * 0.35) {
+            a.x = p.x;
+            a.y = p.y;
+            a.desde = ahora;
+            return;
+          }
+          if (ahora - a.desde < ATASCO_MS) return;
+
+          let vecina = null;
+          let mejor = Infinity;
+          for (const otra of pelotas.values()) {
+            if (otra === p || otra.morir > 0) continue;
+            const d = Math.hypot(otra.x - p.x, otra.y - p.y);
+            if (d < mejor) {
+              mejor = d;
+              vecina = otra;
+            }
+          }
+          if (vecina) {
+            const dx = p.x - vecina.x;
+            const dy = p.y - vecina.y;
+            const d = Math.hypot(dx, dy) || 1;
+            p.vx += (dx / d) * EMPUJON_ATASCO;
+            p.vy += (dy / d) * EMPUJON_ATASCO;
+          } else {
+            p.vx += EMPUJON_ATASCO * (Math.random() < 0.5 ? -1 : 1);
+          }
+          a.x = p.x;
+          a.y = p.y;
+          a.desde = ahora;
+        }
+
+        /** Diferencia entre dos angulos, por el camino corto. */
+        function diferenciaAngular(a, b) {
+          let d = a - b;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          return d;
+        }
+
+        /**
+         * Rompe las trayectorias rectas que se eternizan.
+         *
+         * Una pelota que lleva tres segundos en la misma direccion se lee como un
+         * objeto deslizandose, no como una bola dentro de un juego: pasa cuando una
+         * pequena coge una horizontal larga con su crucero bajo. La correccion es un
+         * giro de 4,6 grados **una sola vez**; lo que no se hace es meter ruido
+         * aleatorio en cada fotograma, que es la forma de que la franja parezca
+         * temblar.
+         */
+        function romperTrayectoria(p) {
+          const v = Math.hypot(p.vx, p.vy);
+          if (v < 1) return;
+          const direccion = Math.atan2(p.vy, p.vx);
+          const r = p.recta;
+
+          if (r.angulo === null || Math.abs(diferenciaAngular(direccion, r.angulo)) > 0.06) {
+            r.angulo = direccion;
+            r.desde = ahora;
+            return;
+          }
+          if (ahora - r.desde < RECTA_MS) return;
+
+          const desvio = (Math.random() < 0.5 ? -1 : 1) * RECTA_GIRO;
+          const cos = Math.cos(desvio);
+          const sin = Math.sin(desvio);
+          const vx = p.vx * cos - p.vy * sin;
+          const vy = p.vx * sin + p.vy * cos;
+          p.vx = vx;
+          p.vy = vy;
+          r.angulo = Math.atan2(p.vy, p.vx);
+          r.desde = ahora;
+        }
+
+        /**
+         * Fuerzas globales temporales: gravedad, anti-gravedad, empuje lateral.
+         *
+         * **No hay ninguna activa**: con la estructura en cero esto es una
+         * comparacion que no se cumple. La gravedad permanente esta descartada a
+         * proposito —la franja mide 480 px y una gravedad constante apilaria todas
+         * las fotos contra el suelo—, pero la puerta queda abierta: lo que se ponga
+         * aqui se aplica a todas por igual y se apaga solo al vencer `hasta`.
+         *
+         * Se enciende desde fuera con `window.diseno.fuerzaGlobal(x, y, ms)`, sin
+         * tocar nada mas: es el gancho que hara falta si algun dia se quiere un
+         * "modo gravedad" para una racha concreta.
+         */
+        const fuerzaGlobal = { x: 0, y: 0, hasta: 0 };
+
+        function empujarGlobal(p, dt) {
+          if (ahora >= fuerzaGlobal.hasta) return;
+          p.vx += fuerzaGlobal.x * dt;
+          p.vy += fuerzaGlobal.y * dt;
+        }
 
         // El nº1 nada a velocidad constante y se le suma una atraccion suave
         // hacia el centro para que no se quede atrapado en una esquina.
@@ -125,6 +383,38 @@
         // un borron rosa, no chispas. Ademas cada chispa es un `arc` por
         // fotograma: con 12 pelotas, el tope es lo que mantiene el coste acotado.
         const CHISPAS_MAX = 70;
+
+        // --- Modo de trabajo -------------------------------------------------
+        //
+        // Dos interruptores que **solo** existen para trabajar sobre la fisica y
+        // que en antena valen `false`:
+        //
+        //   * `DEBUG_FISICA`: pinta el circulo de colision, el vector de velocidad,
+        //     el centro, la masa, la energia y los topes de cada pelota. Con
+        //     `false` no dibuja absolutamente nada de mas.
+        //   * `SIMULAR_FISICA`: el diseno se inventa los taps y va recorriendo
+        //     escenarios por su cuenta, para juzgar la fisica sin esperar a que el
+        //     publico toque justo en ese momento. Trabaja contra las MISMAS
+        //     funciones que el camino de verdad (`sincronizar` y `observarRitmo`),
+        //     asi que lo que se ve con el encendido es la fisica de antena.
+        //
+        // Se encienden por la URL, que es como se prueba en el navegador:
+        //
+        //   ?view=tap&diseno=pelotas&demo=1&fisica=1
+        //   ?view=tap&diseno=pelotas&demo=1&sim=1
+        //   ...&sim=1&escenario=rafaga_top1&pelotas=5&semilla=7
+        //
+        // El overlay que se pega en OBS no lleva esos parametros, asi que las dos
+        // constantes quedan en `false` y el camino normal no paga nada: dos
+        // comparaciones por fotograma.
+        const OPCIONES = new URLSearchParams(location.search);
+        const DEBUG_FISICA = OPCIONES.has("fisica") || OPCIONES.get("physicsDebug") === "1";
+        const SIMULAR_FISICA = OPCIONES.has("sim") || DEBUG_FISICA;
+        /** Cuantas pelotas inventa la simulacion: 2, 5, 10 o lo que se pida. */
+        const SIM_PELOTAS = Math.max(2, Math.min(TOPE, Number(OPCIONES.get("pelotas")) || 10));
+        /** Escenario fijo; sin el, la simulacion los va recorriendo en orden. */
+        const SIM_ESCENARIO = OPCIONES.get("escenario") || null;
+        const SIM_SEMILLA = Number(OPCIONES.get("semilla")) || 0x5eed17;
 
         // --- Colores ---------------------------------------------------------
         //
@@ -164,6 +454,14 @@
         let tasaDe = new Map();
         /** Cajas de etiqueta ya pintadas, para que no se pisen entre ellas. */
         let etiquetasPintadas = [];
+        /**
+         * Ondas de choque vivas.
+         *
+         * Van en una lista suelta y no dentro de la pelota que las suelta: la onda
+         * sobrevive a su dueña (una racha puede coincidir con que esa persona baje
+         * puestos) y afecta a las vecinas, no a ella.
+         */
+        const ondas = [];
 
         const seSolapan = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 
@@ -199,30 +497,182 @@
         /**
          * Reparte el area de la franja entre las pelotas segun su aportacion.
          *
-         * El presupuesto es una fraccion del area de la franja, no la suma de lo
-         * que pida cada una: el radio va con la raiz del valor y lo proporcional
-         * es el area.
+         * Tres pasos, en el orden de las prioridades —legible, nº1 contenida,
+         * proporciones, aire—:
+         *
+         *   1. **La forma**: el radio va con la raiz del valor (`sqrt(v / max)`),
+         *      asi que lo proporcional es el area, que es lo que el ojo compara.
+         *      Esto **no** se toca: quien mas taps tiene sigue siendo el mas grande
+         *      y las diferencias relativas son las de siempre.
+         *   2. **El tamano global**: `ESCALA_PELOTAS` reduce el conjunto entero.
+         *      Multiplicar todos por lo mismo deja las proporciones intactas.
+         *   3. **Los topes**. El de arriba **no recorta a la nº1**: si se pasa de
+         *      `RADIO_MAX` se reduce el conjunto otra vez, para que la forma se
+         *      mantenga en vez de quedar una nº1 clavada con el resto sin encoger.
+         *      El de abajo levanta a las pequenas hasta el minimo legible y, si con
+         *      eso el area se pasa del presupuesto, comprime **lo que sobresale del
+         *      minimo**, que es lo unico que se puede comprimir sin volver a dejarlas
+         *      ilegibles.
          */
         function repartirRadios(entradas) {
           const maximo = entradas.reduce((tope, e) => Math.max(tope, Number(e.value) || 0), 0);
           if (maximo <= 0) return new Map();
 
           const raices = entradas.map((e) => Math.sqrt((Number(e.value) || 0) / maximo));
-          const sumaRaices = raices.reduce((suma, r) => suma + r * r, 0) || 1;
-          const areaDisponible = ZONA_ANCHO * ZONA_ALTO * AREA_FRACCION;
-          const k = Math.sqrt(areaDisponible / (Math.PI * sumaRaices));
+
+          // 1 y 2: la forma, con el tamano global.
+          const sumaCuadrados = raices.reduce((suma, r) => suma + r * r, 0) || 1;
+          const presupuesto = ZONA_ANCHO * ZONA_ALTO * AREA_FRACCION;
+          let k = Math.sqrt(presupuesto / (Math.PI * sumaCuadrados)) * ESCALA_PELOTAS;
+
+          // 3a: el tope de arriba, encogiendo el conjunto entero.
+          const mayor = Math.max(...raices) || 1;
+          if (k * mayor > RADIO_MAX) k = RADIO_MAX / mayor;
+
+          // 3b: el minimo legible.
+          const sobresale = raices.map((r) => Math.max(0, k * r - RADIO_MIN));
+
+          // 3c: si con el minimo el conjunto no cabe, se comprime lo que sobresale.
+          // El area con el factor `f` es un polinomio de segundo grado en `f`
+          // —`pi * (n*m^2 + 2*m*f*S1 + f^2*S2)`—, asi que el factor que la deja justo
+          // en el presupuesto sale de la raiz positiva de la ecuacion.
+          const n = raices.length;
+          const sumaSobra = sobresale.reduce((suma, d) => suma + d, 0);
+          const sumaSobra2 = sobresale.reduce((suma, d) => suma + d * d, 0);
+          let factor = 1;
+          const areaDe = (f) =>
+            Math.PI * (n * RADIO_MIN * RADIO_MIN + 2 * RADIO_MIN * f * sumaSobra + f * f * sumaSobra2);
+          if (sumaSobra2 > 0 && areaDe(1) > presupuesto) {
+            const b = 2 * RADIO_MIN * sumaSobra;
+            const c = n * RADIO_MIN * RADIO_MIN - presupuesto / Math.PI;
+            const discriminante = b * b - 4 * sumaSobra2 * c;
+            factor =
+              discriminante <= 0
+                ? 0
+                : Math.max(0, Math.min(1, (-b + Math.sqrt(discriminante)) / (2 * sumaSobra2)));
+          }
 
           const radios = new Map();
           entradas.forEach((e, i) => {
-            radios.set(
-              window.ritmo.clave(e, i),
-              Math.max(RADIO_MIN, Math.min(RADIO_MAX, k * raices[i])),
-            );
+            // El area se reparte por `sobresale`, que ya lleva la escala y el tope
+            // de arriba: la proporcion entre los que pasan del minimo es la misma
+            // que pide el reparto.
+            radios.set(window.ritmo.clave(e, i), RADIO_MIN + sobresale[i] * factor);
           });
           return radios;
         }
 
         // --- Entrada y salida de las pelotas ---------------------------------
+
+        /**
+         * Busca un sitio donde quepa una pelota nueva.
+         *
+         * Nacer encima de otra la empuja: el solver las separa en el mismo fotograma,
+         * pero se ve el tiron, y cuando entran varias a la vez —el arranque de un
+         * directo, un cambio de tabla— se veian solapes de hasta 36 px (medido en el
+         * banco). Ocho intentos y se queda con el mas despejado, que cuesta
+         * microsegundos y solo pasa al crear.
+         */
+        function sitioLibre(radio) {
+          const lados = Math.max(14, radio * 0.28);
+          const abajo = Math.max(44, radio * 0.32);
+          const xMin = radio + lados;
+          const xMax = ZONA_ANCHO - radio - lados;
+          const yMin = ZONA_Y + radio;
+          const yMax = ALTO - radio - abajo;
+
+          let mejor = null;
+          let mejorHueco = -Infinity;
+          for (let intento = 0; intento < 8; intento++) {
+            const x = xMin + Math.random() * Math.max(1, xMax - xMin);
+            const y = yMin + Math.random() * Math.max(1, yMax - yMin);
+            let hueco = Infinity;
+            for (const otra of pelotas.values()) {
+              hueco = Math.min(hueco, Math.hypot(otra.x - x, otra.y - y) - otra.radio - radio);
+            }
+            if (hueco > mejorHueco) {
+              mejorHueco = hueco;
+              mejor = { x, y };
+            }
+            if (hueco > 8) break; // sitio de sobra
+          }
+          return mejor;
+        }
+
+        /**
+         * Una pelota nueva, con **todo** su estado en un solo sitio.
+         *
+         * La fisica lee y escribe muchos numeros por pelota (velocidad, radio,
+         * angulo, energia, deformacion, atascos). Repartidos por el fichero, uno se
+         * queda sin inicializar y sale `NaN` en el lienzo **sin ningun error**: el
+         * canvas ignora los trazos no finitos y la pelota simplemente deja de
+         * dibujarse. Aqui estan todos.
+         *
+         * Lo que **no** se guarda, porque se deduce de lo anterior y guardarlo
+         * seria tener dos verdades que se pueden separar:
+         *
+         *   * el crucero (`velocidadObjetivo`) y el tope (`velocidadMaxima`) salen
+         *     de `limitesDe`, que ya los calculaba en cada fotograma;
+         *   * la masa sale de `masaDe` (radio, mas el empujon de una racha);
+         *   * la restitucion y la friccion son constantes del diseno, no de la
+         *     pelota: viven arriba, con las demas.
+         */
+        function crearPelota(clave, e, i, radioObjetivo) {
+          const angulo = Math.random() * Math.PI * 2;
+          // La velocidad de arranque va con el tamano: una pelota pequena arranca
+          // despacio, para que no parezca tan importante como el lider. Es el mismo
+          // criterio que `pesoMovimiento`.
+          const velocidad =
+            (VELOCIDAD_MINIMA + Math.random() * 160) *
+            (0.3 + 0.7 * Math.pow(radioObjetivo / RADIO_MAX, 1.5));
+          const sitio = sitioLibre(radioObjetivo);
+          return {
+            clave,
+            x: sitio.x,
+            y: sitio.y,
+            vx: Math.cos(angulo) * velocidad,
+            vy: Math.sin(angulo) * velocidad,
+            // --- Tamano: un muelle, no un salto ---
+            radio: radioObjetivo,
+            radioObjetivo,
+            /** Velocidad del muelle del radio, en px/s. */
+            velocidadRadio: 0,
+            // --- Giro (visual, acotado por ANGULO_MAX al dibujar) ---
+            angulo: 0,
+            velocidadAngular: 0,
+            // --- Deformacion al impactar: solo visual ---
+            squash: { valor: 0, velocidad: 0, angulo: 0 },
+            // --- Taps ---
+            energia: { valor: 0 },
+            valor: Number(e.value) || 0,
+            nombre: nombreDe(e),
+            inicial: inicialDe(e),
+            foto: null,
+            puesto: i,
+            // Nace a escala 0 y crece: antes la pelota aparecia de golpe.
+            escala: 0,
+            /** Posiciones recientes con su marca de tiempo; ver `paso`. */
+            rastro: [],
+            empujadoHasta: 0,
+            morir: 0,
+            /** Anti-atasco: donde estaba y desde cuando no se mueve. */
+            atasco: { x: 0, y: 0, desde: 0 },
+            /** Trayectoria repetitiva: desde cuando va en la misma direccion. */
+            recta: { angulo: null, desde: 0 },
+            // Ritmo de esta persona. `empujonHasta` es cuando se le acaba la
+            // efervescencia, `pulso` la ultima subida (el aro que se expande)
+            // y `chispas` las particulas vivas de la rafaga.
+            ritmo: {
+              ultimo: Number(e.value) || 0,
+              t: false,
+              empujonHasta: 0,
+              pulso: 0,
+              chispas: [],
+              nuevo: true,
+            },
+            tiburon: i === 0,
+          };
+        }
 
         /**
          * Crea o actualiza una pelota, conservando su sitio y su velocidad.
@@ -243,37 +693,7 @@
             const radioObjetivo = radios.get(clave) ?? RADIO_MIN;
             let p = pelotas.get(clave);
             if (!p) {
-              const angulo = Math.random() * Math.PI * 2;
-              // La velocidad de arranque va con el tamano: una pelota pequena
-              // arranca despacio, para que no parezca tan importante como el
-              // lider. Es el mismo criterio que `pesoMovimiento`.
-              const velocidad =
-                (VELOCIDAD_MINIMA + Math.random() * 160) *
-                (0.3 + 0.7 * Math.pow(radioObjetivo / RADIO_MAX, 1.5));
-              p = {
-                clave,
-                x: Math.random() * ZONA_ANCHO,
-                y: ZONA_Y + Math.random() * ZONA_ALTO,
-                vx: Math.cos(angulo) * velocidad,
-                vy: Math.sin(angulo) * velocidad,
-                radio: radioObjetivo,
-                radioObjetivo,
-                valor: Number(e.value) || 0,
-                nombre: nombreDe(e),
-                inicial: inicialDe(e),
-                foto: null,
-                puesto: i,
-                // Nace a escala 0 y crece: antes la pelota aparecia de golpe.
-                escala: 0,
-                // Rastro: posiciones recientes, solo mientras dura la rafaga.
-                rastro: [],
-                empujadoHasta: 0,
-                morir: 0,
-                // Ritmo de esta persona. `empujonHasta` es cuando se le acaba la
-                // efervescencia, `pulso` la ultima subida (el aro que se expande)
-                // y `chispas` las particulas vivas de la rafaga.
-                ritmo: { ultimo: Number(e.value) || 0, t: false, empujonHasta: 0, pulso: 0, chispas: [] },
-              };
+              p = crearPelota(clave, e, i, radioObjetivo);
               pelotas.set(clave, p);
             }
 
@@ -310,11 +730,20 @@
         // --- Ritmo de taps ---------------------------------------------------
 
         /**
-         * Mira quien viene en racha y le suelta el empujon y las chispas.
+         * Mira quien viene en racha y le suelta el empujon, las chispas y la onda.
          *
          * Va aqui, en `pintar`, y no en el bucle de dibujo, porque el dato solo
          * cambia cuando llega una actualizacion: el bucle llama 60 veces por
          * segundo a este paso y solo la primera de cada tanda ve `nuevo`.
+         *
+         * Tres escalones, y los tres importan:
+         *
+         *   * **un tap** (subida 1) acumula energia y da un micro impulso: el
+         *     overlay late cuando alguien toca, aunque sea una vez;
+         *   * **varios seguidos** llenan la energia, y esa energia es la que hace
+         *     que el siguiente empujon sea mas fuerte;
+         *   * **una racha** (TAPS_RAFAGA) da el empujon grande, suelta chispas y,
+         *     si la energia esta alta, deja onda de choque.
          */
         function observarRitmo(p, valor, tasa) {
           const r = p.ritmo;
@@ -327,24 +756,92 @@
           const empuje = Math.max(subida, Math.max(0, Number(tasa) || 0));
           r.ultimo = valor;
 
+          // --- La energia, primero: la fuerza de abajo la usa ---
+          if (subida >= 1) {
+            p.energia.valor = Math.min(
+              ENERGIA_MAX,
+              p.energia.valor + Math.sqrt(subida) * ENERGIA_POR_TAP,
+            );
+          }
+          const energia = p.energia.valor / ENERGIA_MAX;
+
           if (subida >= TAPS_RAFAGA && (r.t === false || ahora - r.t < RAFAGA_MS)) {
+            // --- Rachas ---
             r.t = ahora;
             r.empujonHasta = ahora + EMPUJON_MS;
             r.pulso = ahora;
             const angulo = Math.random() * Math.PI * 2;
-            // Cuanto mas fuerte la rafaga, mas lejos sale.
-            const fuerza = EMPUJON_VELOCIDAD * Math.min(3, 1 + empuje / 20);
+            // Cuanto mas fuerte la rafaga y mas cargada la energia, mas lejos sale.
+            const fuerza =
+              EMPUJON_VELOCIDAD * Math.min(3, 1 + empuje / 20) * (0.75 + 0.45 * energia);
             p.vx += Math.cos(angulo) * fuerza;
             p.vy += Math.sin(angulo) * fuerza;
-            // El que calla pero no deja de tocar tiene que crecer con cada
-            // marca: sin esto solo contarian las rafagas.
+            activarSquash(p, Math.cos(angulo), Math.sin(angulo), fuerza * 0.5);
+
+            if (!reducido) {
+              soltarChispas(p, Math.min(26, 8 + subida / 3) * (0.7 + 0.7 * energia));
+            }
+            if (energia >= ONDA_MINIMA) lanzarOnda(p, energia);
           } else if (subida >= 1) {
+            // --- Taps sueltos: micro impulso ---
             r.pulso = ahora;
+            const angulo = Math.random() * Math.PI * 2;
+            const fuerza = EMPUJON_MICRO * Math.sqrt(subida) * (0.6 + 0.6 * energia);
+            p.vx += Math.cos(angulo) * fuerza;
+            p.vy += Math.sin(angulo) * fuerza;
+            activarSquash(p, Math.cos(angulo), Math.sin(angulo), fuerza);
           }
           if (subida >= TAPS_RAFAGA) r.t = ahora;
+        }
 
-          if (!reducido && subida >= TAPS_RAFAGA) {
-            soltarChispas(p, Math.min(26, 8 + subida / 3));
+        /** La energia de taps se cae sola: sin taps, en dos segundos no queda. */
+        function actualizarEnergia(p, dt) {
+          p.energia.valor *= Math.exp(-dt / ENERGIA_TAU);
+          if (p.energia.valor < 0.01) p.energia.valor = 0;
+        }
+
+        /** Una onda radial desde la pelota que viene en racha. */
+        function lanzarOnda(p, energia) {
+          if (ondas.length >= ONDAS_MAX) ondas.shift();
+          ondas.push({
+            clave: p.clave,
+            x: p.x,
+            y: p.y,
+            inicio: ahora,
+            fuerza: ONDA_FUERZA * (0.5 + 0.5 * energia),
+          });
+        }
+
+        /**
+         * Las ondas empujan a las vecinas y se apagan solas.
+         *
+         * Se aplica como aceleracion por fotograma y no como choque instantaneo, que
+         * es lo que hace que se sienta una onda y no un golpe: la pelota que la pilla
+         * al lado se va, la que esta al borde apenas se entera. La propia pelota que
+         * la lanzo **no se empuja** a si misma.
+         */
+        function aplicarOndas(dt) {
+          for (let i = ondas.length - 1; i >= 0; i--) {
+            const o = ondas[i];
+            const vida = (ahora - o.inicio) / ONDA_MS;
+            if (vida >= 1 || vida < 0) {
+              ondas.splice(i, 1);
+              continue;
+            }
+            const radio = ONDA_RADIO * (0.35 + 0.65 * vida);
+            for (const p of pelotas.values()) {
+              if (p.morir > 0 || p.clave === o.clave) continue;
+              const dx = p.x - o.x;
+              const dy = p.y - o.y;
+              const d = Math.hypot(dx, dy) || 1;
+              const alcance = radio + p.radio;
+              if (d > alcance) continue;
+              const cercania = 1 - Math.min(1, d / alcance);
+              const empuje = o.fuerza * cercania * (1 - vida) * dt;
+              p.vx += (dx / d) * empuje;
+              p.vy += (dy / d) * empuje;
+              activarSquash(p, dx / d, dy / d, empuje * 4);
+            }
           }
         }
 
@@ -371,43 +868,136 @@
         /**
          * Masa de una pelota para los choques.
          *
-         * Crece con el radio pero **suavizada** (r^1.3, no r^2): con el area la
-         * diferencia era tan brutal que una pequena salia disparada al rozar la
-         * grande. Y una pelota **en racha** pesa cuatro veces mas: es lo que le da
-         * fuerza para empujar a otras mas grandes que ella.
+         * Va con el radio pero **por debajo del area** (r^1.6, no r^2): con el area
+         * pura la mayor pesaba 17 veces la menor y la pequena salia disparada al
+         * rozarla. Con 1.6 la razon es ~9, que ya se siente "esta pesa" sin que la
+         * pequena salga volando. Y una pelota **en racha** pesa cuatro veces mas: es
+         * lo que le da fuerza para empujar a otras mas grandes que ella.
+         *
+         * Ninguna queda inmovil: el impulso se reparte dividiendo por la masa, y
+         * ademas el control de crucero le devuelve su velocidad. Lo que se nota es
+         * que empuja poco, no que no se mueva.
          */
         function masaDe(p) {
-          const base = Math.pow(Math.max(2, p.radio), 1.3);
+          const base = Math.pow(Math.max(2, p.radio), 1.6);
           return ahora < p.ritmo.empujonHasta ? base * 4 : base;
+        }
+
+        /**
+         * Deformacion al impactar: **solo visual**.
+         *
+         * Se guarda como un valor (cuanto) y un angulo (hacia donde) en vez de un
+         * `squashX`/`squashY`: la deformacion es siempre a lo largo de una
+         * direccion —la del golpe— y con dos ejes habria que mantenerlos
+         * coherentes. El radio de **colision no cambia**: la deformacion entra solo
+         * al dibujar, asi que lo que se ve y lo que choca pueden diferir un poco sin
+         * que nadie note un choque raro, y sin que un `arc` reciba un radio
+         * negativo, que es lo que congelo este diseno una vez.
+         *
+         * `fuerza` es la velocidad del golpe: se normaliza para que un roce no
+         * deforme como una racha.
+         */
+        function activarSquash(p, nx, ny, fuerza) {
+          const cuanto = Math.min(SQUASH_MAX, Math.abs(fuerza) / 900);
+          if (cuanto < 0.012) return;
+          if (cuanto > p.squash.valor) {
+            p.squash.valor = cuanto;
+            p.squash.angulo = Math.atan2(ny, nx);
+          }
         }
 
         /** Margen para que la etiqueta no se salga: cuelga por debajo y a los lados. */
         const margenLados = (p) => Math.max(14, p.radio * 0.28);
         const margenAbajo = (p) => Math.max(44, p.radio * 0.32);
 
-        function rebotarEnBordes(p) {
-          // Quieto = sin rebote: la pelota se queda pegada al borde en vez de
-          // botar sin parar, que es lo que pide quien quita el movimiento.
-          const restitucion = reducido ? 0 : 0.92;
+        /**
+         * Cuanto puede moverse una pelota en una direccion antes de tocar la pared.
+         *
+         * Se usa al separar dos pelotas que se solapan: la parte del empujon que una
+         * no puede recorrer la tiene que hacer la otra. Es lo que evita el caso feo
+         * —una pequena atrapada entre el nº1 y el suelo— en el que el recorte de
+         * pared devolvia a la pequena dentro de la grande en cada fotograma.
+         */
+        function holgura(p, dx, dy) {
           const lados = margenLados(p);
           const abajo = margenAbajo(p);
+          let libre = Infinity;
+          if (dx > 1e-6) libre = Math.min(libre, (ZONA_ANCHO - p.radio - lados - p.x) / dx);
+          else if (dx < -1e-6) libre = Math.min(libre, (p.radio + lados - p.x) / dx);
+          if (dy > 1e-6) libre = Math.min(libre, (ALTO - p.radio - abajo - p.y) / dy);
+          else if (dy < -1e-6) libre = Math.min(libre, (ZONA_Y + p.radio - p.y) / dy);
+          return Math.max(0, libre);
+        }
 
-          if (p.x - p.radio < lados) {
-            p.x = p.radio + lados;
+        /**
+         * Rebote en las paredes, con el **sobrante reflejado**.
+         *
+         * Antes la pelota se clavaba en el borde y se le daba la vuelta a la
+         * velocidad: el trozo de trayectoria que ya habia recorrido de mas se
+         * perdia, asi que el rebote salia corto y la pelota parecia quedarse pegada
+         * al borde un instante. Medido: a 1980 px/s, un fotograma de 60 fps son 33
+         * px tirados en cada choque, media pelota pequena. Ahora se calcula donde
+         * toco y el sobrante se recorre hacia dentro, que es lo que hace un rebote
+         * de verdad.
+         *
+         * La restitucion es 1: la energia la gobierna el control de crucero
+         * (`ajustarVelocidad`), y tener dos mecanismos quitando energia a la vez
+         * era lo que hacia temblar a las pequenas. Con el movimiento reducido la
+         * pared si frena, porque ahi lo que se pide es que se queden quietas.
+         */
+        function rebotarEnBordes(p) {
+          const restitucion = reducido ? 0 : RESTITUCION_PARED;
+          const lados = margenLados(p);
+          const abajo = margenAbajo(p);
+          const xMin = p.radio + lados;
+          const xMax = ZONA_ANCHO - p.radio - lados;
+          const yMin = ZONA_Y + p.radio;
+          const yMax = ALTO - p.radio - abajo;
+
+          if (p.x < xMin) {
+            p.x = xMin + (xMin - p.x) * restitucion;
+            // La deformacion solo al **entrar**: una pelota que va pegada a la pared
+            // no puede quedarse aplastada todo el rato.
+            if (p.vx < 0) activarSquash(p, 1, 0, p.vx);
             p.vx = Math.abs(p.vx) * restitucion;
-          }
-          if (p.x + p.radio > ZONA_ANCHO - lados) {
-            p.x = ZONA_ANCHO - p.radio - lados;
+            girarPorPared(p, p.vy, 1);
+          } else if (p.x > xMax) {
+            p.x = xMax - (p.x - xMax) * restitucion;
+            if (p.vx > 0) activarSquash(p, -1, 0, p.vx);
             p.vx = -Math.abs(p.vx) * restitucion;
+            girarPorPared(p, p.vy, -1);
           }
-          if (p.y - p.radio < ZONA_Y) {
-            p.y = ZONA_Y + p.radio;
+          if (p.y < yMin) {
+            p.y = yMin + (yMin - p.y) * restitucion;
+            if (p.vy < 0) activarSquash(p, 0, 1, p.vy);
             p.vy = Math.abs(p.vy) * restitucion;
-          }
-          if (p.y + p.radio > ALTO - abajo) {
-            p.y = ALTO - p.radio - abajo;
+            girarPorPared(p, p.vx, -1);
+          } else if (p.y > yMax) {
+            p.y = yMax - (p.y - yMax) * restitucion;
+            if (p.vy > 0) activarSquash(p, 0, -1, p.vy);
             p.vy = -Math.abs(p.vy) * restitucion;
+            girarPorPared(p, p.vx, 1);
           }
+
+          // Red de seguridad: con el sobrante reflejado y una velocidad absurda,
+          // la pelota podria salir por el lado contrario en el mismo fotograma.
+          if (p.x < xMin) p.x = xMin;
+          if (p.x > xMax) p.x = xMax;
+          if (p.y < yMin) p.y = yMin;
+          if (p.y > yMax) p.y = yMax;
+        }
+
+        /**
+         * Un roce con la pared anade un poco de giro.
+         *
+         * Es lo que hace que una pelota que baja pegada a la pared izquierda gire
+         * como si rodara, en vez de deslizar. La cuenta es la de una rueda: el giro
+         * que anula la velocidad del punto de contacto es `v_paralela / radio`, y
+         * aqui se aplica una fraccion (`GIRO_PARED`) porque esto es un arcade y no
+         * un libro de texto.
+         */
+        function girarPorPared(p, paralela, signo) {
+          p.velocidadAngular += (paralela / Math.max(24, p.radio)) * GIRO_PARED * signo;
         }
 
         function chocar(a, b) {
@@ -417,34 +1007,93 @@
           const suma = a.radio + b.radio;
           // Ni divisiones por cero ni trabajo cuando no se tocan: es el bucle
           // mas caliente del diseno (12 pelotas x 3 pasadas por fotograma).
-          if (distancia === 0 || distancia >= suma) return;
+          if (distancia >= suma) return;
 
-          const nx = dx / distancia;
-          const ny = dy / distancia;
+          // Concentricas: direccion de reserva. Antes esto salia por la puerta de
+          // atras (`distancia === 0`) y las dos pelotas se quedaban pegadas una
+          // dentro de otra para siempre.
+          let nx;
+          let ny;
+          if (distancia < 1e-6) {
+            nx = 1;
+            ny = 0;
+          } else {
+            nx = dx / distancia;
+            ny = dy / distancia;
+          }
+
           const masaA = masaDe(a);
           const masaB = masaDe(b);
           const total = masaA + masaB;
           const solape = suma - distancia;
 
-          a.x -= nx * solape * (masaB / total);
-          a.y -= ny * solape * (masaB / total);
-          b.x += nx * solape * (masaA / total);
-          b.y += ny * solape * (masaA / total);
+          // El reparto es por masa, pero **con la pared en cuenta**: lo que una no
+          // puede recorrer lo hace la otra. Sin esto, una pequena entre el nº1 y el
+          // suelo se quedaba pegada (medido en el banco: 59 px de solape con 12
+          // pelotas, y 35 px con solo dos).
+          let moverA = solape * (masaB / total);
+          let moverB = solape * (masaA / total);
+          const sitioA = holgura(a, -nx, -ny);
+          const sitioB = holgura(b, nx, ny);
+          if (moverA > sitioA) {
+            moverB += moverA - sitioA;
+            moverA = sitioA;
+          }
+          if (moverB > sitioB) {
+            moverA += moverB - sitioB;
+            moverB = sitioB;
+          }
+          a.x -= nx * moverA;
+          a.y -= ny * moverA;
+          b.x += nx * moverB;
+          b.y += ny * moverB;
 
           const acercamiento = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
           if (acercamiento > 0) return; // ya se estaban separando
 
-          const RESTITUCION = 0.95;
+          // --- Impulso normal ---
           // Si en el choque va el nº1, la otra pelota sale **mucho** mas fuerte:
           // es el "mordisco" del tiburon, aparte de lo que ya le toca por masa.
           const conLider = a.tiburon || b.tiburon;
           const refuerzo = conLider ? EMPUJON_TIBURON : 1;
           const impulso =
-            (-(1 + RESTITUCION) * acercamiento) / (1 / masaA + 1 / masaB) * refuerzo;
+            (-(1 + RESTITUCION_PAR) * acercamiento) / (1 / masaA + 1 / masaB) * refuerzo;
           a.vx -= (impulso * nx) / masaA;
           a.vy -= (impulso * ny) / masaA;
           b.vx += (impulso * nx) / masaB;
           b.vy += (impulso * ny) / masaB;
+
+          // --- Roce: parte del golpe se va a lo tangencial ---
+          //
+          // Sin esto todos los choques eran de billar perfecto: dos pelotas que se
+          // rozan por un lado salian como si se hubieran dado de frente. Se toma la
+          // velocidad **relativa** en el eje del roce, se acota con el tope de
+          // Coulomb (para que un roce no frene el sistema) y se reparte por masa,
+          // igual que la normal. Es la friccion que arrastra un poco a la vecina y
+          // la que gira las dos.
+          const tx = -ny;
+          const ty = nx;
+          const roce = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty;
+          if (Math.abs(roce) > 1) {
+            const tope = Math.abs(impulso) * FRICCION_TOPE;
+            let jt = (-roce / (1 / masaA + 1 / masaB)) * FRICCION;
+            jt = Math.max(-tope, Math.min(tope, jt));
+            a.vx -= (jt * tx) / masaA;
+            a.vy -= (jt * ty) / masaA;
+            b.vx += (jt * tx) / masaB;
+            b.vy += (jt * ty) / masaB;
+            // El roce las gira en sentidos contrarios, como dos ruedas que se
+            // tocan.
+            a.velocidadAngular -= (jt / Math.max(24, a.radio)) * GIRO_CHOQUE;
+            b.velocidadAngular += (jt / Math.max(24, b.radio)) * GIRO_CHOQUE;
+          }
+
+          // --- Deformacion ---
+          // Solo visual, y con la fuerza del choque: un roce apenas se nota y un
+          // golpe de frente si. La normal va de `a` hacia `b`, asi que cada una se
+          // aplasta a lo largo de esa misma linea.
+          activarSquash(a, nx, ny, acercamiento);
+          activarSquash(b, -nx, -ny, acercamiento);
 
           // La victima del nº1 queda "empujada" un momento: sin esto, su crucero
           // frenaba el empujon en el mismo fotograma y el mordisco no se veia
@@ -462,21 +1111,33 @@
           // La sacudida va con el tamano: una pequena tiembla poco y una grande
           // mucho. Sin esto temblaban igual y las pequenas parecian el lider.
           const peso = 0.28 + 0.72 * (p.radio / RADIO_MAX);
-          p.vx += (Math.random() - 0.5) * 2400 * intensidad * peso * dt;
-          p.vy += (Math.random() - 0.5) * 2400 * intensidad * peso * dt;
+          // **`sqrt(dt)`, no `dt`.** Esto es un paseo aleatorio: los empujones se
+          // acumulan, asi que con `dt` la varianza de la velocidad sale
+          // proporcional al tamano del fotograma y a 30 fps temblaba un 41% mas que
+          // a 60 (medido en el banco). Con `sqrt(dt)` la varianza por segundo es la
+          // misma a cualquier ritmo, y el 310 esta puesto para que a 60 fps empuje
+          // exactamente igual que antes.
+          const empuje = SACUDIDA * intensidad * peso * Math.sqrt(dt);
+          p.vx += (Math.random() - 0.5) * empuje;
+          p.vy += (Math.random() - 0.5) * empuje;
         }
 
         function avanzarChispas(p, dt) {
           const chispas = p.ritmo.chispas;
           if (!chispas.length) return;
+          // El frenado va por **tiempo**, no por fotograma: con `*= 0.94` a secas,
+          // a los 0,5 s quedaba el 39% de la velocidad a 30 fps y el 1,2% a 144, y
+          // la escena de OBS puede estar en cualquiera de las dos (medido). Asi la
+          // chispa vive lo mismo en cualquier PC.
+          const frenado = Math.pow(0.94, dt * 60);
           let vivas = 0;
           for (let i = 0; i < chispas.length; i++) {
             const c = chispas[i];
             c.vida -= dt * 0.9;
             c.x += c.vx * dt;
             c.y += c.vy * dt;
-            c.vx *= 0.94;
-            c.vy *= 0.94;
+            c.vx *= frenado;
+            c.vy *= frenado;
             if (c.vida > 0) chispas[vivas++] = c;
           }
           // Se compacta en el sitio en vez de con `filter`: esto corre en cada
@@ -501,6 +1162,26 @@
         }
 
         /**
+         * Crucero y tope de velocidad de una pelota, con el empujon si lo tiene.
+         *
+         * Van juntos en una funcion porque los lee `ajustarVelocidad` en cada
+         * fotograma y `limitarVelocidad` despues de los choques: dos copias de la
+         * misma cuenta acabarian discrepando, y el tope es justo lo que faltaba
+         * despues de chocar.
+         */
+        function limitesDe(p) {
+          const peso = pesoMovimiento(p);
+          // Si acaba de morderle el nº1, se le deja correr: el empujon se ve y
+          // despues vuelve solo a su crucero.
+          const empujada = p.empujadoHasta > ahora;
+          return {
+            peso,
+            crucero: VELOCIDAD_MINIMA * peso * (empujada ? 4 : 1),
+            maxima: VELOCIDAD_MAXIMA * Math.pow(peso, 1.8) * (empujada ? 2.2 : 1),
+          };
+        }
+
+        /**
          * Devuelve la pelota a **su** velocidad de crucero, que va con su tamano.
          *
          * La primera version solo ponia un suelo: un mordisco lanzaba a una
@@ -513,12 +1194,7 @@
          * Cuanto mas pequena, antes frena.
          */
         function ajustarVelocidad(p, dt) {
-          const peso = pesoMovimiento(p);
-          // Si acaba de morderle el nº1, se le deja correr: el empujon se ve y
-          // despues vuelve solo a su crucero.
-          const empujada = p.empujadoHasta > ahora;
-          const crucero = VELOCIDAD_MINIMA * peso * (empujada ? 4 : 1);
-          const maxima = VELOCIDAD_MAXIMA * Math.pow(peso, 1.8) * (empujada ? 2.2 : 1);
+          const { peso, crucero, maxima } = limitesDe(p);
           const v = Math.hypot(p.vx, p.vy);
 
           if (v <= 0.01) {
@@ -531,13 +1207,172 @@
             return;
           }
 
-          // Se acerca a su crucero: las pequenas frenan mas deprisa.
-          let objetivo = v + (crucero - v) * Math.min(1, dt * (1.6 + 2.6 * (1 - peso)));
+          // Se acerca a su crucero: las pequenas frenan mas deprisa. La prisa va
+          // multiplicada porque sin ella el control llegaba tarde y mandaban los
+          // choques; ver `PRISA_CONTROL`.
+          //
+          // Va con `1 - exp(-k*dt)` y no con `min(1, k*dt)`: la forma lineal se
+          // queda corta al aproximar la exponencial, y se queda mas corta cuanto
+          // mas largo es el fotograma, asi que a 30 fps el control era un 20% mas
+          // rapido que a 60 (medido en el banco). Con la exponencial el tiempo de
+          // vuelta al crucero es el mismo en cualquier escena de OBS.
+          const prisa = PRISA_CONTROL * (1.6 + 2.6 * (1 - peso));
+          let objetivo = v + (crucero - v) * (1 - Math.exp(-prisa * dt));
           if (objetivo > maxima) objetivo = maxima;
 
           const f = objetivo / v;
           p.vx *= f;
           p.vy *= f;
+        }
+
+        /**
+         * Recorta la velocidad al tope de la pelota **en el momento**, sin esperar
+         * al fotograma siguiente.
+         *
+         * Los choques corren despues de `ajustarVelocidad`, asi que el impulso de
+         * un choque vivia un fotograma entero por encima del tope y el control de
+         * crucero solo lo veia al siguiente. Por si solo ya baja el jitter maximo
+         * (medido en el port: 80% -> 73%); junto con `PRISA_CONTROL` es lo que deja
+         * los numeros sobre el fichero de verdad. El empujon de una racha no se
+         * toca: el tope tambien va con `empujadoHasta`, que es lo que le da 2,2x.
+         */
+        function limitarVelocidad(p) {
+          const { maxima } = limitesDe(p);
+          const v = Math.hypot(p.vx, p.vy);
+          if (v <= maxima) return;
+          const f = maxima / v;
+          p.vx *= f;
+          p.vy *= f;
+        }
+
+        /**
+         * Devuelve a la franja las pelotas que un choque haya podido sacar.
+         *
+         * Solo corrige la posicion, sin tocar la velocidad, para no alterar el
+         * rebote. Va **dentro** del bucle de choques: recortar puede meter una
+         * pelota dentro de otra, y entonces hay que volver a separarlas.
+         */
+        function recortarEnZona(lista) {
+          for (const p of lista) {
+            if (p.morir > 0) continue;
+            p.x = Math.min(
+              ZONA_ANCHO - p.radio - margenLados(p),
+              Math.max(p.radio + margenLados(p), p.x),
+            );
+            p.y = Math.min(ALTO - p.radio - margenAbajo(p), Math.max(ZONA_Y + p.radio, p.y));
+          }
+        }
+
+        // --- Muelles y estado interno ----------------------------------------
+
+        /**
+         * El radio va a un **muelle**, no a un `lerp`.
+         *
+         * Antes el radio se acercaba a su objetivo un 3% por fotograma: crecer se
+         * veia como una frenada, sin golpe. Con un muelle sube, se pasa un poco y
+         * vuelve, que es el gesto que pide una racha; y funciona igual al reves,
+         * cuando el contador baja y la pelota encoge.
+         *
+         * La amortiguacion es algo menor que la critica a proposito: un rebote corto
+         * es lo que hace que se lea como elastico. Los topes evitan los dos unicos
+         * casos malos: un radio negativo (el `arc` dejaria de pintar la foto) y un
+         * radio enorme por un contador que se dispara.
+         */
+        function actualizarRadio(p, dt) {
+          p.velocidadRadio +=
+            (-RADIO_MUELLE * (p.radio - p.radioObjetivo) - RADIO_AMORTIGUACION * p.velocidadRadio) *
+            dt;
+          p.radio += p.velocidadRadio * dt;
+
+          const minimo = RADIO_MIN * 0.55;
+          const maximo = RADIO_MAX * 1.12;
+          if (p.radio < minimo) {
+            p.radio = minimo;
+            p.velocidadRadio = Math.abs(p.velocidadRadio) * 0.2;
+          } else if (p.radio > maximo) {
+            p.radio = maximo;
+            p.velocidadRadio = -Math.abs(p.velocidadRadio) * 0.2;
+          }
+
+          // Reposo: sin esto el muelle se queda oscilando en el ultimo decimal y la
+          // pelota tiembla sin que se vea por que.
+          if (Math.abs(p.radio - p.radioObjetivo) < 0.15 && Math.abs(p.velocidadRadio) < 1.5) {
+            p.radio = p.radioObjetivo;
+            p.velocidadRadio = 0;
+          }
+        }
+
+        /**
+         * Giro: un muelle que devuelve la foto a la vertical, con el angulo acotado.
+         *
+         * Los golpes y los roces meten velocidad angular; el muelle la devuelve a
+         * cero con un balanceo corto. El angulo se queda dentro de `ANGULO_MAX`
+         * (unos 10 grados) porque la cara del usuario tiene que reconocerse, y la
+         * velocidad angular tiene su propio tope para que un mordisco del nº1 no de
+         * un latigazo.
+         *
+         * El frenado va por tiempo (`exp`), no por fotograma: a 30 y a 144 fps el
+         * giro se apaga igual.
+         */
+        function actualizarRotacion(p, dt) {
+          p.velocidadAngular +=
+            (-ANGULO_MUELLE * p.angulo - ANGULO_AMORTIGUACION * p.velocidadAngular) * dt;
+          p.velocidadAngular = Math.max(-GIRO_MAX, Math.min(GIRO_MAX, p.velocidadAngular));
+
+          p.angulo += p.velocidadAngular * dt;
+          if (p.angulo > ANGULO_MAX) {
+            p.angulo = ANGULO_MAX;
+            p.velocidadAngular = Math.min(0, p.velocidadAngular);
+          } else if (p.angulo < -ANGULO_MAX) {
+            p.angulo = -ANGULO_MAX;
+            p.velocidadAngular = Math.max(0, p.velocidadAngular);
+          }
+
+          if (Math.abs(p.angulo) < 0.002 && Math.abs(p.velocidadAngular) < 0.02) {
+            p.angulo = 0;
+            p.velocidadAngular = 0;
+          }
+        }
+
+        /**
+         * El muelle de la deformacion: vuelve a su forma y se pasa un poco.
+         *
+         * Es lo que hace que un golpe "se sienta": la pelota se aplasta en la
+         * direccion del impacto y recupera con un rebote corto. Se apaga solo en el
+         * ultimo decimal para no dejar el lienzo repintandose por una vibracion que
+         * no se ve.
+         */
+        function actualizarSquash(p, dt) {
+          const s = p.squash;
+          s.velocidad += (-SQUASH_MUELLE * s.valor - SQUASH_AMORTIGUACION * s.velocidad) * dt;
+          s.valor += s.velocidad * dt;
+
+          if (s.valor > SQUASH_MAX) {
+            s.valor = SQUASH_MAX;
+            s.velocidad = 0;
+          } else if (s.valor < SQUASH_MIN) {
+            s.valor = SQUASH_MIN;
+            s.velocidad = 0;
+          }
+          if (Math.abs(s.valor) < 0.002 && Math.abs(s.velocidad) < 0.02) {
+            s.valor = 0;
+            s.velocidad = 0;
+          }
+        }
+
+        /**
+         * El rastro, por **tiempo** y no por numero de fotogramas.
+         *
+         * Antes se recortaba a los nueve ultimos fotogramas, asi que la estela duraba
+         * 150 ms a 60 fps y 62 ms a 144: el mismo efecto se veia distinto segun la
+         * escena de OBS. Ahora se guardan las posiciones de los ultimos `RASTRO_MS`,
+         * con un tope de puntos para que el coste no dependa del framerate.
+         */
+        function actualizarRastro(p) {
+          const rastro = p.rastro;
+          if (ahora < p.ritmo.empujonHasta) rastro.push({ x: p.x, y: p.y, t: ahora });
+          while (rastro.length && ahora - rastro[0].t > RASTRO_MS) rastro.shift();
+          if (rastro.length > RASTRO_MAX) rastro.splice(0, rastro.length - RASTRO_MAX);
         }
 
         /**
@@ -565,64 +1400,463 @@
           p.vy *= f;
         }
 
+        // --- Simulacion (solo para trabajar) ---------------------------------
+        //
+        // No sustituye a los datos: los **inventa**. Existe porque juzgar una racha
+        // mirando la previa obliga a esperar a que el publico toque justo en ese
+        // momento, y los casos que hay que probar —dos pelotas, un nº1 enorme, una
+        // racha extrema, un crecimiento de golpe— casi nunca salen solos.
+        //
+        // Habla con las MISMAS funciones que el camino de verdad (`sincronizar` y
+        // `observarRitmo`), asi que lo que se ve con la simulacion encendida es la
+        // fisica que va a antena, no una maqueta aparte.
+
+        /** Generador con semilla: la simulacion tiene que repetirse igual. */
+        function azarCon(semilla) {
+          let a = semilla >>> 0;
+          return () => {
+            a = (a + 0x6d2b79f5) >>> 0;
+            let t = a;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+          };
+        }
+
+        /** Elenco de mentira: sin fotos (cae a la inicial) y sin red. */
+        const ELENCO_SIM = [
+          { id: "s01", unique_id: "vane_rt", nickname: "Vanessa" },
+          { id: "s02", unique_id: "elcarlos", nickname: "Carlos M." },
+          { id: "s03", unique_id: "lupe_99", nickname: "Lupe" },
+          { id: "s04", unique_id: "drakoft", nickname: "Drako" },
+          { id: "s05", unique_id: "mariamar", nickname: "Mariana" },
+          { id: "s06", unique_id: "juanpa", nickname: "Juan Pablo" },
+          { id: "s07", unique_id: "sofi_g", nickname: "Sofi" },
+          { id: "s08", unique_id: "richi", nickname: "Ricardo" },
+          { id: "s09", unique_id: "nando_x", nickname: "Fernando" },
+          { id: "s10", unique_id: "camilo_r", nickname: "Camilo" },
+          { id: "s11", unique_id: "paolita", nickname: "Paola" },
+          { id: "s12", unique_id: "andresit", nickname: "Andres" },
+        ];
+
+        /**
+         * Los escenarios, en el orden en que se recorren.
+         *
+         * Cada uno dura unos segundos y toca los taps a su manera. Lo que hay que
+         * comprobar no es solo que aguante la racha, sino que **vuelva** al estado
+         * tranquilo despues: por eso el ciclo empieza y acaba en `tranquilo`, y por
+         * eso la reduccion de tamano esta despues del crecimiento.
+         *
+         *   `toque`        taps por segundo y por persona (fondo)
+         *   `rafagaCada`   cada cuanto suelta una rafaga, en ms
+         *   `rafagaTaps`   taps de esa rafaga
+         *   `rafagaTop1`   la rafaga va siempre al nº1 (y deja onda de choque)
+         *   `alEntrar`     lo que se hace una sola vez al empezar el escenario
+         */
+        const ESCENARIOS = [
+          { id: "tranquilo", ms: 5000, toque: 0 },
+          { id: "taps_sueltos", ms: 6000, toque: 0.35 },
+          { id: "rafaga_uno", ms: 6000, toque: 0.5, rafagaCada: 1800, rafagaTaps: 9 },
+          { id: "rafaga_top1", ms: 6000, toque: 0.4, rafagaCada: 1500, rafagaTaps: 30, rafagaTop1: true },
+          // Sin taps de fondo y con las rafagas marcadas por el **reloj**: asi la
+          // entrada no depende de cuantos fotogramas se hayan dibujado, y sirve para
+          // comparar 30 con 144 fps sin que el azar de cada fotograma los separe.
+          { id: "solo_rafagas", ms: 8000, toque: 0, rafagaCada: 1500, rafagaTaps: 26, rafagaTop1: true },
+          { id: "varios", ms: 7000, toque: 1.6 },
+          { id: "crecimiento", ms: 4000, toque: 1, alEntrar: "crecer" },
+          { id: "reduccion", ms: 4000, toque: 0, alEntrar: "encoger" },
+          // Crecer y encoger de golpe, una y otra vez: es el unico escenario que
+          // estresa el muelle del radio en los dos sentidos sin parar, y el que deja
+          // ver si se queda oscilando.
+          { id: "vaiven", ms: 14000, toque: 0.4, vaiven: true },
+          { id: "top1_grande", ms: 6000, toque: 0.3, alEntrar: "top1" },
+          // Valores casi iguales (todas del mismo tamano) y una escalera que se
+          // parte por la mitad en cada puesto: los dos extremos del reparto, que es
+          // donde se ve si el minimo legible y el tope de arriba hacen su trabajo.
+          { id: "parejos", ms: 7000, toque: 0.5, alEntrar: "parejos" },
+          { id: "escalera", ms: 8000, toque: 0.3, alEntrar: "escalera" },
+          { id: "tranquilo", ms: 6000, toque: 0 },
+        ];
+
+        /** Cada cuanto se manda la tabla inventada: el directo publica a 1/s. */
+        const VENTANA_SIM_MS = 250;
+
+        const sim = {
+          escenario: 0,
+          desde: 0,
+          valores: new Map(),
+          taps: new Map(),
+          gente: new Map(ELENCO_SIM.map((p) => [p.id, p])),
+          activos: ELENCO_SIM.slice(0, SIM_PELOTAS).map((p) => p.id),
+          azar: azarCon(SIM_SEMILLA),
+          ventana: 0,
+          ultimaRafaga: 0,
+          ultimoVaiven: 0,
+          vaivenArriba: true,
+          nombre: "",
+          /** Parrafo del lienzo donde se enseña el escenario; se toma en `montar`. */
+          rotulo: null,
+        };
+
+        function escenarioSim() {
+          if (SIM_ESCENARIO) {
+            return ESCENARIOS.find((e) => e.id === SIM_ESCENARIO) ?? ESCENARIOS[0];
+          }
+          return ESCENARIOS[sim.escenario % ESCENARIOS.length];
+        }
+
+        const valorSim = (id) => sim.valores.get(id) || 0;
+
+        function sumarTaps(id, cuantos) {
+          sim.valores.set(id, valorSim(id) + cuantos);
+          sim.taps.set(id, (sim.taps.get(id) || 0) + cuantos);
+        }
+
+        function liderSim() {
+          let mejor = sim.activos[0];
+          for (const id of sim.activos) if (valorSim(id) > valorSim(mejor)) mejor = id;
+          return mejor;
+        }
+
+        /**
+         * Reparte factores **distintos** por persona.
+         *
+         * Multiplicar a todos por el mismo numero no cambia **ningun** radio: los
+         * tamanos salen de `sqrt(valor / maximo)`, asi que un factor comun se
+         * cancela. El primer `vaiven` que escribi hacia justo eso y el muelle del
+         * radio no se movia ni un pixel, que es justo lo que hay que probar.
+         */
+        function escalarValores(minimo, maximo) {
+          for (const id of sim.activos) {
+            const factor = minimo + sim.azar() * (maximo - minimo);
+            sim.valores.set(id, Math.max(60, Math.round(valorSim(id) * factor)));
+          }
+        }
+
+        /** Lo que se hace una sola vez al entrar en un escenario. */
+        function entrarEnEscenario(e) {
+          if (e.alEntrar === "crecer") {
+            escalarValores(0.7, 3.2);
+          } else if (e.alEntrar === "encoger") {
+            escalarValores(0.15, 1.1);
+          } else if (e.alEntrar === "top1") {
+            const jefe = liderSim();
+            for (const id of sim.activos) {
+              sim.valores.set(id, id === jefe ? Math.round(valorSim(id) * 12) + 400 : Math.round(valorSim(id) * 0.2));
+            }
+          } else if (e.alEntrar === "parejos") {
+            // Todos con los mismos taps (dentro de un 8%): el reparto tiene que
+            // sacar diez pelotas del mismo tamano, sin que el minimo las aplaste.
+            const alto = Math.max(...sim.activos.map(valorSim));
+            for (const id of sim.activos) {
+              sim.valores.set(id, Math.round(alto * (0.92 + sim.azar() * 0.08)));
+            }
+          } else if (e.alEntrar === "escalera") {
+            // Cada puesto con la mitad de taps que el anterior: el ultimo acaba con
+            // muy pocos, que es el caso del que casi no toca.
+            const alto = Math.max(...sim.activos.map(valorSim), 4000);
+            sim.activos.forEach((id, i) => {
+              sim.valores.set(id, Math.max(20, Math.round(alto / Math.pow(2, i))));
+            });
+          }
+          sim.ultimaRafaga = 0;
+          sim.ultimoVaiven = 0;
+          sim.vaivenArriba = true;
+          if (sim.rotulo && SIMULAR_FISICA) sim.rotulo.textContent = `${e.id} · ${SIM_PELOTAS} pelotas`;
+        }
+
+        function arrancarSimulacion() {
+          for (const id of sim.activos) {
+            sim.valores.set(id, Math.round(200 + sim.azar() * 1400));
+          }
+          entrarEnEscenario(escenarioSim());
+        }
+
+        /** Manda la tabla inventada por el mismo camino que el directo. */
+        function enviarTablaSim() {
+          const gente = sim.activos
+            .map((id) => ({ id, persona: sim.gente.get(id), valor: valorSim(id) }))
+            .sort((a, b) => b.valor - a.valor);
+          const entradas = gente.map((g) => ({
+            // Sin `avatar_url`: el diseno cae a la inicial, que es justo lo que
+            // hace con quien no tiene foto. Ni una peticion de red.
+            user: { id: g.id, unique_id: g.persona.unique_id, nickname: g.persona.nickname, avatar_url: null },
+            value: g.valor,
+            events: Math.max(1, Math.round(g.valor / 6)),
+          }));
+
+          sincronizar(entradas);
+
+          const segundos = VENTANA_SIM_MS / 1000;
+          for (const [clave, p] of pelotas) {
+            if (p.morir > 0) continue;
+            observarRitmo(p, p.valor, (sim.taps.get(clave) || 0) / segundos);
+          }
+          sim.taps.clear();
+        }
+
+        /** Un fotograma de simulacion: toca taps, cambia de escenario y publica. */
+        function avanzarSimulacion(dt) {
+          const e = escenarioSim();
+          sim.desde += dt * 1000;
+
+          // 1. Cambio de escenario: al acabarse el tiempo, el siguiente.
+          if (!SIM_ESCENARIO && sim.desde >= e.ms) {
+            sim.escenario = (sim.escenario + 1) % ESCENARIOS.length;
+            sim.desde = 0;
+            entrarEnEscenario(escenarioSim());
+          }
+
+          // 2. Taps de fondo. La probabilidad va con `dt`, asi que el ritmo es el
+          //    mismo a 30 que a 144 fps.
+          const toque = e.toque ?? 0;
+          if (toque > 0) {
+            for (const id of sim.activos) {
+              if (sim.azar() < toque * dt) sumarTaps(id, 1 + (sim.azar() < 0.25 ? 1 : 0));
+            }
+          }
+
+          // 3. Rafagas: a uno al azar, o al nº1 (que es la que deja onda).
+          if (e.rafagaCada && sim.desde - sim.ultimaRafaga >= e.rafagaCada) {
+            sim.ultimaRafaga = sim.desde;
+            const objetivo = e.rafagaTop1
+              ? liderSim()
+              : sim.activos[Math.floor(sim.azar() * sim.activos.length)];
+            sumarTaps(objetivo, e.rafagaTaps ?? 9);
+          }
+
+          // 4. Vaiven: crecer y encoger de golpe, para el muelle del radio.
+          if (e.vaiven && sim.desde - sim.ultimoVaiven >= 1600) {
+            sim.ultimoVaiven = sim.desde;
+            if (sim.vaivenArriba) escalarValores(0.7, 3.2);
+            else escalarValores(0.15, 1.1);
+            sim.vaivenArriba = !sim.vaivenArriba;
+          }
+
+          // 4. La tabla, al mismo camino que el directo.
+          sim.ventana += dt * 1000;
+          if (sim.ventana >= VENTANA_SIM_MS) {
+            sim.ventana = 0;
+            enviarTablaSim();
+          }
+        }
+
+        // --- Metricas y sonda ------------------------------------------------
+        //
+        // Se miden **siempre**: son cuatro sumas por fotograma, y sin ellas no hay
+        // forma de saber desde fuera si el diseno va a 60 fps o a 22. La sonda las
+        // lee por el depurador con `window.__pelotasDebug()`.
+
+        const metricas = {
+          fotogramas: 0,
+          msAcumulado: 0,
+          msPeor: 0,
+          ventanaMs: 0,
+          ventanaFotogramas: 0,
+          fps: 0,
+          msMedio: 0,
+        };
+
+        function anotarFotograma(ms) {
+          metricas.fotogramas += 1;
+          metricas.msAcumulado += ms;
+          metricas.msPeor = Math.max(metricas.msPeor, ms);
+          metricas.ventanaMs += ms;
+          metricas.ventanaFotogramas += 1;
+          if (metricas.ventanaMs >= 1000) {
+            metricas.fps = (metricas.ventanaFotogramas * 1000) / metricas.ventanaMs;
+            metricas.msMedio = metricas.ventanaMs / metricas.ventanaFotogramas;
+            metricas.msPeor = 0;
+            metricas.ventanaMs = 0;
+            metricas.ventanaFotogramas = 0;
+          }
+        }
+
+        const media = (lista) => (lista.length ? lista.reduce((a, v) => a + v, 0) / lista.length : 0);
+
+        /** Solape maximo entre dos pelotas: lo que se ve como "pegadas". */
+        function solapeMaximo(lista) {
+          let peor = 0;
+          for (let i = 0; i < lista.length; i++) {
+            for (let j = i + 1; j < lista.length; j++) {
+              const d = Math.hypot(lista[j].x - lista[i].x, lista[j].y - lista[i].y);
+              peor = Math.max(peor, lista[i].radio + lista[j].radio - d);
+            }
+          }
+          return peor;
+        }
+
+        /**
+         * La foto de la fisica, para leerla desde el depurador del navegador.
+         *
+         * Devuelve tambien `problemas`: la lista de cosas que **no** deberian pasar
+         * (fuera de la franja, por encima del tope de velocidad, coordenadas no
+         * finitas, solapes, fps bajos). Es lo que se mira despues de cada cambio en
+         * vez de confiar en que "se ve bien".
+         */
+        window.__pelotasDebug = () => {
+          const lista = [...pelotas.values()].filter((p) => p.morir === 0);
+          const velocidades = lista.map((p) => Math.hypot(p.vx, p.vy));
+          const limites = lista.map((p) => limitesDe(p));
+          const problemas = [];
+
+          lista.forEach((p, i) => {
+            if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.vx)) {
+              problemas.push(`pelota ${p.clave}: coordenada no finita`);
+            }
+            if (velocidades[i] > limites[i].maxima + 1) {
+              problemas.push(`pelota ${p.clave}: ${velocidades[i].toFixed(0)} px/s sobre su tope ${limites[i].maxima.toFixed(0)}`);
+            }
+            const lados = margenLados(p);
+            if (p.x - p.radio < lados - 1 || p.x + p.radio > ZONA_ANCHO - lados + 1) {
+              problemas.push(`pelota ${p.clave}: fuera por los lados (x=${p.x.toFixed(0)})`);
+            }
+            if (p.y - p.radio < ZONA_Y - 1 || p.y + p.radio > ALTO - margenAbajo(p) + 1) {
+              problemas.push(`pelota ${p.clave}: fuera por arriba o abajo (y=${p.y.toFixed(0)})`);
+            }
+          });
+          const solape = solapeMaximo(lista);
+          if (solape > 2) problemas.push(`solape de ${solape.toFixed(1)} px entre dos pelotas`);
+          // Por debajo de 24 fps si que hay un problema: a 30 fps (una escena de OBS
+          // mas lenta) el diseno tiene que ir fino, no solo "no caerse".
+          if (metricas.fps > 0 && metricas.fps < 24) problemas.push(`caida de fps: ${metricas.fps.toFixed(1)}`);
+
+          return {
+            modo: SIMULAR_FISICA ? "simulacion" : "directo",
+            depuracion: DEBUG_FISICA,
+            escenario: SIMULAR_FISICA ? escenarioSim().id : null,
+            pelotas: lista.length,
+            fps: Number(metricas.fps.toFixed(1)),
+            msMedio: Number(metricas.msMedio.toFixed(2)),
+            fotogramas: metricas.fotogramas,
+            vMedia: Number(media(velocidades).toFixed(0)),
+            vMax: Number(Math.max(0, ...velocidades).toFixed(0)),
+            relMedia: Number(media(velocidades.map((v, i) => v / limites[i].crucero)).toFixed(2)),
+            masaMin: Number(Math.min(...lista.map((p) => masaDe(p, ahora))).toFixed(0)),
+            masaMax: Number(Math.max(...lista.map((p) => masaDe(p, ahora))).toFixed(0)),
+            radioMin: Number(Math.min(...lista.map((p) => p.radio)).toFixed(1)),
+            radioMax: Number(Math.max(...lista.map((p) => p.radio)).toFixed(1)),
+            solapeMax: Number(solape.toFixed(2)),
+            energiaMedia: Number(media(lista.map((p) => p.energia?.valor ?? 0)).toFixed(1)),
+            anguloMax: Number(Math.max(0, ...lista.map((p) => Math.abs(p.angulo ?? 0))).toFixed(3)),
+            giroMax: Number(Math.max(0, ...lista.map((p) => Math.abs(p.velocidadAngular ?? 0))).toFixed(2)),
+            squashMax: Number(Math.max(0, ...lista.map((p) => Math.abs(p.squash?.valor ?? 0))).toFixed(3)),
+            radioVelMax: Number(Math.max(0, ...lista.map((p) => Math.abs(p.velocidadRadio ?? 0))).toFixed(1)),
+            chispas: lista.reduce((n, p) => n + p.ritmo.chispas.length, 0),
+            ondas: ondas.length,
+            /**
+             * Posicion y radio de cada una, para poder recortar y ampliar desde
+             * fuera. La sonda del navegador lo usa para mirar de cerca la pelota
+             * mas pequena: el tamano minimo legible no se juzga con un numero.
+             */
+            lista: lista.map((p) => ({
+              puesto: p.puesto,
+              r: Number(p.radio.toFixed(1)),
+              x: Math.round(p.x),
+              y: Math.round(p.y),
+              etiqueta: p.radio >= RADIO_ETIQUETA,
+            })),
+            /** Cuantas estan en racha o empujadas: tiene que volver a 0 solo. */
+            empujadas: lista.filter((p) => p.ritmo.empujonHasta > ahora || p.empujadoHasta > ahora).length,
+            problemas,
+          };
+        };
+
         // --- Paso de simulacion ----------------------------------------------
 
+        /**
+         * Un paso de fisica, en orden.
+         *
+         * El orden no es decorativo: primero los taps (que dan energia), despues el
+         * tamano (que cambia la masa), luego las fuerzas, luego el movimiento, y al
+         * final los choques, los topes y las paredes, que corrigen lo que el
+         * movimiento dejo mal. Los muelles de **dibujo** (giro y deformacion) van al
+         * final, porque no afectan a la fisica y no deben poder romperla.
+         *
+         *   1. tamano (muelle del radio)
+         *   2. energia y fuerzas (sacudida, nado, ondas, fuerzas globales)
+         *   3. movimiento
+         *   4. paredes
+         *   5. control de velocidad de crucero
+         *   6. choques pelota-pelota
+         *   7. recorte de posicion y tope de velocidad
+         *   8. atascos, trayectorias, giro, deformacion y particulas
+         */
         function paso(dt) {
+          const lista = [];
+
           for (const [clave, p] of pelotas) {
-            // Entrada y salida animadas. La escala corre tambien con el
-            // movimiento reducido: es lo unico que explica que una pelota cambie
-            // de tamano cuando alguien toca.
-            p.escala += ((p.morir > 0 ? 0 : 1) - p.escala) * Math.min(1, dt * 6);
+            // Entrada y salida animadas. La escala corre tambien con el movimiento
+            // reducido: es lo unico que explica que una pelota cambie de tamano
+            // cuando alguien toca. Exponencial y no `dt * 6` para que la entrada
+            // dure lo mismo a 30 que a 144 fps.
+            p.escala += ((p.morir > 0 ? 0 : 1) - p.escala) * (1 - Math.exp(-6 * dt));
             if (p.morir > 0 && ahora - p.morir > 420) {
               pelotas.delete(clave);
               continue;
             }
+            lista.push(p);
+
+            // --- 1. Energia y tamano ---
+            actualizarEnergia(p, dt);
+            actualizarRadio(p, dt);
 
             if (reducido) continue; // sin movimiento: solo tamanos
 
+            // --- 2. Fuerzas ---
             sacudir(p, dt);
-            avanzarChispas(p, dt);
             nadar(p, dt);
+            empujarGlobal(p, dt);
 
+            // --- 3. Movimiento ---
             p.x += p.vx * dt;
             p.y += p.vy * dt;
-            ajustarVelocidad(p, dt);
+
+            // --- 4. Paredes ---
             rebotarEnBordes(p);
+            actualizarRastro(p);
 
-            // Rastro: solo mientras dura la rafaga, para que no ensucie siempre.
-            // Se apaga recortando la lista vieja en vez de vaciarla, que es lo
-            // que deja la estela degradandose hacia atras.
-            if (ahora < p.ritmo.empujonHasta) {
-              p.rastro.push({ x: p.x, y: p.y });
-              if (p.rastro.length > 9) p.rastro.shift();
-            } else if (p.rastro.length > 0) {
-              p.rastro.shift();
-            }
-
-            p.radio += (p.radioObjetivo - p.radio) * Math.min(1, dt * 3);
+            // --- 5. Crucero ---
+            ajustarVelocidad(p, dt);
           }
 
           if (reducido) return;
 
-          // Choques: tres pasadas, porque con una las grandes se solapaban cuando
-          // varias llegaban a la vez.
-          const lista = [...pelotas.values()];
-          for (let pasada = 0; pasada < 3; pasada++) {
+          // --- 6. Ondas de choque: empujan a las vecinas antes de los choques,
+          // para que el empujon de la onda y el del golpe se resuelvan en el mismo
+          // fotograma y no se pisen.
+          aplicarOndas(dt);
+
+          // --- 7. Choques y paredes, alternos ---
+          //
+          // Tres pasadas de choques, y despues de cada una el recorte contra las
+          // paredes: el recorte puede meter una pelota dentro de otra (una pequena
+          // entre el nº1 y el suelo), y entonces hay que volver a separarlas. Con
+          // una sola vuelta al final se quedaban pegadas.
+          for (let vuelta = 0; vuelta < 3; vuelta++) {
             for (let i = 0; i < lista.length; i++) {
               for (let j = i + 1; j < lista.length; j++) chocar(lista[i], lista[j]);
             }
+            recortarEnZona(lista);
           }
-          // Y un recorte final: al separar dos pelotas, el empujon puede sacar una
-          // de la franja DESPUES del recorte de bordes, y entonces se quedaba fuera
-          // (medido: una asomaba por arriba). Aqui solo se corrige la posicion,
-          // sin tocar la velocidad, para no alterar el rebote.
-          for (const p of pelotas.values()) {
+
+          // --- 8. Tope de velocidad, ya con todo colocado ---
+          //
+          // Los choques acaban de meter impulso y sin esto sobrevivia un fotograma
+          // entero por encima de `maxima`. Es media docena de `hypot` por fotograma.
+          for (const p of lista) {
             if (p.morir > 0) continue;
-            p.x = Math.min(
-              ZONA_ANCHO - p.radio - margenLados(p),
-              Math.max(p.radio + margenLados(p), p.x),
-            );
-            p.y = Math.min(ALTO - p.radio - margenAbajo(p), Math.max(ZONA_Y + p.radio, p.y));
+            limitarVelocidad(p);
+          }
+
+          // --- 9. Lo que ya no mueve la fisica ---
+          for (const p of lista) {
+            if (p.morir > 0) continue;
+            desatascar(p);
+            romperTrayectoria(p);
+            actualizarRotacion(p, dt);
+            actualizarSquash(p, dt);
+            avanzarChispas(p, dt);
           }
         }
 
@@ -666,6 +1900,7 @@
           pincel.globalAlpha = esLider ? 1 : 0.62 + 0.38 * (r / RADIO_MAX);
 
           pincel.save();
+          aplicarDeformacion(p);
           pincel.beginPath();
           pincel.arc(p.x, p.y, r, 0, Math.PI * 2);
           pincel.closePath();
@@ -689,14 +1924,19 @@
           }
           pincel.restore();
 
-          // El aro.
+          // El aro, tambien deformado: es lo que hace que el aplastamiento se lea
+          // como una pelota que se chafa y no como una foto recortada.
+          pincel.save();
+          aplicarDeformacion(p);
           pincel.beginPath();
           pincel.arc(p.x, p.y, rAro, 0, Math.PI * 2);
           pincel.lineWidth = esLider ? 14 : 8;
           pincel.strokeStyle = esLider ? LIDER : ACENTO;
           pincel.stroke();
+          pincel.restore();
 
-          // La corona del nº1, como en los otros disenos.
+          // La corona del nº1, como en los otros disenos. **Sin deformar**: es una
+          // insignia, y una corona aplastada y ladeada se lee como un error.
           if (esLider && r > 40) {
             pincel.font = `${Math.round(r * 0.52)}px "Segoe UI Emoji", serif`;
             pincel.textAlign = "center";
@@ -710,7 +1950,7 @@
           // Etiqueta: solo en las pelotas que se leen, y solo si no pisa otra ya
           // pintada (antes dos cajas juntas se solapaban y no se leia ninguna).
           // Lleva caja propia porque va sobre video.
-          if (r >= 52) pintarEtiqueta(p, r, esLider);
+          if (r >= RADIO_ETIQUETA) pintarEtiqueta(p, r, esLider);
         }
 
         function pintarEtiqueta(p, r, esLider) {
@@ -771,8 +2011,11 @@
           const desde = ahora - rit.pulso;
           if (rit.pulso > 0 && desde >= 0 && desde < 620) {
             const t = desde / 620;
+            // El aro crece con la energia: el mismo tap no puede sonar igual con la
+            // pelota fria que con la pelota cargada de una racha.
+            const hinchazon = 0.7 + 0.7 * ((p.energia?.valor ?? 0) / ENERGIA_MAX);
             pincel.beginPath();
-            pincel.arc(p.x, p.y, r + t * 46, 0, Math.PI * 2);
+            pincel.arc(p.x, p.y, r + t * 46 * hinchazon, 0, Math.PI * 2);
             pincel.lineWidth = 10 * (1 - t) + 2;
             pincel.strokeStyle = p.puesto === 0 ? LIDER : ACENTO;
             pincel.globalAlpha = (1 - t) * 0.9;
@@ -801,11 +2044,149 @@
           }
         }
 
+        /**
+         * La capa de depuracion. Solo se llama con `?fisica=1`; con la constante en
+         * `false` no se dibuja absolutamente nada de mas.
+         *
+         * Enseña lo que no se ve: el **circulo de colision** (el radio fisico, que
+         * el squash no toca), el centro, el vector de velocidad y la ficha de cada
+         * pelota con velocidad, objetivo, masa y energia. Es lo que distingue "se ve
+         * raro" de "esta mal": un solape, un tope pasado o una energia disparada se
+         * leen aqui en un fotograma.
+         */
+        function pintarDebug(lista) {
+          pincel.save();
+
+          // La franja de juego, el borde por el que rebotan y el centro al que
+          // tiende el nº1.
+          pincel.setLineDash([14, 10]);
+          pincel.lineWidth = 2;
+          pincel.strokeStyle = "rgba(37, 244, 238, 0.5)";
+          pincel.strokeRect(2, ZONA_Y + 2, ZONA_ANCHO - 4, ZONA_ALTO - 4);
+          pincel.setLineDash([]);
+          pincel.beginPath();
+          pincel.moveTo(ZONA_ANCHO / 2 - 12, ZONA_Y + ZONA_ALTO / 2);
+          pincel.lineTo(ZONA_ANCHO / 2 + 12, ZONA_Y + ZONA_ALTO / 2);
+          pincel.moveTo(ZONA_ANCHO / 2, ZONA_Y + ZONA_ALTO / 2 - 12);
+          pincel.lineTo(ZONA_ANCHO / 2, ZONA_Y + ZONA_ALTO / 2 + 12);
+          pincel.stroke();
+
+          pincel.font = '600 20px "Consolas", monospace';
+          pincel.textAlign = "left";
+          pincel.textBaseline = "middle";
+
+          for (const p of lista) {
+            const v = Math.hypot(p.vx, p.vy);
+
+            // Circulo de colision: el radio de verdad, sin squash ni escala.
+            pincel.beginPath();
+            pincel.arc(p.x, p.y, p.radio, 0, Math.PI * 2);
+            pincel.lineWidth = 2;
+            pincel.strokeStyle = p.tiburon ? "rgba(255,46,99,0.9)" : "rgba(37,244,238,0.75)";
+            pincel.stroke();
+
+            // Centro y vector de velocidad, con la punta.
+            pincel.fillStyle = BLANCO;
+            pincel.beginPath();
+            pincel.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            pincel.fill();
+
+            const escalaV = 0.22;
+            const fx = p.x + p.vx * escalaV;
+            const fy = p.y + p.vy * escalaV;
+            pincel.beginPath();
+            pincel.moveTo(p.x, p.y);
+            pincel.lineTo(fx, fy);
+            pincel.lineWidth = 3;
+            pincel.strokeStyle = "rgba(245,196,81,0.95)";
+            pincel.stroke();
+            pincel.beginPath();
+            pincel.arc(fx, fy, 5, 0, Math.PI * 2);
+            pincel.fillStyle = "rgba(245,196,81,0.95)";
+            pincel.fill();
+
+            // El numero del puesto, para poder cruzar la tabla con el lienzo.
+            pincel.fillStyle = BLANCO;
+            pincel.font = '700 22px "Consolas", monospace';
+            pincel.textAlign = "center";
+            pincel.fillText(String(p.puesto), p.x, p.y - p.radio - 10);
+            pincel.textAlign = "left";
+            void v;
+          }
+
+          // La tabla: una linea por pelota, **fuera** de las bolas. Las fichas
+          // pegadas a cada una se tapaban entre ellas y no se leia ninguna.
+          const filas = lista.map((p) => {
+            const { crucero, maxima } = limitesDe(p);
+            return [
+              String(p.puesto).padStart(2),
+              `${Math.hypot(p.vx, p.vy).toFixed(0).padStart(4)}/${crucero.toFixed(0).padStart(3)}`,
+              `tope ${maxima.toFixed(0).padStart(4)}`,
+              `m ${masaDe(p, ahora).toFixed(0).padStart(4)}`,
+              `r ${p.radio.toFixed(0).padStart(3)}>${p.radioObjetivo.toFixed(0).padStart(3)}`,
+              `e ${(p.energia?.valor ?? 0).toFixed(1).padStart(4)}`,
+              `g ${(p.angulo ?? 0).toFixed(2).padStart(5)}`,
+              `s ${(p.squash?.valor ?? 0).toFixed(2).padStart(5)}`,
+            ].join(" ");
+          });
+          const resumen = [
+            SIMULAR_FISICA ? `sim ${escenarioSim().id} · ${lista.length} pelotas` : `directo · ${lista.length} pelotas`,
+            `${metricas.fps.toFixed(1)} fps · ${metricas.msMedio.toFixed(2)} ms/f · peor ${metricas.msPeor.toFixed(1)}`,
+            `v medio ${media(lista.map((q) => Math.hypot(q.vx, q.vy))).toFixed(0)} px/s`,
+            `chispas ${lista.reduce((n, q) => n + q.ritmo.chispas.length, 0)} · ondas ${ondas.length}`,
+            `solape max ${solapeMaximo(lista).toFixed(1)} px`,
+          ];
+          const ancho = 470;
+          const alto = (resumen.length + filas.length) * 20 + 14;
+          pincel.fillStyle = "rgba(8,10,14,0.8)";
+          pincel.fillRect(6, ZONA_Y + 6, ancho, alto);
+          pincel.font = '700 17px "Consolas", monospace';
+          pincel.fillStyle = ACENTO;
+          resumen.forEach((texto, i) => pincel.fillText(texto, 16, ZONA_Y + 22 + i * 20));
+          pincel.fillStyle = "#c3cad4";
+          pincel.font = '15px "Consolas", monospace';
+          filas.forEach((texto, i) =>
+            pincel.fillText(texto, 16, ZONA_Y + 22 + (resumen.length + i) * 20),
+          );
+
+          pincel.restore();
+        }
+
+        /**
+         * Aplica al pincel el giro y el aplastamiento de una pelota.
+         *
+         * Va aparte porque lo usan la foto y el aro, y porque **no** lo usa lo que
+         * tiene que quedarse recto: la corona, los efectos y la etiqueta. El
+         * aplastamiento va en la direccion del golpe (`squash.angulo`) y el giro
+         * encima, que es lo que hace que la pelota ruede.
+         *
+         * Se ahorra el `save`/`restore` mas caro —el de la matriz— cuando no hay
+         * nada que aplicar: en reposo esto es una comparacion.
+         */
+        function aplicarDeformacion(p) {
+          const sq = p.squash.valor;
+          const giro = p.angulo;
+          if (Math.abs(sq) < 0.004 && Math.abs(giro) < 0.002) return;
+
+          pincel.translate(p.x, p.y);
+          if (giro) pincel.rotate(giro);
+          if (Math.abs(sq) >= 0.004) {
+            pincel.rotate(p.squash.angulo);
+            // Aplasta en el eje del golpe y estira en el perpendicular. El area
+            // cambia un poco a proposito: es el gesto de una pelota que se chafa.
+            pincel.scale(1 + sq, 1 - sq);
+            pincel.rotate(-p.squash.angulo);
+          }
+          pincel.translate(-p.x, -p.y);
+        }
+
         function pintar(tiempo) {
           // `clearRect` y no un relleno: fuera de las bolas el lienzo tiene que
           // quedar transparente para que el video del streamer se vea.
           pincel.clearRect(0, 0, ANCHO, ALTO);
           etiquetasPintadas = [];
+          // Las ondas van debajo de las pelotas: se ven, pero no las tapan.
+          pintarOndas();
           // Las pequenas primero: la grande queda por encima. La escala entra en
           // el criterio porque una pelota que acaba de nacer mide cero.
           const lista = [...pelotas.values()].sort(
@@ -816,6 +2197,25 @@
             pintarPelota(p);
           }
           pincel.globalAlpha = 1;
+          // Con la depuracion apagada esto es una comparacion y nada mas.
+          if (DEBUG_FISICA) pintarDebug(lista);
+        }
+
+        /** El aro que se expande de una onda de choque, apagandose hacia fuera. */
+        function pintarOndas() {
+          if (!ondas.length) return;
+          for (const o of ondas) {
+            const vida = (ahora - o.inicio) / ONDA_MS;
+            if (vida < 0 || vida >= 1) continue;
+            const radio = Math.max(2, ONDA_RADIO * (0.35 + 0.65 * vida));
+            pincel.beginPath();
+            pincel.arc(o.x, o.y, radio, 0, Math.PI * 2);
+            pincel.lineWidth = 3 + 9 * (1 - vida);
+            pincel.strokeStyle = ACENTO;
+            pincel.globalAlpha = (1 - vida) * 0.45;
+            pincel.stroke();
+            pincel.globalAlpha = 1;
+          }
         }
 
         // --- Bucle -----------------------------------------------------------
@@ -833,6 +2233,10 @@
           const dt = Math.min(0.032, Math.max(0, (tiempo - anterior) / 1000));
           anterior = tiempo;
           ahora = tiempo;
+          anotarFotograma(dt * 1000);
+          // La simulacion va **antes** del paso: es lo que acumula los taps de este
+          // fotograma, igual que `pintar` los acumula cuando llegan del directo.
+          if (SIMULAR_FISICA) avanzarSimulacion(dt);
           paso(dt);
           pintar(tiempo);
         }
@@ -852,6 +2256,14 @@
             // cuenta. Un segundo formato en la misma pantalla se nota.
             numero = (valor) => contexto.numero(valor);
             nombreDe = (entrada) => contexto.nombre(entrada);
+
+            // El rotulo del lienzo (el "1080 x 1920") es el sitio que ya existe,
+            // abajo a la izquierda, para enseñar el escenario en modo simulacion.
+            // En antena no se toca: ni se busca el nodo.
+            if (SIMULAR_FISICA) {
+              sim.rotulo = raiz.querySelector(".medida");
+              arrancarSimulacion();
+            }
 
             // Nada de `requestAnimationFrame` directo: si un fotograma lanza,
             // `ctx.animar` lo cuenta, lo enseña en el aviso y **sigue dibujando**.
@@ -873,6 +2285,13 @@
           },
 
           pintar(entradas, tasas) {
+            // Con la simulacion encendida los datos de fuera se ignoran: los taps
+            // los inventa `avanzarSimulacion`, y contra **estas mismas** funciones
+            // (`sincronizar` y `observarRitmo`), asi que sigue siendo la fisica de
+            // antena. Si no se ignoraran, la previa (`?demo=1`) y la simulacion
+            // pelearian por la misma tabla.
+            if (SIMULAR_FISICA) return;
+
             // `pintar` corre una vez por segundo, pero el bucle sigue a 60: la
             // primera marca de cada tanda decide quien esta en racha y la fisica
             // hace el resto.
@@ -892,6 +2311,20 @@
               observarRitmo(p, p.valor, tasa);
             }
             tasaDe = tasasNuevas;
+          },
+
+          /**
+           * Enciende una fuerza global temporal, en px/s², durante `ms`.
+           *
+           * Es el gancho de `empujarGlobal`: gravedad, anti-gravedad o un empuje
+           * lateral para un momento concreto. No lo usa nadie todavia y el overlay
+           * de OBS no lo llama: existe para que añadirlo despues no obligue a tocar
+           * la fisica.
+           */
+          fuerzaGlobal(x, y, ms) {
+            fuerzaGlobal.x = Number(x) || 0;
+            fuerzaGlobal.y = Number(y) || 0;
+            fuerzaGlobal.hasta = ahora + (Number(ms) || 1000);
           },
         };
       })();
