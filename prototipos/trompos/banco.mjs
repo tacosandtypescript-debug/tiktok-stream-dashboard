@@ -303,10 +303,10 @@ async function principal() {
     );
     comprobar(
       "La franja superior se reparte a mitades y la inferior queda libre para los trompos",
-      med.arena.yMin === 258 &&
+      med.arena.yMin === 322 &&
         med.arena.yMax === 1920 - 24 &&
         med.arena.xMin === 76 &&
-        med.arena.alto >= 1600 &&
+        med.arena.alto >= 1500 &&
         med.clasificacion.ancho === 486 &&
         med.carteles.ancho === 486 &&
         med.clasificacion.x + med.clasificacion.ancho < med.carteles.x &&
@@ -580,7 +580,9 @@ async function principal() {
     await cdp.evaluar("PROTOTIPO.participantes(30)");
     await cdp.evaluar("PROTOTIPO.simular(7.4)");
     await cdp.evaluar("PROTOTIPO.dibujar()");
-    await guardarRecorte(cdp, resolve(SALIDA, "22-tabla-identidad.png"), 0, 0, 1080, 260, 2);
+    // El recorte cubre la franja superior entera (0..330), que es donde viven la tabla y
+    // los carteles de eliminación.
+    await guardarRecorte(cdp, resolve(SALIDA, "22-tabla-identidad.png"), 0, 0, 1080, 330, 2);
 
     // ---------------------------------------------------------- poderes (orden 04)
     console.log("\nPoderes: catálogo, ciclo y límites");
@@ -1411,6 +1413,13 @@ async function principal() {
         const t = PROTOTIPO.sim.trompos
           .map(x => ({ x, n: PROTOTIPO.sim.trompos.filter(o => o !== x && Math.hypot(o.x - x.x, o.y - x.y) <= radio).length }))
           .sort((a, b) => b.n - a.n)[0].x;
+        // El líder y el de más vida se FIJAN antes de lanzar (con la vida muy por encima
+        // del resto): si no, la propia cadena cambia la clasificación durante los tres
+        // segundos de la prueba y el objetivo elegido deja de ser el que era.
+        PROTOTIPO.sim.trompos.forEach(x => { x.vida = 400; });
+        PROTOTIPO.sim.trompos[2].vida = 1800;
+        PROTOTIPO.sim.tabla.firma = "";
+        PROTOTIPO.sim.actualizarClasificacion(0, true);
         const lider = PROTOTIPO.sim.lider().nombre;
         const masVida = PROTOTIPO.sim.trompos.slice().sort((a, b) => b.vida - a.vida)[0].nombre;
         const usado = PROTOTIPO.activarPoder(t.id, clave, true, objetivo);

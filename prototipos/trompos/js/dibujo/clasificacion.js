@@ -80,8 +80,10 @@ export class Clasificacion {
       const resaltado = this.flash.get(e.nombre) ?? 0;
       const pulso = resaltado > 0 ? 0.5 + 0.5 * Math.sin(resaltado * 26) : 0;
       const medio = y + c.altoFila / 2;
-      const linea1 = medio - 8;
-      const linea2 = medio + 10;
+      // Con 44 px de plato: los datos arriba, la barra y el porcentaje abajo, y 4-5 px
+      // de aire hasta el borde para que nada roce la fila siguiente.
+      const linea1 = medio - 10;
+      const linea2 = medio + 12;
 
       // --- plato de la fila
       ctx.fillStyle = primero ? "rgba(52,40,12,0.82)" : "rgba(6,5,14,0.66)";
@@ -111,7 +113,7 @@ export class Clasificacion {
       x += 46;
 
       // --- medallón con la cara (o la inicial sobre el color del jugador)
-      const radio = 13;
+      const radio = 12;
       if (fotos && p.fotos.activo) {
         fotos.medallon(ctx, x + radio, linea1, radio - 1, {
           foto: e.foto,
@@ -131,7 +133,7 @@ export class Clasificacion {
         ctx.textAlign = "center";
         ctx.font = "800 15px system-ui, 'Segoe UI', sans-serif";
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(e.inicial, x + radio, linea1 + 1);
+        ctx.fillText(e.inicial, x + radio, linea1);
       }
       x += radio * 2 + 10;
 
@@ -162,7 +164,7 @@ export class Clasificacion {
       const huecoVariante = e.variante > 0 ? 28 : 0;
       const nombre = acortarTexto(ctx, e.nombre, Math.max(40, Math.min(anchoNombre, espacio - huecoVariante)));
       const anchoDibujado = ctx.measureText(nombre).width;
-      ctx.fillText(nombre, x, linea1 + 1);
+      ctx.fillText(nombre, x, linea1);
       let finNombre = x + anchoDibujado;
       if (e.variante > 0 && anchoDibujado + 6 + 16 <= espacio) {
         ctx.font = "700 13px system-ui, 'Segoe UI', sans-serif";
@@ -193,7 +195,7 @@ export class Clasificacion {
       ctx.textAlign = "right";
       ctx.font = "700 17px ui-monospace, 'Cascadia Mono', monospace";
       ctx.fillStyle = "rgba(232,240,255,0.92)";
-      ctx.fillText(`${Math.round(pct * 100)} %`, c.x + c.ancho - 10, linea2 + 1);
+      ctx.fillText(`${Math.round(pct * 100)} %`, c.x + c.ancho - 10, linea2);
     });
 
     // --- resumen del resto: una línea fina justo debajo de la última fila

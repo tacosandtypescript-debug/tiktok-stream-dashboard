@@ -17,7 +17,10 @@ export const PARAMETROS = {
     // los mensajes. Los trompos rebotan contra la arena, nunca contra el lienzo, así
     // que ni la tabla ni los carteles tapan la pelea.
     margenLados: 76,
-    margenArriba: 258, // debajo de la tabla de clasificación
+    // Borde superior de la arena. La franja de arriba aloja la clasificación y las
+    // eliminaciones: se sube de 258 a 322 para que la tabla tenga aire entre filas (y
+    // las etiquetas de los trompos del borde no se le echen encima).
+    margenArriba: 322, // debajo de la tabla de clasificación
     // La franja inferior queda **libre** desde la orden de layout: las eliminaciones
     // se han movido arriba, así que aquí sólo queda un margen mínimo de seguridad para
     // que ningún trompo roce el borde del lienzo.
@@ -239,11 +242,12 @@ export const PARAMETROS = {
     altoCabecera: 22,
     // Cinco filas de 36 px más la línea de resumen tienen que caber por encima de
     // `lienzo.margenArriba` (258): 22 + 5·(36+3) + 22 = 239 px.
-    altoFila: 36,
-    separacionFilas: 3,
-    // La línea de «+N participantes más»: 18 px para que el bloque entero (22 de
-    // cabecera + 6 + cinco filas + esta línea = 241) quepa en la franja de 258.
-    altoResumen: 18,
+    // Filas de 44 con 6 de aire: cada puesto se lee como una fila independiente. El
+    // bloque entero (22 de cabecera + 6 + 5·(44+6) + 20 = 298) cabe en la franja de 322.
+    altoFila: 44,
+    separacionFilas: 6,
+    // La línea de «+N participantes más».
+    altoResumen: 20,
     // Cuántas filas se enseñan enteras; el resto se resume en una línea.
     filas: 5,
     // Ancho máximo del nombre antes de acortarlo: en media franja no cabe entero, y el
