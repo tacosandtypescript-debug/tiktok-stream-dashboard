@@ -599,6 +599,7 @@ mod tests {
     /// queda vieja justo cuando hace falta que no lo este, que es cuando alguien
     /// anade un comando.
     fn comandos_del_shell(codigo: &str) -> BTreeSet<String> {
+        let codigo = normalizar(codigo);
         let mut nombres = BTreeSet::new();
         let mut lineas = codigo.lines();
         while let Some(linea) = lineas.next() {
@@ -627,6 +628,7 @@ mod tests {
     /// Solo el cuerpo de `dispatch`: las sub-acciones de `accion_tts` —`pause`,
     /// `skip`...— tienen la misma forma y no son comandos de la superficie.
     fn comandos_del_despachador(codigo: &str) -> BTreeSet<String> {
+        let codigo = normalizar(codigo);
         let desde = codigo
             .find("pub async fn dispatch")
             .expect("existe `dispatch` en ipc.rs");
@@ -647,6 +649,17 @@ mod tests {
                     .then(|| nombre.to_string())
             })
             .collect()
+    }
+
+    /// Deja el fuente con finales de linea `\n`.
+    ///
+    /// Hace falta y no es un detalle: `include_str!` lee el fichero **del arbol de
+    /// trabajo**, y con `core.autocrlf` —lo normal en Windows— el checkout tiene CRLF
+    /// aunque el repositorio guarde LF. Sin normalizar, buscar `"\n}\n"` no encuentra
+    /// nada en la integracion continua y si en la maquina donde el fichero se escribio
+    /// con LF. Paso exactamente eso: el test salio verde en local y rojo en la CI.
+    fn normalizar(codigo: &str) -> String {
+        codigo.replace("\r\n", "\n")
     }
 
     /// Las diferencias **a proposito**, para que se vean y no se confundan con un
@@ -712,5 +725,27 @@ mod tests {
                 "{nombre} ya no existe en el servidor web"
             );
         }
+    }
+
+    /// El extractor tiene que dar lo mismo con CRLF que con LF.
+    ///
+    /// Regresion de un fallo real: el test de arriba salio **verde en local y rojo en
+    /// la integracion continua**. Aqui los ficheros se habian escrito con LF y alli el
+    /// checkout los deja con CRLF (`core.autocrlf`), asi que `find("\n}\n")` no
+    /// encontraba el cierre de `dispatch` y el extractor se quedaba sin nada.
+    #[test]
+    fn el_extractor_es_igual_con_crlf_que_con_lf() {
+        let con_lf = "pub async fn dispatch(\n) {\n    match cmd {\n        \"uno\" => {}\n        \"dos\" => {}\n        otro => {}\n    }\n}\n\nfn otra() {}\n";
+        let con_crlf = con_lf.replace('\n', "\r\n");
+
+        assert_eq!(
+            comandos_del_despachador(con_lf),
+            comandos_del_despachador(&con_crlf),
+            "el extractor depende de los finales de linea"
+        );
+        assert_eq!(
+            comandos_del_shell("#[tauri::command]\r\nfn uno() {}\r\n\r\n#[tauri::command]\r\nasync fn dos(a: u8) {}\r\n"),
+            comandos_del_shell("#[tauri::command]\nfn uno() {}\n\n#[tauri::command]\nasync fn dos(a: u8) {}\n"),
+        );
     }
 }
