@@ -27,7 +27,12 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    watch: { ignored: ["**/src-tauri/**"] },
+    watch: {
+      // `src-tauri` se recompila por su cuenta. Y las carpetas temporales que dejan los
+      // editores al guardar (`.package.json.<pid>.<uuid>.tmpdir`) tumbaban el servidor
+      // con EBUSY: el vigilante intentaba seguirlas justo cuando desaparecían.
+      ignored: ["**/src-tauri/**", "**/.*.tmpdir/**", "**/*.tmp", "**/.*.tmp"],
+    },
     fs: {
       // El motor del juego vive en el prototipo (`prototipos/trompos/js`), que es su
       // entorno de pruebas: el overlay lo importa de allí en vez de mantener una copia.
