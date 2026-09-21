@@ -1756,13 +1756,22 @@
             chispas: lista.reduce((n, p) => n + p.ritmo.chispas.length, 0),
             ondas: ondas.length,
             /**
-             * Posicion y radio de cada una, para poder recortar y ampliar desde
-             * fuera. La sonda del navegador lo usa para mirar de cerca la pelota
-             * mas pequena: el tamano minimo legible no se juzga con un numero.
+             * Posicion, radio y lo que se dibuja de cada una, para poder recortar y
+             * ampliar desde fuera y para poder **comprobar que el tamano que choca y el
+             * que se ve son el mismo numero** mientras la pelota crece.
+             *
+             * `r` es el radio fisico (el de los choques y las paredes) y `dibujo` es lo
+             * que se pinta: el mismo radio por la escala de entrada y salida. En reposo
+             * —que es como esta una pelota que solo esta creciendo— los dos coinciden al
+             * centesimo; solo se separan en el medio segundo de nacer o de irse.
              */
             lista: lista.map((p) => ({
               puesto: p.puesto,
-              r: Number(p.radio.toFixed(1)),
+              taps: p.valor,
+              // Tres decimales: la curva avanza 74/15.000 = 0,0049 px por tap, asi que
+              // con dos no se podria comprobar que 5.000 y 5.001 **no** dan lo mismo.
+              r: Number(p.radio.toFixed(3)),
+              dibujo: Number((p.radio * p.escala).toFixed(3)),
               x: Math.round(p.x),
               y: Math.round(p.y),
               etiqueta: p.radio >= RADIO_ETIQUETA,
