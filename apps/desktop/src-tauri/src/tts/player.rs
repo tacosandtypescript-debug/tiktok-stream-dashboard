@@ -42,7 +42,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -128,7 +128,6 @@ enum Command {
     /// Espera a que termine lo que suena y responde. Siempre responde; el
     /// llamante decide si le interesa bloquearse cuando no hay nada sonando.
     Wait(Sender<()>),
-    Devices(Sender<anyhow::Result<Vec<String>>>),
     Shutdown,
 }
 
@@ -298,9 +297,6 @@ impl Worker {
                     self.device.sleep_until_end();
                     let _ = reply.send(());
                 }
-                Command::Devices(reply) => {
-                    let _ = reply.send(available_devices());
-                }
                 Command::Shutdown => break,
             }
         }
@@ -339,9 +335,15 @@ impl Worker {
 
 /// Nombres de los dispositivos de salida disponibles.
 ///
-/// `cpal` no garantiza que su lista se pueda consultar desde cualquier hilo
-/// (en Windows el dispositivo es COM), asi que la enumeracion se hace **en el
-/// hilo de audio**, que es el mismo que lo va a abrir.
+/// **No abre ningun dispositivo**, y esa es la diferencia que importa. Abrir el de
+/// por defecto para poder enumerar —que es lo que se hacia antes— cuesta entre medio
+/// segundo y uno, y falla con `AUDCLNT_E_DEVICE_IN_USE` si en ese momento esta
+/// ocupado. La lista de dispositivos no puede depender de que se pueda abrir uno.
+///
+/// Que se pueda preguntar desde un hilo cualquiera **se midio, no se supuso**:
+/// `cpal` cachea el enumerador en un `static` y COM es de cada hilo, asi que se
+/// comprobo que devuelve los mismos dispositivos desde hilos nuevos sucesivos sin
+/// abrir nada (ver `enumerar_no_necesita_abrir_ningun_dispositivo`).
 pub fn available_devices() -> anyhow::Result<Vec<String>> {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
 
@@ -354,14 +356,101 @@ pub fn available_devices() -> anyhow::Result<Vec<String>> {
         .collect::<Vec<String>>())
 }
 
-/// Lista los dispositivos de salida usando un hilo de audio efimero.
+/// Lo que viaja por el canal del enumerador: un buzon donde dejar la respuesta.
+type PeticionDeDispositivos = Sender<anyhow::Result<Vec<String>>>;
+
+/// Espera maxima a que el enumerador conteste. Enumerar tarda medio segundo, asi que
+/// este tope solo salta si algo se ha quedado muy atascado.
+const DEVICES_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// El hilo que enumera dispositivos, uno solo para todo el proceso.
 ///
-/// Abre el dispositivo por defecto (es lo que permite enumerar en el hilo
-/// correcto) y lo cierra al terminar. Se usa desde la interfaz, no en el camino
-/// caliente.
+/// Antes cada consulta creaba su propio `RodioSink`: **dos hilos** —el de audio y el
+/// que lo esperaba— y el dispositivo por defecto abierto de propina. Y la consulta
+/// viajaba al hilo de audio, que se bloquea en `sleep_until_end()` mientras suena una
+/// frase: caducaba a los dos segundos justo despues de usar la voz, que es
+/// exactamente el sintoma que se veia.
+///
+/// Este hilo no abre nada ni reproduce nada, asi que no lo bloquea una locucion ni le
+/// afecta que un dispositivo este ocupado.
+fn arrancar_enumerador() -> SyncSender<PeticionDeDispositivos> {
+    let (peticiones, cola) = mpsc::sync_channel::<PeticionDeDispositivos>(4);
+    let hilo = thread::Builder::new()
+        .name("tts-devices".into())
+        .spawn(move || {
+            while let Ok(respuesta) = cola.recv() {
+                // Si nadie espera la respuesta, el buzon esta cerrado y se ignora:
+                // el hilo sigue vivo para la siguiente consulta.
+                let _ = respuesta.send(available_devices());
+            }
+        });
+    if let Err(error) = hilo {
+        tracing::warn!(%error, "no se pudo crear el hilo de dispositivos");
+    }
+    peticiones
+}
+
+/// El canal del enumerador: **uno solo para todo el proceso**.
+///
+/// Va en un `Mutex<Option<..>>` y no en un `OnceLock` a pelo porque tiene que poder
+/// volver a arrancarse: si el hilo se muere, la lista de dispositivos no puede
+/// quedarse vacia hasta reiniciar la aplicacion.
+static ENUMERADOR: OnceLock<Mutex<Option<SyncSender<PeticionDeDispositivos>>>> = OnceLock::new();
+
+/// El canal del enumerador, arrancando el hilo si hace falta.
+fn enumerador() -> SyncSender<PeticionDeDispositivos> {
+    let mut actual = ENUMERADOR
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|envenenado| envenenado.into_inner());
+    if actual.is_none() {
+        *actual = Some(arrancar_enumerador());
+    }
+    actual
+        .as_ref()
+        .expect("el enumerador acaba de arrancarse")
+        .clone()
+}
+
+/// Tira el canal actual: la proxima consulta arranca un hilo nuevo.
+fn tirar_el_enumerador() {
+    let mut actual = ENUMERADOR
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|envenenado| envenenado.into_inner());
+    *actual = None;
+}
+
+/// Una pregunta al enumerador, sin reintentos.
+fn preguntar_al_enumerador() -> anyhow::Result<Vec<String>> {
+    let (respuesta, espera) = mpsc::channel();
+    enumerador().try_send(respuesta).map_err(|error| {
+        anyhow::anyhow!("el hilo de dispositivos no acepta la consulta: {error}")
+    })?;
+    match espera.recv_timeout(DEVICES_TIMEOUT) {
+        Ok(resultado) => resultado,
+        Err(_) => Err(anyhow::anyhow!("el hilo de dispositivos no respondio")),
+    }
+}
+
+/// Lista los dispositivos de salida **sin abrir ninguno** y sin pasar por el hilo de
+/// audio.
+///
+/// Si la primera consulta falla se arranca un enumerador nuevo y se pregunta otra vez:
+/// un hilo muerto no puede dejar la lista de dispositivos vacia hasta reiniciar la
+/// aplicacion.
 pub fn list_devices() -> anyhow::Result<Vec<String>> {
-    let sink = RodioSink::new()?;
-    sink.devices()
+    match preguntar_al_enumerador() {
+        Ok(devices) => Ok(devices),
+        Err(primero) => {
+            tracing::warn!(
+                %primero,
+                "la enumeracion fallo; se reintenta con un enumerador nuevo"
+            );
+            tirar_el_enumerador();
+            preguntar_al_enumerador()
+        }
+    }
 }
 
 /// Piezas del hilo de audio: el flujo, el nombre del dispositivo y el
@@ -482,15 +571,6 @@ impl RodioSink {
     /// Ordenes descartadas por canal lleno.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
-    }
-
-    pub fn devices(&self) -> anyhow::Result<Vec<String>> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.send(Command::Devices(reply_tx))?;
-        match reply_rx.recv_timeout(Duration::from_secs(2)) {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("el hilo de audio no respondio")),
-        }
     }
 
     /// Envia una orden. Si el canal esta lleno se descarta **la mas nueva**:
@@ -1115,6 +1195,130 @@ mod tests {
         assert!(!sink.is_playing());
         assert!(sink.last_error().is_none());
         let _ = sink.dropped();
+    }
+
+    /// Enumerar no puede depender de **abrir** un dispositivo.
+    ///
+    /// Es la comprobacion que separa las dos cosas: si `output_devices()` funciona
+    /// desde un hilo que no ha abierto nada, la lista de dispositivos deja de
+    /// depender de que el dispositivo por defecto se pueda abrir en ese momento
+    /// —ocupado, en exclusiva o a medio conectar—, que es lo que hacia que la
+    /// pestana Voz se quedara sin ninguno.
+    #[test]
+    fn enumerar_no_necesita_abrir_ningun_dispositivo() {
+        use rodio::cpal::traits::{DeviceTrait, HostTrait};
+
+        if let Some(problem) = disabled_reason() {
+            eprintln!("audio apagado por entorno, test omitido: {problem}");
+            return;
+        }
+
+        let hilo = std::thread::Builder::new()
+            .name("prueba-enumerar".into())
+            .spawn(|| {
+                let host = rodio::cpal::default_host();
+                match host.output_devices() {
+                    Ok(devices) => devices.filter_map(|d| d.name().ok()).collect::<Vec<_>>(),
+                    Err(error) => {
+                        eprintln!("no se pudo enumerar: {error}");
+                        Vec::new()
+                    }
+                }
+            })
+            .expect("hilo de prueba");
+        let nombres = hilo.join().expect("el hilo no debe entrar en panico");
+
+        eprintln!("enumerados sin abrir nada: {} dispositivos", nombres.len());
+
+        // Y no basta con que funcione **una** vez: `cpal` cachea el enumerador en un
+        // `static` y COM es de cada hilo, asi que la segunda enumeracion ocurre en un
+        // hilo donde COM no lo ha inicializado nadie. Si eso fallara, la lista se
+        // quedaria vacia a partir de la segunda consulta, que es justo el sintoma.
+        for intento in 2..=5 {
+            let otro = std::thread::Builder::new()
+                .name(format!("prueba-enumerar-{intento}"))
+                .spawn(|| {
+                    let host = rodio::cpal::default_host();
+                    host.output_devices()
+                        .map(|devices| devices.filter_map(|d| d.name().ok()).count())
+                        .unwrap_or(0)
+                })
+                .expect("hilo de prueba");
+            let cuantos = otro.join().expect("el hilo no debe entrar en panico");
+            eprintln!("enumeracion {intento} desde un hilo nuevo: {cuantos} dispositivos");
+            assert_eq!(
+                cuantos,
+                nombres.len(),
+                "la enumeracion {intento} no devolvio lo mismo que la primera"
+            );
+        }
+
+        // Sin tarjeta de sonido la lista puede estar vacia: eso no es un fallo del
+        // codigo, asi que se avisa y no se afirma nada.
+        if nombres.is_empty() {
+            eprintln!("esta maquina no tiene dispositivos de salida; nada que comprobar");
+            return;
+        }
+        assert!(
+            !nombres.iter().any(|n| n.is_empty()),
+            "hay un dispositivo sin nombre: {nombres:?}"
+        );
+    }
+
+    /// La lista no puede depender de que el audio funcione.
+    ///
+    /// Antes `list_devices()` abria el dispositivo por defecto: si eso fallaba —ocupado
+    /// por otro programa, un cable virtual en exclusiva, unos auriculares Bluetooth a
+    /// medio conectar— la pestana Voz se quedaba **sin ningun dispositivo**, aunque
+    /// enumerar no necesite abrir nada. Las dos vias tienen que dar lo mismo.
+    #[test]
+    fn la_lista_de_dispositivos_no_depende_de_abrir_ninguno() {
+        if let Some(problem) = disabled_reason() {
+            eprintln!("audio apagado por entorno, test omitido: {problem}");
+            return;
+        }
+
+        let directa = available_devices();
+        let por_el_enumerador = list_devices();
+
+        match (directa, por_el_enumerador) {
+            (Ok(a), Ok(b)) => assert_eq!(a, b, "las dos vias tienen que dar lo mismo"),
+            // En una maquina sin tarjeta las dos fallan: eso no es un fallo del codigo.
+            (Err(_), Err(_)) => eprintln!("esta maquina no tiene salidas; nada que comparar"),
+            (a, b) => panic!("una via dio lista y la otra no: {a:?} / {b:?}"),
+        }
+    }
+
+    /// Consultas seguidas: la lista ni se vacia ni cambia.
+    ///
+    /// Es la regresion del sintoma que se persigue —«despues de un rato ya no reconoce
+    /// ninguno»—. Con el codigo anterior cada vuelta creaba un hilo de audio, abria el
+    /// dispositivo por defecto y lo cerraba; bastaba que ese dispositivo estuviera
+    /// ocupado en el momento de la consulta para que la lista fallara.
+    #[test]
+    fn la_lista_de_dispositivos_aguanta_consultas_seguidas() {
+        if let Some(problem) = disabled_reason() {
+            eprintln!("audio apagado por entorno, test omitido: {problem}");
+            return;
+        }
+        let primera = match list_devices() {
+            Ok(lista) if !lista.is_empty() => lista,
+            Ok(_) => {
+                eprintln!("esta maquina no tiene salidas; nada que comprobar");
+                return;
+            }
+            Err(error) => {
+                eprintln!("sin dispositivos, test omitido: {error:#}");
+                return;
+            }
+        };
+
+        for vuelta in 2..=8 {
+            let lista = list_devices().unwrap_or_else(|error| {
+                panic!("la consulta {vuelta} fallo teniendo dispositivos: {error:#}")
+            });
+            assert_eq!(lista, primera, "la lista cambio en la consulta {vuelta}");
+        }
     }
 
     #[test]

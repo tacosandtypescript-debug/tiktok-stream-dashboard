@@ -24,7 +24,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   TIPOS_AVISO,
-  api,
   type AjusteAviso,
   type AjustesAlertas,
   type ImportacionMedios,
@@ -33,6 +32,7 @@ import {
   type TipoAviso,
 } from "../api";
 import { Card, Copiar, DialogoConfirmacion, Empty, VistaPrevia } from "../components";
+import { useDispositivosDeAudio } from "../dispositivos";
 import { PanelMensaje, rotuloMensaje } from "../PanelMensaje";
 import { mensajeDe } from "../mensaje";
 import { usePreviewAudio } from "../previewAudio";
@@ -238,8 +238,9 @@ export function Alertas({
   const [borrandoMedio, setBorrandoMedio] = useState(false);
   const disparadorBorrado = useRef<HTMLButtonElement | null>(null);
   const selector = useRef<HTMLInputElement | null>(null);
-  // La lista de dispositivos es la misma que la del lector de voz: una sola fuente.
-  const [dispositivos, setDispositivos] = useState<string[]>([]);
+  // La lista de dispositivos es la misma que la del lector de voz: una sola fuente,
+  // con el reintento que trae el gancho (antes se preguntaba una sola vez al montar).
+  const { dispositivos } = useDispositivosDeAudio();
   /**
    * El aviso que se esta editando.
    *
@@ -288,22 +289,6 @@ export function Alertas({
     }
   }, [borrandoMedio, busy, medioPendiente, onBorrarMedio]);
 
-  useEffect(() => {
-    let vivo = true;
-    void api
-      .ttsDevices()
-      .then((lista) => {
-        // Se comprueba que sea una lista y no se da por hecho: si el motor contesta
-        // otra cosa —o nada, como en el banco de la interfaz—, `dispositivos.map`
-        // reventaria la pagina entera. Un desplegable vacio es un problema; una
-        // pantalla en blanco es otro mucho peor.
-        if (vivo) setDispositivos(Array.isArray(lista) ? lista : []);
-      })
-      .catch(() => undefined);
-    return () => {
-      vivo = false;
-    };
-  }, []);
 
   /**
    * Un cambio en un aviso se guarda entero.

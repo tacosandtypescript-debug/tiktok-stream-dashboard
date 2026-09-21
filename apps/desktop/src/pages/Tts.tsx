@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type TtsCuota, type TtsProvider, type TtsStatus, type TtsVoice, type TtsVozGuardada } from "../api";
 import { Anillo, Card, Empty, formatDuration, formatNumber } from "../components";
+import { useDispositivosDeAudio } from "../dispositivos";
 import { t } from "../i18n/es";
 import { BibliotecaVoces } from "../voces/BibliotecaVoces";
 import { MenuVoz } from "../voces/MenuVoz";
@@ -63,7 +64,6 @@ interface Props {
 export function Tts({ initial, urlOverlay }: Props) {
   const [status, setStatus] = useState<TtsStatus | null>(initial);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
-  const [devices, setDevices] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   /** El saldo de la cuenta, preguntado aparte porque es una consulta de red. */
   const [cuota, setCuota] = useState<TtsCuota | null>(null);
@@ -122,20 +122,14 @@ export function Tts({ initial, urlOverlay }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    void api
-      .ttsDevices()
-      .then((lista) => {
-        if (active) setDevices(lista);
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(`${t.tts.deviceLoadError} ${String(cause)}`);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  /**
+   * Las salidas de audio, con su propio reintento.
+   *
+   * Se pregunta al abrir, cada vez con mas espera mientras la lista este vacia, y al
+   * volver la ventana a primer plano. Antes se preguntaba **una sola vez**: si esa
+   * consulta fallaba, la pantalla se quedaba sin ninguna salida hasta reiniciar.
+   */
+  const { dispositivos: devices, error: errorDispositivos } = useDispositivosDeAudio();
 
   /**
    * El saldo de la cuenta, preguntado a la API del motor.
@@ -397,6 +391,9 @@ export function Tts({ initial, urlOverlay }: Props) {
   return (
     <div className="grid-panel voz" data-vista={vista}>
       {error ? <div className="error">{error}</div> : null}
+      {errorDispositivos ? (
+        <div className="error">{`${t.tts.deviceLoadError} ${errorDispositivos}`}</div>
+      ) : null}
       {status.degraded ? (
         <div className="error">
           {t.tts.degraded(
