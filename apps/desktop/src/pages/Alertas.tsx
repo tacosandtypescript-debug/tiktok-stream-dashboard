@@ -462,6 +462,23 @@ export function Alertas({
   );
 
   /**
+   * Una miniatura que no se pudo pintar.
+   *
+   * Se apunta para no volver a pedirla —si no, un fichero que ya no está se
+   * reintentaría en cada pintado— y se deja en la consola **la dirección exacta**,
+   * que es lo único que permite seguir el fallo: el recuadro del placeholder se ve
+   * igual si el fichero no está, si el token no vale o si el WebView la bloqueó por
+   * su política de contenido. Sin la dirección, los tres casos son el mismo «no
+   * carga».
+   */
+  const marcarRota = useCallback((nombre: string, direccion: string | undefined) => {
+    console.error(
+      `no se pudo cargar la miniatura de «${nombre}»: ${direccion ?? "sin dirección: el servidor de overlays todavía no ha dado su URL"}`,
+    );
+    setRotas((antes) => new Set(antes).add(nombre));
+  }, []);
+
+  /**
    * Los medios que pasan el buscador.
    *
    * Se compara **sin acentos y sin mayúsculas**: los ficheros se llaman como los
@@ -841,7 +858,7 @@ export function Alertas({
                                 src={url}
                                 muted
                                 preload="metadata"
-                                onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                                onError={() => marcarRota(nombre, url)}
                               />
                             ) : (
                               <img
@@ -849,7 +866,7 @@ export function Alertas({
                                 src={url}
                                 alt=""
                                 loading="lazy"
-                                onError={() => setRotas((antes) => new Set(antes).add(nombre))}
+                                onError={() => marcarRota(nombre, url)}
                               />
                             )}
                             <span className="galeria-nombre">{nombre}</span>
