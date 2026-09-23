@@ -293,7 +293,7 @@ impl AppState {
                 crate::tts::Consumo::default()
             }
         };
-        let writer = DbWriter::start(database, DB_QUEUE);
+        let writer = DbWriter::start(database, DB_QUEUE)?;
         let native = Arc::new(NativeProvider::new(
             ProviderConfig::default(),
             bus.clone(),

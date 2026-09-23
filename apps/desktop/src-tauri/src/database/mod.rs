@@ -1153,7 +1153,7 @@ pub struct DbWriter {
 impl DbWriter {
     /// Arranca el hilo escritor. `capacity` acota la cola: si se llena, los
     /// trabajos descartables se descartan y se cuentan.
-    pub fn start(mut database: Database, capacity: usize) -> Self {
+    pub fn start(mut database: Database, capacity: usize) -> Result<Self> {
         let (tx, rx) = sync_channel::<WriteJob>(capacity);
         let dropped = Arc::new(AtomicU64::new(0));
         let written = Arc::new(AtomicU64::new(0));
@@ -1242,16 +1242,16 @@ impl DbWriter {
                     }
                 }
             })
-            .expect("no se pudo arrancar el hilo escritor");
+            .context("no se pudo arrancar el hilo escritor")?;
 
-        Self {
+        Ok(Self {
             tx,
             dropped,
             join: Mutex::new(Some(join)),
             written,
             write_errors,
             critical_write_errors,
-        }
+        })
     }
 
     /// Envio no bloqueante. Devuelve `false` si la cola estaba llena (el
@@ -2236,7 +2236,7 @@ mod tests {
 
         let database = Database::open(&path).expect("base en disco");
         database.migrate().expect("migraciones");
-        let writer = DbWriter::start(database, 4096);
+        let writer = DbWriter::start(database, 4096).expect("hilo escritor");
 
         assert!(writer.try_send(WriteJob::StreamStarted {
             stream_id: "s1".into(),
@@ -2273,7 +2273,7 @@ mod tests {
 
         let database = Database::open(&path).expect("base en disco");
         database.migrate().expect("migraciones");
-        let writer = DbWriter::start(database, 8);
+        let writer = DbWriter::start(database, 8).expect("hilo escritor");
         assert!(writer.try_send(WriteJob::StreamStarted {
             stream_id: "s1".into(),
             handle: "usuario".into(),
@@ -2306,7 +2306,7 @@ mod tests {
 
         let database = Database::open(&path).expect("base en disco");
         database.migrate().expect("migraciones");
-        let writer = DbWriter::start(database, 8);
+        let writer = DbWriter::start(database, 8).expect("hilo escritor");
         assert!(writer.try_send(WriteJob::Gift {
             // No existe el stream: la transaccion debe fallar por foreign key.
             stream_id: "missing".into(),

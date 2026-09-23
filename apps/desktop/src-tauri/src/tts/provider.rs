@@ -773,7 +773,9 @@ impl EdgeTtsSidecar {
         if guard.is_none() {
             *guard = Some(self.start().await?);
         }
-        let sidecar = guard.as_mut().expect("sidecar recien arrancado");
+        let sidecar = guard
+            .as_mut()
+            .ok_or_else(|| anyhow!("el sidecar no esta disponible despues de arrancarlo"))?;
 
         let mut line = serde_json::to_string(&request)?;
         line.push('\n');
