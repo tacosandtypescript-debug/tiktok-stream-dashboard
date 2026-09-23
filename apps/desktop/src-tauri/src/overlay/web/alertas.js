@@ -36,6 +36,43 @@
    */
   const enPrevia = parametros.get("previa") === "1";
 
+  /**
+   * Cursor de esta fuente, separado para la previa y para OBS.
+   *
+   * El WebSocket puede reconectar mientras un Browser Source cambia de escena.
+   * Guardar el cursor permite pedir solo lo que falto; la generacion evita que un
+   * `seq` de una ejecucion anterior se confunda con el primero del proceso nuevo.
+   * `localStorage` puede estar bloqueado en algun WebView, asi que no es requisito
+   * para que el overlay funcione.
+   */
+  const claveCursor = `ttdash-alertas:${location.host}:${enPrevia ? "previa" : "obs"}`;
+
+  function leerCursor() {
+    try {
+      const guardado = JSON.parse(localStorage.getItem(claveCursor) || "null");
+      const generacion = Number(guardado?.generacion);
+      const seq = Number(guardado?.seq);
+      return {
+        generacion: Number.isSafeInteger(generacion) && generacion > 0 ? generacion : 0,
+        seq: Number.isSafeInteger(seq) && seq > 0 ? seq : 0,
+      };
+    } catch {
+      return { generacion: 0, seq: 0 };
+    }
+  }
+
+  const cursorInicial = leerCursor();
+  let generacion = cursorInicial.generacion;
+  let ultimoSeq = cursorInicial.seq;
+
+  function guardarCursor() {
+    try {
+      localStorage.setItem(claveCursor, JSON.stringify({ generacion, seq: ultimoSeq }));
+    } catch {
+      // El cursor es una mejora de recuperacion, no una razon para romper la alerta.
+    }
+  }
+
   const caja = document.getElementById("caja");
   const imagen = document.getElementById("imagen");
   const video = document.getElementById("video");
@@ -560,6 +597,44 @@
     if (!representando) void sacar();
   }
 
+  /**
+   * Acepta una alerta del protocolo y la fusiona por `seq`.
+   *
+   * La foto inicial y los incrementales llegan por el mismo socket, pero una
+   * reconexion puede dejar la misma alerta en la foto pendiente y en el broadcast.
+   * El cursor es el equivalente de la fusion que usa la interfaz principal.
+   */
+  function recibir(aviso, generacionMensaje) {
+    if (!aviso) return;
+
+    const nuevaGeneracion = Number(generacionMensaje);
+    if (Number.isSafeInteger(nuevaGeneracion) && nuevaGeneracion > 0) {
+      if (generacion !== 0 && generacion !== nuevaGeneracion) {
+        // El servidor reinicio su cola: los seq viejos ya no representan alertas
+        // de esta ejecucion. Lo que ya esta visible termina; lo que esperaba era
+        // del proceso anterior y no debe reaparecer.
+        cola.length = 0;
+        ultimoSeq = 0;
+      }
+      generacion = nuevaGeneracion;
+    }
+
+    const seq = Number(aviso.seq);
+    if (Number.isSafeInteger(seq) && seq > 0) {
+      if (seq <= ultimoSeq) return;
+      ultimoSeq = seq;
+      guardarCursor();
+    }
+    encolar(aviso);
+  }
+
+  function recibirVarios(avisos, generacionMensaje) {
+    avisos
+      .filter((aviso) => aviso && Number.isSafeInteger(Number(aviso.seq)))
+      .sort((a, b) => Number(a.seq) - Number(b.seq))
+      .forEach((aviso) => recibir(aviso, generacionMensaje));
+  }
+
   async function sacar() {
     representando = true;
     while (cola.length > 0) {
@@ -734,7 +809,16 @@
 
   function conectar() {
     const url =
-      "ws://" + location.host + "/overlay?view=alerts&t=" + encodeURIComponent(token);
+      "ws://" +
+      location.host +
+      "/overlay?view=alerts&t=" +
+      encodeURIComponent(token) +
+      "&desde=" +
+      encodeURIComponent(String(ultimoSeq)) +
+      "&generacion=" +
+      encodeURIComponent(String(generacion)) +
+      "&origen=" +
+      encodeURIComponent(enPrevia ? "previa" : "obs");
     const socket = new WebSocket(url);
 
     socket.onopen = () => anunciar("En directo", true);
@@ -746,9 +830,10 @@
         console.error("mensaje de alertas ilegible", error);
         return;
       }
-      // Al conectar llegan los que se quedaron esperando; despues, uno a uno.
-      if (Array.isArray(mensaje.avisos)) mensaje.avisos.forEach(encolar);
-      if (mensaje.aviso) encolar(mensaje.aviso);
+      // Al conectar llega una foto acotada por cursor; despues, uno a uno. Ambos
+      // caminos entran por `recibir`, asi que la alerta no se duplica si se cruzan.
+      if (Array.isArray(mensaje.avisos)) recibirVarios(mensaje.avisos, mensaje.generacion);
+      if (mensaje.aviso) recibir(mensaje.aviso, mensaje.generacion);
     };
     socket.onclose = () => {
       anunciar("Reconectando…", false);

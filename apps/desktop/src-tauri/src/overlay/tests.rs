@@ -31,6 +31,9 @@ fn parametros(view: &str, diseno: &str) -> Parametros {
         view: view.to_string(),
         diseno: diseno.to_string(),
         t: String::new(),
+        desde: 0,
+        generacion: 0,
+        origen: String::new(),
     }
 }
 

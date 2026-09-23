@@ -116,8 +116,14 @@ enum MensajeOverlay {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum MensajeAlertas {
-    Alertas { avisos: Vec<crate::alerts::Aviso> },
-    Alerta { aviso: Box<crate::alerts::Aviso> },
+    Alertas {
+        generacion: u64,
+        avisos: Vec<crate::alerts::Aviso>,
+    },
+    Alerta {
+        generacion: u64,
+        aviso: Box<crate::alerts::Aviso>,
+    },
 }
 
 /// Celda compartida con el estado de la aplicacion.
@@ -228,6 +234,17 @@ pub(crate) struct Parametros {
     /// Token de acceso.
     #[serde(default)]
     t: String,
+    /// Cursor de la ultima alerta recibida por esta fuente.
+    #[serde(default)]
+    desde: u64,
+    /// Generacion de la cola que emitio el cursor. `seq` vuelve a empezar al
+    /// reiniciar la aplicacion y no se puede reutilizar sin esta segunda marca.
+    #[serde(default)]
+    generacion: u64,
+    /// `previa` identifica la fuente embebida en el editor. OBS no manda este
+    /// parametro y queda como la fuente que consume pendientes.
+    #[serde(default)]
+    origen: String,
 }
 
 /// Arranca el servidor en un hilo con su propio runtime.
@@ -712,7 +729,15 @@ async fn websocket(
     // La fuente de alertas no pide tablas: pide avisos.
     if params.view == VISTA_ALERTAS {
         let cola = estado.cola.clone();
-        return ws.on_upgrade(move |socket| atender_alertas(socket, cola));
+        return ws.on_upgrade(move |socket| {
+            atender_alertas(
+                socket,
+                cola,
+                params.desde,
+                params.generacion,
+                params.origen == "previa",
+            )
+        });
     }
 
     let vista = vista_para(&params.view).to_string();
@@ -727,26 +752,59 @@ async fn websocket(
 /// no es una tabla sino una cola de avisos que hay que entregar. Lo que si se
 /// respeta es la promesa de que un refresco no pierde nada: al conectar se lleva
 /// lo que se quedo esperando.
-async fn atender_alertas(mut socket: WebSocket, cola: Arc<crate::alerts::ColaAlertas>) {
+async fn atender_alertas(
+    mut socket: WebSocket,
+    cola: Arc<crate::alerts::ColaAlertas>,
+    desde: u64,
+    generacion: u64,
+    previa: bool,
+) {
     tracing::debug!("overlay de alertas conectado");
 
     // Se suscribe **antes** de leer lo pendiente: a partir de aqui, un aviso nuevo
     // va directo al receptor y no entra en la lista de espera, asi que no hay forma
     // de mandarlo dos veces.
     let mut receptor = cola.suscribir();
-    let pendientes = cola.pendientes();
-    if !pendientes.is_empty() {
-        let cuantos = pendientes.len();
-        let seqs: Vec<u64> = pendientes.iter().map(|aviso| aviso.seq).collect();
-        if enviar(&mut socket, &MensajeAlertas::Alertas { avisos: pendientes })
-            .await
-            .is_err()
+    if !previa {
+        // La previa es un observador mas del broadcast, pero no debe decidir que
+        // "ya hay fuente" para la cola de OBS ni retirar sus pendientes.
+        cola.registrar_obs();
+    }
+    let generacion_actual = cola.generacion();
+    let inicial = cola.avisos_para(generacion, desde);
+    let mut ultimo_enviado = if generacion == generacion_actual {
+        desde
+    } else {
+        0
+    };
+    if !inicial.is_empty() {
+        let cuantos = inicial.len();
+        let seqs: Vec<u64> = inicial.iter().map(|aviso| aviso.seq).collect();
+        ultimo_enviado = inicial
+            .iter()
+            .map(|aviso| aviso.seq)
+            .max()
+            .unwrap_or(ultimo_enviado);
+        if enviar(
+            &mut socket,
+            &MensajeAlertas::Alertas {
+                generacion: generacion_actual,
+                avisos: inicial,
+            },
+        )
+        .await
+        .is_err()
         {
+            if !previa {
+                cola.retirar_obs();
+            }
             return;
         }
         // Se dan por entregados despues de enviarlos: si el envio falla, siguen
         // esperando a la siguiente conexion en vez de perderse.
-        cola.entregar(&seqs);
+        if !previa {
+            cola.entregar(&seqs);
+        }
         tracing::debug!(cuantos, "avisos pendientes entregados al overlay");
     }
 
@@ -755,15 +813,53 @@ async fn atender_alertas(mut socket: WebSocket, cola: Arc<crate::alerts::ColaAle
             nuevo = receptor.recv() => {
                 match nuevo {
                     Ok(aviso) => {
-                        if enviar(&mut socket, &MensajeAlertas::Alerta { aviso: Box::new(aviso) }).await.is_err() {
+                        // La lectura inicial y el broadcast pueden solaparse: el
+                        // cursor evita mandar dos veces el mismo aviso por esa
+                        // ventana.
+                        if aviso.seq <= ultimo_enviado {
+                            continue;
+                        }
+                        if enviar(
+                            &mut socket,
+                            &MensajeAlertas::Alerta {
+                                generacion: generacion_actual,
+                                aviso: Box::new(aviso.clone()),
+                            },
+                        )
+                        .await
+                        .is_err()
+                        {
                             break;
                         }
+                        ultimo_enviado = aviso.seq;
                     }
-                    // Un suscriptor lento pierde avisos viejos en vez de consumir
-                    // memoria: es la politica del bus, y una alerta de hace rato ya
-                    // no interesa.
                     Err(broadcast::error::RecvError::Lagged(perdidos)) => {
-                        tracing::warn!(perdidos, "el overlay de alertas se salto avisos");
+                        // A diferencia del bus general, aqui el cliente tiene un
+                        // cursor y el servidor guarda una ventana corta. Se
+                        // reconstruye desde el ultimo seq mandado para que un
+                        // iframe lento no quede desincronizado en silencio.
+                        let replay = cola.avisos_despues(ultimo_enviado);
+                        if !replay.is_empty() {
+                            let maximo = replay
+                                .iter()
+                                .map(|aviso| aviso.seq)
+                                .max()
+                                .unwrap_or(ultimo_enviado);
+                            if enviar(
+                                &mut socket,
+                                &MensajeAlertas::Alertas {
+                                    generacion: generacion_actual,
+                                    avisos: replay,
+                                },
+                            )
+                            .await
+                            .is_err()
+                            {
+                                break;
+                            }
+                            ultimo_enviado = maximo;
+                        }
+                        tracing::warn!(perdidos, "el overlay de alertas recupero avisos atrasados");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -783,6 +879,9 @@ async fn atender_alertas(mut socket: WebSocket, cola: Arc<crate::alerts::ColaAle
         }
     }
 
+    if !previa {
+        cola.retirar_obs();
+    }
     tracing::debug!("overlay de alertas desconectado");
 }
 

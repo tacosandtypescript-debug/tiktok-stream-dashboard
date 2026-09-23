@@ -19,9 +19,9 @@
 //!     becomes active`, que es lo normal, un cambio de escena no se come la alerta
 //!     del regalo grande.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
@@ -36,6 +36,14 @@ use mensaje::MensajeAviso;
 /// Avisos que se guardan sin entregar. Mas alla de esto, lo viejo se descarta:
 /// una ristra de alertas de hace diez minutos no la quiere nadie.
 pub const TOPE_PENDIENTES: usize = 20;
+
+/// Ventana de replay para una fuente que se reconecta o se queda atras.
+///
+/// No sustituye a la cola de pendientes: esta conserva los avisos que aun no han
+/// llegado a una fuente de OBS, mientras que esta ventana solo permite reconstruir
+/// el tramo reciente de una conexion que ya tenia un cursor. Tiene que ser acotada:
+/// guardar cada alerta de un directo seria otra fuga de memoria.
+pub const TOPE_HISTORIAL: usize = 64;
 
 /// Tamano maximo de un medio importado.
 ///
@@ -1534,9 +1542,19 @@ fn limpiar_nombre(nombre: &str) -> String {
 pub struct ColaAlertas {
     /// Avisos que aun no ha recogido ninguna fuente.
     pendientes: Mutex<VecDeque<Aviso>>,
+    /// Ultimos avisos para recuperar una conexion que perdio el broadcast.
+    historial: Mutex<VecDeque<Aviso>>,
     /// Avisos nuevos, para las fuentes ya conectadas.
     emisor: tokio::sync::broadcast::Sender<Aviso>,
     siguiente_seq: AtomicU64,
+    /// Identifica la vida de esta cola: `seq` vuelve a empezar al reiniciar la
+    /// aplicacion, asi que el cursor del navegador no puede reutilizarse entre dos
+    /// procesos distintos.
+    generacion: u64,
+    /// Solo las fuentes de OBS cuentan para decidir si un aviso normal queda
+    /// pendiente. La previa del editor recibe el broadcast, pero no puede consumir
+    /// la cola que OBS necesitara al volver a su escena.
+    fuentes_obs: AtomicUsize,
     /// Cuantos se han tirado por no caber. Se cuenta: el plan obliga a contar lo
     /// que se descarta.
     descartados: AtomicU64,
@@ -1548,11 +1566,19 @@ impl ColaAlertas {
         let (emisor, _) = tokio::sync::broadcast::channel(64);
         Self {
             pendientes: Mutex::new(VecDeque::new()),
+            historial: Mutex::new(VecDeque::new()),
             emisor,
             siguiente_seq: AtomicU64::new(1),
+            generacion: generacion_de_cola(),
+            fuentes_obs: AtomicUsize::new(0),
             descartados: AtomicU64::new(0),
             entregados: AtomicU64::new(0),
         }
+    }
+
+    /// Identificador de esta ejecucion del servidor de alertas.
+    pub fn generacion(&self) -> u64 {
+        self.generacion
     }
 
     pub fn siguiente_seq(&self) -> u64 {
@@ -1565,11 +1591,17 @@ impl ColaAlertas {
     /// distincion la hace `send`, que falla precisamente cuando no queda ningun
     /// receptor, asi que no hay que llevar la cuenta de conexiones a mano.
     pub fn encolar(&self, aviso: Aviso) {
-        if self.emisor.send(aviso.clone()).is_ok() {
+        self.recordar(&aviso);
+        let enviado = self.emisor.send(aviso.clone()).is_ok();
+        if enviado {
             self.entregados.fetch_add(1, Ordering::Relaxed);
-            return;
         }
-        self.guardar(aviso);
+        // La previa siempre esta escuchando mientras se edita. No debe convertir
+        // ese hecho en "OBS ya recibio el aviso": si la escena de alertas esta
+        // oculta, el aviso espera para la fuente que si lo necesita.
+        if !enviado || self.fuentes_obs.load(Ordering::Acquire) == 0 {
+            self.guardar(aviso);
+        }
     }
 
     /// Encola una **prueba**, que ademas se queda esperando a las fuentes que no estan.
@@ -1592,9 +1624,45 @@ impl ColaAlertas {
         if let Ok(mut pendientes) = self.pendientes.lock() {
             pendientes.retain(|esperando| !esperando.prueba);
         }
-        self.guardar(aviso.clone());
-        // Y sale ya para quien este mirando, que es lo que hace util el boton.
-        let _ = self.emisor.send(aviso);
+        self.recordar(&aviso);
+        // Si OBS no esta conectado, la prueba tiene que esperar para que el cambio
+        // se pueda revisar al volver a la escena. Con OBS conectado basta el
+        // broadcast, y el historial cubre una reconexion que pierda el paquete.
+        let enviado = self.emisor.send(aviso.clone()).is_ok();
+        if enviado {
+            self.entregados.fetch_add(1, Ordering::Relaxed);
+        }
+        if !enviado || self.fuentes_obs.load(Ordering::Acquire) == 0 {
+            self.guardar(aviso);
+        }
+    }
+
+    /// Registra una fuente de OBS antes de leer sus pendientes.
+    ///
+    /// La previa no llama a esto: es un observador del panel, no la fuente que
+    /// decide si la cola del directo ya tiene a quien entregar un aviso.
+    pub fn registrar_obs(&self) {
+        self.fuentes_obs.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Retira una fuente de OBS al cerrar su WebSocket.
+    pub fn retirar_obs(&self) {
+        let _ = self
+            .fuentes_obs
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |actual| {
+                Some(actual.saturating_sub(1))
+            });
+    }
+
+    /// Conserva una copia pequena para reponer una conexion que se atraso.
+    fn recordar(&self, aviso: &Aviso) {
+        let Ok(mut historial) = self.historial.lock() else {
+            return;
+        };
+        historial.push_back(aviso.clone());
+        while historial.len() > TOPE_HISTORIAL {
+            historial.pop_front();
+        }
     }
 
     /// Aparta un aviso para la proxima fuente que se conecte, con su tope.
@@ -1625,9 +1693,52 @@ impl ColaAlertas {
         let Ok(mut pendientes) = self.pendientes.lock() else {
             return;
         };
+        let antes = pendientes.len();
         pendientes.retain(|aviso| !seqs.contains(&aviso.seq));
         self.entregados
-            .fetch_add(seqs.len() as u64, Ordering::Relaxed);
+            .fetch_add((antes - pendientes.len()) as u64, Ordering::Relaxed);
+    }
+
+    /// Avisos que debe recibir una conexion al abrirse.
+    ///
+    /// Una conexion nueva (`desde == 0`) solo recibe lo que estaba pendiente. Una
+    /// reconexion con el mismo `generacion` y un cursor recibe el tramo que conserva
+    /// el historial, mas cualquier pendiente posterior a ese cursor. El mapa elimina
+    /// duplicados cuando un aviso estuvo a la vez en ambas colecciones.
+    pub fn avisos_para(&self, generacion: u64, desde: u64) -> Vec<Aviso> {
+        let cursor = if generacion == self.generacion && desde > 0 {
+            desde
+        } else {
+            0
+        };
+        let mut por_seq = BTreeMap::new();
+
+        if cursor == 0 {
+            if let Ok(pendientes) = self.pendientes.lock() {
+                for aviso in pendientes.iter() {
+                    por_seq.entry(aviso.seq).or_insert_with(|| aviso.clone());
+                }
+            }
+        } else {
+            if let Ok(historial) = self.historial.lock() {
+                for aviso in historial.iter().filter(|aviso| aviso.seq > cursor) {
+                    por_seq.entry(aviso.seq).or_insert_with(|| aviso.clone());
+                }
+            }
+            if let Ok(pendientes) = self.pendientes.lock() {
+                for aviso in pendientes.iter().filter(|aviso| aviso.seq > cursor) {
+                    por_seq.entry(aviso.seq).or_insert_with(|| aviso.clone());
+                }
+            }
+        }
+
+        por_seq.into_values().collect()
+    }
+
+    /// Avisos recientes posteriores a un cursor, para recuperar un receptor que
+    /// recibio `broadcast::RecvError::Lagged` sin cerrar el Browser Source.
+    pub fn avisos_despues(&self, desde: u64) -> Vec<Aviso> {
+        self.avisos_para(self.generacion, desde)
     }
 
     pub fn suscribir(&self) -> tokio::sync::broadcast::Receiver<Aviso> {
@@ -1641,6 +1752,19 @@ impl ColaAlertas {
     pub fn entregados(&self) -> u64 {
         self.entregados.load(Ordering::Relaxed)
     }
+}
+
+/// Generacion suficientemente distinta entre dos arranques, incluso si `seq`
+/// vuelve a empezar en uno. El contador cubre dos colas creadas en el mismo tick;
+/// el reloj y el PID cubren un reinicio del proceso.
+fn generacion_de_cola() -> u64 {
+    static CONTADOR: AtomicU64 = AtomicU64::new(1);
+    let reloj = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duracion| duracion.as_nanos() as u64)
+        .unwrap_or(0);
+    let contador = CONTADOR.fetch_add(1, Ordering::Relaxed);
+    reloj ^ (std::process::id() as u64).rotate_left(32) ^ contador
 }
 
 impl Default for ColaAlertas {
@@ -2384,7 +2508,9 @@ mod tests {
         cola.entregar(&pendientes.iter().map(|a| a.seq).collect::<Vec<_>>());
         assert!(cola.pendientes().is_empty(), "entregados se vacian");
 
-        // Y con una fuente conectada, el siguiente va directo.
+        // Y con una fuente de OBS conectada, el siguiente va directo. Un receptor
+        // cualquiera puede ser la previa del editor y no cuenta para esta garantia.
+        cola.registrar_obs();
         let _receptor = cola.suscribir();
         cola.encolar(Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste));
         assert!(
@@ -2392,6 +2518,48 @@ mod tests {
             "con receptor no se queda en la cola"
         );
         assert_eq!(cola.entregados(), 2);
+        cola.retirar_obs();
+    }
+
+    /// La previa recibe la alerta, pero no puede consumir la que OBS necesita al
+    /// cambiar de escena. Antes cualquier WebSocket bastaba para que `encolar` no
+    /// guardara nada, asi que editar con la previa abierta podia esconder alertas al
+    /// publico.
+    #[test]
+    fn la_previa_no_consume_la_alerta_que_espera_obs() {
+        let cola = ColaAlertas::nueva();
+        let ajuste = AjustesAlertas::de_fabrica().gift;
+        let _previa = cola.suscribir();
+
+        cola.encolar(Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste));
+
+        assert_eq!(cola.pendientes().len(), 1);
+    }
+
+    /// Una reconexion pide lo posterior a su cursor y recibe los avisos en orden,
+    /// aunque el aviso siga tambien en la cola de pendientes.
+    #[test]
+    fn el_replay_de_alertas_fusiona_historial_y_pendientes_por_seq() {
+        let cola = ColaAlertas::nueva();
+        let ajuste = AjustesAlertas::de_fabrica().gift;
+        cola.registrar_obs();
+        let _obs = cola.suscribir();
+
+        let primero = Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste);
+        let segundo = Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste);
+        cola.encolar(primero.clone());
+        cola.encolar(segundo.clone());
+
+        let replay = cola.avisos_para(cola.generacion(), primero.seq);
+        assert_eq!(
+            replay.iter().map(|aviso| aviso.seq).collect::<Vec<_>>(),
+            vec![segundo.seq]
+        );
+        assert!(
+            cola.avisos_para(cola.generacion() ^ 1, 0).is_empty(),
+            "una generacion vieja no puede reaparecer por un cursor del proceso anterior"
+        );
+        cola.retirar_obs();
     }
 
     /// La cola tiene tope y lo que sobra se cuenta: el plan obliga a contar lo que
@@ -2635,13 +2803,13 @@ mod tests {
             "la prueba viaja con el tamaño puesto, que es lo que se va a mirar"
         );
 
-        // Un aviso de verdad **no** se queda esperando: si hay alguien escuchando, se
-        // entrega, que es como funciona un directo.
+        // La previa no cuenta como fuente de OBS: el aviso normal tambien debe quedar
+        // esperando hasta que la escena del directo tenga una fuente conectada.
         cola.encolar(Aviso::demo(cola.siguiente_seq(), TipoAviso::Gift, &ajuste));
         assert_eq!(
             cola.pendientes().len(),
-            1,
-            "un aviso normal no se acumula detras de la prueba"
+            2,
+            "la previa no debe consumir el aviso que espera OBS"
         );
     }
 
