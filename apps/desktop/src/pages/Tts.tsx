@@ -61,6 +61,19 @@ interface Props {
   urlOverlay?: string;
 }
 
+type PlantillaCampo = "chat" | "regalo" | "follow";
+type Plantillas = Record<PlantillaCampo, string>;
+
+const CAMPOS_PLANTILLAS: readonly PlantillaCampo[] = ["chat", "regalo", "follow"];
+
+function plantillasDesdeEstado(status: TtsStatus): Plantillas {
+  return {
+    chat: status.settings.chat_template,
+    regalo: status.settings.gift_template,
+    follow: status.settings.follow_template,
+  };
+}
+
 export function Tts({ initial, urlOverlay }: Props) {
   const [status, setStatus] = useState<TtsStatus | null>(initial);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
@@ -95,19 +108,53 @@ export function Tts({ initial, urlOverlay }: Props) {
   const [vista, setVista] = useState<"sonando" | "voces">("sonando");
 
   /** Las tres plantillas de lectura, en local mientras se escriben. */
-  const [plantillas, setPlantillas] = useState<{
-    chat: string;
-    regalo: string;
-    follow: string;
-  } | null>(null);
+  const [plantillas, setPlantillas] = useState<Plantillas | null>(null);
+  /** Campos que el usuario tiene abiertos: no se reemplazan desde el polling. */
+  const plantillasEnEdicion = useRef<Set<PlantillaCampo>>(new Set());
+  /**
+   * Valores que ya se mandaron a Rust, pero que todavía no han sido confirmados
+   * por un estado. Protege contra una respuesta vieja del polling que llegue
+   * después del `ttsUpdate`.
+   */
+  const plantillasPendientes = useRef<Partial<Record<PlantillaCampo, string>>>({});
+  /** Último valor de backend visto, para distinguir cambio real de otro tick. */
+  const ultimoBackendPlantillas = useRef<Plantillas | null>(null);
+
   useEffect(() => {
-    if (!status || plantillas) return;
-    setPlantillas({
-      chat: status.settings.chat_template,
-      regalo: status.settings.gift_template,
-      follow: status.settings.follow_template,
+    if (!status) return;
+    const backend = plantillasDesdeEstado(status);
+    const anterior = ultimoBackendPlantillas.current;
+    ultimoBackendPlantillas.current = backend;
+
+    setPlantillas((actual) => {
+      if (!actual) return backend;
+
+      let siguiente: Plantillas | null = null;
+      for (const campo of CAMPOS_PLANTILLAS) {
+        if (anterior && anterior[campo] === backend[campo]) continue;
+
+        const pendiente = plantillasPendientes.current[campo];
+        if (pendiente !== undefined && pendiente === backend[campo]) {
+          delete plantillasPendientes.current[campo];
+        }
+
+        if (
+          plantillasEnEdicion.current.has(campo) ||
+          plantillasPendientes.current[campo] !== undefined
+        ) {
+          continue;
+        }
+
+        if (!siguiente) siguiente = { ...actual };
+        siguiente[campo] = backend[campo];
+      }
+      return siguiente ?? actual;
     });
-  }, [status, plantillas]);
+  }, [
+    status?.settings.chat_template,
+    status?.settings.gift_template,
+    status?.settings.follow_template,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -311,14 +358,38 @@ export function Tts({ initial, urlOverlay }: Props) {
    *
    * El estado de la voz llega cada segundo; si el campo se pintara desde ahi, el
    * cursor saltaria al final mientras se escribe. Es el mismo trato que el texto
-   * de los avisos de OBS. Se siembra una sola vez, cuando llega el primer estado.
+   * de los avisos de OBS: se siembra al llegar el primer estado, se resincroniza
+   * cuando cambia el backend y se respeta el borrador mientras el campo esta en uso.
    */
 
-  const guardarPlantilla = (cual: "chat" | "regalo" | "follow") => {
+  const editarPlantilla = (cual: PlantillaCampo, valor: string) => {
+    plantillasEnEdicion.current.add(cual);
+    setPlantillas((actual) => (actual ? { ...actual, [cual]: valor } : actual));
+  };
+
+  const guardarPlantilla = (cual: PlantillaCampo) => {
     if (!plantillas) return;
-    if (cual === "chat") update({ chat_template: plantillas.chat });
-    else if (cual === "regalo") update({ gift_template: plantillas.regalo });
-    else update({ follow_template: plantillas.follow });
+    plantillasEnEdicion.current.delete(cual);
+
+    const valor = plantillas[cual];
+    plantillasPendientes.current[cual] = valor;
+    const patch =
+      cual === "chat"
+        ? { chat_template: valor }
+        : cual === "regalo"
+          ? { gift_template: valor }
+          : { follow_template: valor };
+
+    void api
+      .ttsUpdate(patch)
+      .then(() => api.ttsStatus())
+      .then(setStatus)
+      .catch((cause: unknown) => {
+        if (plantillasPendientes.current[cual] === valor) {
+          delete plantillasPendientes.current[cual];
+        }
+        setError(String(cause));
+      });
   };
 
   /**
@@ -971,9 +1042,8 @@ export function Tts({ initial, urlOverlay }: Props) {
                     value={plantillas.chat}
                     spellCheck={false}
                     maxLength={160}
-                    onChange={(event) =>
-                      setPlantillas({ ...plantillas, chat: event.target.value })
-                    }
+                    onFocus={() => plantillasEnEdicion.current.add("chat")}
+                    onChange={(event) => editarPlantilla("chat", event.target.value)}
                     onBlur={() => guardarPlantilla("chat")}
                   />
                 </div>
@@ -984,9 +1054,8 @@ export function Tts({ initial, urlOverlay }: Props) {
                     value={plantillas.regalo}
                     spellCheck={false}
                     maxLength={160}
-                    onChange={(event) =>
-                      setPlantillas({ ...plantillas, regalo: event.target.value })
-                    }
+                    onFocus={() => plantillasEnEdicion.current.add("regalo")}
+                    onChange={(event) => editarPlantilla("regalo", event.target.value)}
                     onBlur={() => guardarPlantilla("regalo")}
                   />
                 </div>
@@ -997,9 +1066,8 @@ export function Tts({ initial, urlOverlay }: Props) {
                     value={plantillas.follow}
                     spellCheck={false}
                     maxLength={160}
-                    onChange={(event) =>
-                      setPlantillas({ ...plantillas, follow: event.target.value })
-                    }
+                    onFocus={() => plantillasEnEdicion.current.add("follow")}
+                    onChange={(event) => editarPlantilla("follow", event.target.value)}
                     onBlur={() => guardarPlantilla("follow")}
                   />
                 </div>
