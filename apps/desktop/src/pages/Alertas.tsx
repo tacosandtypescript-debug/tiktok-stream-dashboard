@@ -219,13 +219,20 @@ export function Alertas({
    */
   const [resultado, setResultado] = useState<ImportacionMedios | null>(null);
   /**
-   * Las miniaturas que no cargaron.
-   *
-   * Se recuerda el fallo para no volver a pedirlas en cada pintado: sin esto, un
-   * fichero que ya no está se reintentaría cada segundo y la consola se llenaría de
-   * errores de red.
+   * Fallos de miniaturas por nombre: 0 no ha fallado, 1 permite un reintento y 2
+   * enseña el placeholder. El primer fallo puede ser la carrera normal entre el
+   * arranque del servidor de overlays y el WebView; dejarlo muerto para siempre
+   * hacia que la biblioteca pareciera rota hasta desmontar la pestaña.
    */
-  const [rotas, setRotas] = useState<Set<string>>(() => new Set());
+  const [fallosMiniaturas, setFallosMiniaturas] = useState<Map<string, number>>(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    // El token y el origen pueden cambiar al reiniciar el servidor. Los fallos de la
+    // URL anterior no describen la nueva y no deben conservar un placeholder viejo.
+    setFallosMiniaturas(new Map());
+  }, [url]);
   /**
    * Lo que se ha escrito en el buscador de medios.
    *
@@ -446,21 +453,37 @@ export function Alertas({
     [url],
   );
 
+  /** Agrega un intento acotado sin convertir un error transitorio en estado final. */
+  const urlMiniatura = useCallback((direccion: string | undefined, intento: number) => {
+    if (!direccion || intento < 1) return direccion;
+    try {
+      const destino = new URL(direccion);
+      destino.searchParams.set("reintento", String(intento));
+      return destino.toString();
+    } catch {
+      return direccion;
+    }
+  }, []);
+
   /**
    * Una miniatura que no se pudo pintar.
    *
-   * Se apunta para no volver a pedirla —si no, un fichero que ya no está se
-   * reintentaría en cada pintado— y se deja en la consola **la dirección exacta**,
-   * que es lo único que permite seguir el fallo: el recuadro del placeholder se ve
-   * igual si el fichero no está, si el token no vale o si el WebView la bloqueó por
-   * su política de contenido. Sin la dirección, los tres casos son el mismo «no
-   * carga».
+   * Se permite un solo reintento con una URL distinta para sacar de la caché un 404
+   * o un fallo de arranque. Si vuelve a fallar se deja el placeholder y se conserva
+   * la dirección exacta en la consola: es lo que permite distinguir un fichero que
+   * falta, un token inválido o una política del WebView.
    */
   const marcarRota = useCallback((nombre: string, direccion: string | undefined) => {
     console.error(
       `no se pudo cargar la miniatura de «${nombre}»: ${direccion ?? "sin dirección: el servidor de overlays todavía no ha dado su URL"}`,
     );
-    setRotas((antes) => new Set(antes).add(nombre));
+    setFallosMiniaturas((antes) => {
+      const intento = antes.get(nombre) ?? 0;
+      if (intento >= 2) return antes;
+      const siguiente = new Map(antes);
+      siguiente.set(nombre, intento + 1);
+      return siguiente;
+    });
   }, []);
 
   /**
@@ -824,8 +847,9 @@ export function Alertas({
                     {imagenes.map((nombre) => {
                       const puesto =
                         ajustes[elegido].medio === nombre || ajustes[elegido].sonido === nombre;
-                      const url = urlMedio(nombre);
-                      const rota = rotas.has(nombre) || !url;
+                      const intento = fallosMiniaturas.get(nombre) ?? 0;
+                      const url = urlMiniatura(urlMedio(nombre), intento);
+                      const rota = intento >= 2 || !url;
                       return (
                         <li key={nombre} className={puesto ? "puesto" : undefined}>
                           <button
