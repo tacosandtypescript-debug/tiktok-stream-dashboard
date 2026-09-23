@@ -208,6 +208,51 @@
     return /\.(mp4|webm)$/i.test(nombre);
   }
 
+  /**
+   * Espera a que el medio pueda pintarse, pero nunca deja la cola esperando para
+   * siempre. El servidor entrega ficheros locales, aun asi un GIF grande puede
+   * necesitar varios turnos del navegador para decodificarse y `src` no significa
+   * que ya haya un fotograma visible.
+   *
+   * La misma cancelacion que usa la permanencia permite que el boton Probar tome el
+   * relevo durante una carga lenta. El resultado falso no es un error fatal: quien
+   * llama quita el medio roto y deja pasar el texto o el siguiente aviso.
+   */
+  const TIEMPO_MAXIMO_CARGA_MEDIO_MS = 2000;
+  function esperarCargaMedio(elemento, eventoListo, estaListo, mio) {
+    return new Promise((resolver) => {
+      let terminado = false;
+      let temporizador = null;
+
+      const quitarEscuchas = () => {
+        elemento.removeEventListener(eventoListo, listo);
+        elemento.removeEventListener("error", fallo);
+        if (cortarEspera === cancelar) cortarEspera = null;
+      };
+
+      const terminar = (cargado) => {
+        if (terminado) return;
+        terminado = true;
+        if (temporizador !== null) clearTimeout(temporizador);
+        quitarEscuchas();
+        resolver(cargado && mio === relevo);
+      };
+
+      const cancelar = () => terminar(false);
+      const listo = () => terminar(true);
+      const fallo = () => terminar(false);
+
+      elemento.addEventListener(eventoListo, listo);
+      elemento.addEventListener("error", fallo);
+      cortarEspera = cancelar;
+      temporizador = setTimeout(() => terminar(false), TIEMPO_MAXIMO_CARGA_MEDIO_MS);
+
+      // El evento puede haber ocurrido entre la asignacion de `src` y la instalacion
+      // de los listeners, sobre todo con un fichero pequeño en la cache de WebView.
+      if (estaListo()) terminar(true);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // El motor de animaciones
   // ---------------------------------------------------------------------------
@@ -660,8 +705,10 @@
     video.classList.remove("puesto");
     video.pause();
     video.removeAttribute("src");
+    video.load();
     sonido.pause();
     sonido.removeAttribute("src");
+    sonido.load();
     // El mensaje se para antes de vaciar la caja: deja el texto de una pieza —las
     // animaciones por letra lo trocean— y cancela lo que estuviera corriendo, para que
     // el aviso siguiente no herede ni una caja suelta ni un temporizador.
@@ -711,17 +758,55 @@
         video.muted = true;
         video.volume = volumen;
         video.loop = false;
-        video.classList.add("puesto");
-        // `play()` puede rechazar (autoplay). No es motivo para no enseñar el
-        // aviso: se ve igual, sin sonido.
-        video.play().catch(() => undefined);
+        const cargado = await esperarCargaMedio(
+          video,
+          "loadeddata",
+          () => video.readyState >= 2,
+          mio,
+        );
+        if (mio !== relevo) {
+          limpiar();
+          return;
+        }
+        if (cargado) {
+          video.classList.add("puesto");
+          // `play()` puede rechazar (autoplay). No es motivo para no enseñar el
+          // aviso: se ve igual, sin sonido.
+          video.play().catch(() => undefined);
+        } else {
+          video.removeAttribute("src");
+          video.load();
+        }
       } else {
         imagen.src = url;
-        imagen.classList.add("puesto");
+        const cargado = await esperarCargaMedio(
+          imagen,
+          "load",
+          () => imagen.complete && imagen.naturalWidth > 0,
+          mio,
+        );
+        if (mio !== relevo) {
+          limpiar();
+          return;
+        }
+        if (cargado) {
+          imagen.classList.add("puesto");
+        } else {
+          imagen.removeAttribute("src");
+        }
       }
     }
 
     if (textoDelAviso.trim()) texto.textContent = textoDelAviso;
+
+    // Un aviso que era solo un fichero roto no tiene nada que enseñar; no ocupa el
+    // turno entero ni retrasa los siguientes. Si trae texto, ese texto sigue siendo
+    // una alerta valida aunque el medio haya fallado.
+    if (!imagen.classList.contains("puesto") && !video.classList.contains("puesto") && !textoDelAviso.trim()) {
+      enPantalla = null;
+      limpiar();
+      return;
+    }
 
     // El contenedor del mensaje: **primero el estilo**, antes de que se vea nada. Si se
     // pintara despues, el primer fotograma del aviso saldria con el estilo del anterior,
