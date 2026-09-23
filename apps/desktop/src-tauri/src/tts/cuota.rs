@@ -132,6 +132,10 @@ pub fn parsear(cuerpo: &str) -> Result<Cuota, String> {
 #[derive(Debug, Default)]
 pub struct Saldo {
     ultima: Option<(Instant, Result<Cuota, String>)>,
+    /// Version de invalidacion. Evita que una respuesta que salio antes de
+    /// cambiar de clave vuelva a llenar el cache con el saldo de la cuenta
+    /// anterior.
+    version: u64,
 }
 
 impl Saldo {
@@ -147,6 +151,28 @@ impl Saldo {
     /// Apunta lo que se pregunto.
     pub fn apuntar(&mut self, cuando: Instant, resultado: Result<Cuota, String>) {
         self.ultima = Some((cuando, resultado));
+    }
+
+    /// Guarda una respuesta solo si sigue perteneciendo a la generacion que la
+    /// inicio. Devuelve `false` cuando una invalidacion ocurrio mientras la API
+    /// estaba en vuelo.
+    pub fn apuntar_si(
+        &mut self,
+        version: u64,
+        cuando: Instant,
+        resultado: Result<Cuota, String>,
+    ) -> bool {
+        if self.version != version {
+            return false;
+        }
+        self.apuntar(cuando, resultado);
+        true
+    }
+
+    /// Generacion actual del cache, para asociar una consulta en vuelo con la
+    /// clave que estaba vigente cuando comenzo.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// Lo que hay que enseñar, con la antiguedad puesta al dia.
@@ -178,6 +204,7 @@ impl Saldo {
     /// nada que ver con el de la anterior, asi que el dato guardado deja de valer.
     pub fn invalidar(&mut self) {
         self.ultima = None;
+        self.version = self.version.wrapping_add(1);
     }
 }
 
@@ -443,5 +470,16 @@ mod tests {
         saldo.invalidar();
         assert!(saldo.toca(cero + Duration::from_secs(1)));
         assert!(saldo.status(cero + Duration::from_secs(1)).is_none());
+    }
+
+    #[test]
+    fn una_respuesta_de_otra_generacion_no_vuelve_a_llenar_el_cache() {
+        let cero = Instant::now();
+        let mut saldo = Saldo::default();
+        let version = saldo.version();
+        saldo.invalidar();
+
+        assert!(!saldo.apuntar_si(version, cero, Ok(parsear(REAL).expect("respuesta real")),));
+        assert!(saldo.status(cero).is_none());
     }
 }

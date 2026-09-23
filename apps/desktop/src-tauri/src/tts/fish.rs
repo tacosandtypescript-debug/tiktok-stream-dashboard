@@ -48,6 +48,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::providers::BoxFuture;
 use crate::secreto::Secreto;
@@ -571,6 +572,10 @@ pub struct FishAudio {
     api: Arc<dyn ClienteApi>,
     /// Lo ultimo que se pregunto del saldo y cuando, para no repetirlo.
     saldo: Mutex<Saldo>,
+    /// Solo una consulta de saldo externa a la vez. Los llamantes que lleguen
+    /// durante ella vuelven a mirar `Saldo` al adquirir este cerrojo y usan la
+    /// respuesta recien guardada en vez de abrir otra peticion.
+    cuota_en_curso: AsyncMutex<()>,
     estado: RwLock<FishEstado>,
     calls: AtomicU64,
     failures: AtomicU64,
@@ -606,9 +611,6 @@ impl FishAudio {
     /// que la interfaz puede llamar a esto en cada refresco sin que eso se
     /// traduzca en una consulta a la API.
     pub async fn cuota(&self) -> Option<CuotaStatus> {
-        // El candado **no** se mantiene durante el `await`: si se mantuviera, una
-        // respuesta lenta de la API dejaria esperando a quien solo quiere leer el
-        // numero de antes.
         let toca = self
             .saldo
             .lock()
@@ -616,14 +618,29 @@ impl FishAudio {
             .toca(Instant::now());
 
         if toca {
-            let resultado = match self.clave_activa() {
-                Some(clave) => self.cuota_cliente.pedir(&clave).await,
-                None => Err("no hay ninguna clave con la que preguntar el saldo".to_string()),
+            // No se mantiene el Mutex sincrono durante el `await`: este cerrojo
+            // asincrono serializa solo la consulta externa, no las lecturas del
+            // estado. Al entrar se vuelve a mirar el cache: otra llamada pudo
+            // haberlo llenado mientras esperabamos.
+            let _consulta = self.cuota_en_curso.lock().await;
+            let (toca, version) = {
+                let saldo = self.saldo.lock().unwrap_or_else(|e| e.into_inner());
+                (saldo.toca(Instant::now()), saldo.version())
             };
-            self.saldo
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .apuntar(Instant::now(), resultado);
+
+            if toca {
+                let resultado = match self.clave_activa() {
+                    Some(clave) => self.cuota_cliente.pedir(&clave).await,
+                    None => Err("no hay ninguna clave con la que preguntar el saldo".to_string()),
+                };
+                // Si se anadio, quito o reactivo una clave mientras la consulta
+                // estaba en vuelo, no se puede presentar su respuesta como si
+                // perteneciera al estado nuevo.
+                self.saldo
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .apuntar_si(version, Instant::now(), resultado);
+            }
         }
 
         self.saldo
@@ -662,6 +679,7 @@ impl FishAudio {
             cuota_cliente,
             api,
             saldo: Mutex::new(Saldo::default()),
+            cuota_en_curso: AsyncMutex::new(()),
             estado: RwLock::new(FishEstado {
                 claves: Vec::new(),
                 activa: None,
@@ -2059,6 +2077,105 @@ mod tests {
             Consumo::default(),
         );
         (provider, api)
+    }
+
+    struct CuotaLenta {
+        llamadas: std::sync::atomic::AtomicUsize,
+        iniciada: Arc<tokio::sync::Notify>,
+        liberar: Arc<tokio::sync::Notify>,
+    }
+
+    impl CuotaLenta {
+        fn nueva() -> Arc<Self> {
+            Arc::new(Self {
+                llamadas: std::sync::atomic::AtomicUsize::new(0),
+                iniciada: Arc::new(tokio::sync::Notify::new()),
+                liberar: Arc::new(tokio::sync::Notify::new()),
+            })
+        }
+    }
+
+    impl ClienteCuota for CuotaLenta {
+        fn pedir<'a>(
+            &'a self,
+            _clave: &'a Secreto,
+        ) -> crate::providers::BoxFuture<'a, std::result::Result<crate::tts::cuota::Cuota, String>>
+        {
+            self.llamadas.fetch_add(1, Ordering::Relaxed);
+            self.iniciada.notify_one();
+            let liberar = self.liberar.clone();
+            Box::pin(async move {
+                liberar.notified().await;
+                Ok(crate::tts::cuota::Cuota {
+                    total: Some(100),
+                    restante: Some(75),
+                    tipo: "free".into(),
+                })
+            })
+        }
+    }
+
+    fn con_cuota_lenta(cliente: Arc<CuotaLenta>) -> FishAudio {
+        let provider = FishAudio::con_todo(
+            config(),
+            TransporteFalso::nuevo(vec![]),
+            cliente,
+            Arc::new(ClienteHttpApi::nuevo(Duration::from_secs(1))),
+        );
+        provider.cargar(
+            vec![ClaveGuardada::nueva(
+                0,
+                "la de marzo",
+                Secreto::new("clave-AAA"),
+            )],
+            Consumo::default(),
+        );
+        provider
+    }
+
+    #[tokio::test]
+    async fn las_consultas_de_cuota_concurrentes_comparten_la_peticion() {
+        let cliente = CuotaLenta::nueva();
+        let provider = Arc::new(con_cuota_lenta(cliente.clone()));
+
+        let primera = {
+            let provider = provider.clone();
+            tokio::spawn(async move { provider.cuota().await })
+        };
+        cliente.iniciada.notified().await;
+
+        let segunda = {
+            let provider = provider.clone();
+            tokio::spawn(async move { provider.cuota().await })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(cliente.llamadas.load(Ordering::Relaxed), 1);
+
+        cliente.liberar.notify_one();
+        assert!(primera.await.expect("primera consulta").is_some());
+        assert!(segunda.await.expect("segunda consulta").is_some());
+        assert_eq!(cliente.llamadas.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn una_invalidacion_no_deja_guardada_la_cuota_de_la_clave_anterior() {
+        let cliente = CuotaLenta::nueva();
+        let provider = Arc::new(con_cuota_lenta(cliente.clone()));
+        let consulta = {
+            let provider = provider.clone();
+            tokio::spawn(async move { provider.cuota().await })
+        };
+        cliente.iniciada.notified().await;
+
+        provider
+            .agregar("la nueva", Secreto::new("clave-BBB"))
+            .expect("se puede guardar otra clave");
+        cliente.liberar.notify_one();
+
+        assert!(consulta.await.expect("consulta vieja").is_none());
+        cliente.liberar.notify_one();
+        assert!(provider.cuota().await.is_some());
+        assert_eq!(cliente.llamadas.load(Ordering::Relaxed), 2);
     }
 
     #[tokio::test]

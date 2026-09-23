@@ -80,6 +80,8 @@ export function Tts({ initial, urlOverlay }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** El saldo de la cuenta, preguntado aparte porque es una consulta de red. */
   const [cuota, setCuota] = useState<TtsCuota | null>(null);
+  /** Evita que un intervalo lento abra otra consulta antes de que termine. */
+  const cuotaEnVuelo = useRef(false);
   /** Nombre y valor de la clave que se está dando de alta. */
   const [claveNombre, setClaveNombre] = useState("");
   const [claveValor, setClaveValor] = useState("");
@@ -200,6 +202,8 @@ export function Tts({ initial, urlOverlay }: Props) {
   useEffect(() => {
     let active = true;
     const tick = () => {
+      if (cuotaEnVuelo.current) return;
+      cuotaEnVuelo.current = true;
       void api
         .ttsCuota()
         .then((nuevo) => {
@@ -208,6 +212,9 @@ export function Tts({ initial, urlOverlay }: Props) {
         .catch(() => {
           // El comando no falla por red —eso viaja dentro del estado—: si falla
           // es que el puente no está, y de eso ya avisa el estado.
+        })
+        .finally(() => {
+          cuotaEnVuelo.current = false;
         });
     };
     tick();
