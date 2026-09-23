@@ -78,6 +78,26 @@ async function invocarPorHttp<T>(cmd: string, args?: Record<string, unknown>): P
 const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> =>
   enEscritorio ? invocarTauri<T>(cmd, args) : invocarPorHttp<T>(cmd, args);
 
+/**
+ * Orden de las órdenes que tocan el monitor de previews.
+ *
+ * `invoke` lanza comandos independientes: si «probar» todavía está cruzando IPC
+ * cuando llega «parar», el segundo puede ejecutarse antes y el primero arrancaría
+ * después, dejando audio sonando aunque la interfaz ya se hubiese apagado. Solo se
+ * serializan estas tres mutaciones; las consultas (`previewEstado`) y el resto del
+ * panel siguen siendo concurrentes.
+ */
+let colaPreviewMotor: Promise<unknown> = Promise.resolve();
+
+function ordenarPreview<T>(accion: () => Promise<T>): Promise<T> {
+  const siguiente = colaPreviewMotor.then(accion, accion);
+  colaPreviewMotor = siguiente.then(
+    () => undefined,
+    () => undefined,
+  );
+  return siguiente;
+}
+
 /** A quién avisar cuando el canal de eventos se vuelve a abrir. */
 const reconectados = new Set<() => void>();
 
@@ -1182,7 +1202,8 @@ export const api = {
     invoke<Snapshot>("borrar_medio_alerta", { nombre }),
 
   /** Encola un aviso de prueba para verlo en OBS sin esperar a que pase algo. */
-  probarAlerta: (tipo: string) => invoke<Snapshot>("probar_alerta", { tipo }),
+  probarAlerta: (tipo: string) =>
+    ordenarPreview(() => invoke<Snapshot>("probar_alerta", { tipo })),
 
   /**
    * Suena un medio en el monitor del streamer, sin encolar ningún aviso.
@@ -1191,7 +1212,7 @@ export const api = {
    * estuviera sonando en el monitor y **pide el turno del preview**: ver
    * `previewAudio.tsx`.
    */
-  oirMedio: (nombre: string) => invoke<void>("oir_medio", { nombre }),
+  oirMedio: (nombre: string) => ordenarPreview(() => invoke<void>("oir_medio", { nombre })),
 
   /**
    * Para el audio de previsualización que esté sonando.
@@ -1205,7 +1226,7 @@ export const api = {
    * incondicional, que es lo que se quiere cuando el streamer pulsa «Parar».
    */
   pararPreview: (esperado?: DuenioPreview | null) =>
-    invoke<void>("parar_preview", { esperado: esperado ?? null }),
+    ordenarPreview(() => invoke<void>("parar_preview", { esperado: esperado ?? null })),
 
   /**
    * Quién tiene el turno del preview, si alguien.
