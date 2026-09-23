@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { TtsFiltrosVoces, TtsVozFish } from "../api";
-import { ErrorVoces, vocesApi } from "./vocesApi";
+import { claveCatalogo, ErrorVoces, vocesApi } from "./vocesApi";
 
 /** Cuanto se espera desde la ultima tecla antes de preguntar. */
 export const ESPERA_BUSQUEDA = 350;
@@ -64,12 +64,16 @@ export function useCatalogo(
     return () => clearTimeout(reloj);
   }, [filtros.buscar]);
 
-  const clave = JSON.stringify({
+  const clave = claveCatalogo({
     buscar,
-    idioma: filtros.idioma ?? "",
-    tag: filtros.tag ?? "",
-    autor: filtros.autor ?? "",
-    propios: filtros.propios ?? false,
+    idioma: filtros.idioma,
+    tag: filtros.tag,
+    autor: filtros.autor,
+    propios: filtros.propios,
+    // Esta clave describe los filtros cargados, no una pagina concreta: las
+    // paginas adicionales siguen acumulándose dentro del mismo resultado.
+    pagina: 1,
+    tamano: POR_PAGINA,
   });
 
   const pedir = useCallback(
