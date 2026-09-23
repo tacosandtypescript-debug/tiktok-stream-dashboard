@@ -17,6 +17,7 @@ import {
   type WireEvent,
 } from "./api";
 import { formatDuration, formatNumber } from "./components";
+import { crearColaDeGuardados, type Actualizar } from "./alertasGuardado";
 import { t } from "./i18n/es";
 import { usePreviewAudio } from "./previewAudio";
 import { Aportaciones } from "./pages/Aportaciones";
@@ -247,6 +248,8 @@ export function App() {
   const [overlayBusy, setOverlayBusy] = useState(false);
   /** Mientras el motor confirma un cambio de alertas o importa un medio. */
   const [alertasBusy, setAlertasBusy] = useState(false);
+  /** Base confirmada y cola de escrituras completas de la pestaña Alertas. */
+  const alertasGuardado = useRef(crearColaDeGuardados(ALERTAS_VACIAS));
   const [totals, setTotals] = useState<Totals>(EMPTY_TOTALS);
   const [tab, setTab] = useState<Tab>("chat");
   const [handle, setHandle] = useState("");
@@ -354,6 +357,7 @@ export function App() {
    */
   const applySnapshot = useCallback((next: Snapshot | null | undefined) => {
     if (!next) return;
+    alertasGuardado.current.sincronizar(next.alertas);
     setSnapshot(next);
     setStatus(next.status);
     setDetail(next.status_detail);
@@ -919,8 +923,30 @@ export function App() {
   );
 
   const guardarAlertas = useCallback(
-    (ajustes: AjustesAlertas) => accionAlertas(() => api.setAlertas(ajustes)),
-    [accionAlertas],
+    (actualizar: Actualizar<AjustesAlertas>) => {
+      const mia = (alertasPeticion.current += 1);
+      setAlertasBusy(true);
+      const trabajo = alertasGuardado.current.encolar(actualizar, async (ajustes) => {
+        const next = await api.setAlertas(ajustes);
+        // Los guardados ya salen en orden: cada respuesta confirma la base del
+        // siguiente y debe pintar aunque despues se haya pulsado otro aviso.
+        applySnapshot(next);
+        setError(null);
+        return next.alertas;
+      });
+      void trabajo
+        .catch((cause: unknown) => {
+          setError(String(cause));
+        })
+        .finally(() => {
+          // `mia` evita que una accion posterior quite el ocupado de un guardado
+          // que todavia tiene hermanos en la cola.
+          if (mia === alertasPeticion.current && !alertasGuardado.current.hayPendientes()) {
+            setAlertasBusy(false);
+          }
+        });
+    },
+    [applySnapshot],
   );
   const importarMedioBytes = useCallback(
     (nombre: string, bytes: number[]) =>

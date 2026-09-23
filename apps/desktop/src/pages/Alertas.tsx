@@ -36,6 +36,7 @@ import { useDispositivosDeAudio } from "../dispositivos";
 import { PanelMensaje, rotuloMensaje } from "../PanelMensaje";
 import { mensajeDe } from "../mensaje";
 import { usePreviewAudio } from "../previewAudio";
+import type { Actualizar } from "../alertasGuardado";
 import {
   ANIMACIONES,
   ANIMACION_MAXIMA_S,
@@ -183,7 +184,8 @@ interface Props {
   audioDispositivo: string | null;
   audioProblema: string | null;
   busy: boolean;
-  onGuardar: (ajustes: AjustesAlertas) => void;
+  /** Actualiza el objeto completo cuando el guardado llega a su turno. */
+  onGuardar: (actualizar: Actualizar<AjustesAlertas>) => void;
   onImportarBytes: (nombre: string, bytes: number[]) => void;
   /** Importa varios ficheros —o una carpeta— de golpe. */
   onImportarRutas: (rutas: string[]) => Promise<ImportacionMedios>;
@@ -302,7 +304,8 @@ export function Alertas({
    *
    * Entero y no un parche porque son cinco ajustes pequeños: mandar solo el campo
    * tocado obligaría al motor a fusionar, que es donde se cuelan los campos que
-   * nadie quería cambiar.
+   * nadie quería cambiar. El callback es funcional para que la cola construya ese
+   * objeto entero sobre la ultima foto confirmada, no sobre la de este render.
    */
   /**
    * Un cambio en la salida de audio se guarda entero, como los avisos.
@@ -312,19 +315,22 @@ export function Alertas({
    */
   const onSalida = useCallback(
     (parche: Partial<SalidaAlertas>) => {
-      onGuardar({ ...ajustes, salida: { ...ajustes.salida, ...parche } });
+      onGuardar((actuales) => ({
+        ...actuales,
+        salida: { ...actuales.salida, ...parche },
+      }));
     },
-    [ajustes, onGuardar],
+    [onGuardar],
   );
 
   const cambiar = useCallback(
     (tipo: TipoAviso, campo: keyof AjusteAviso, valor: AjusteAviso[keyof AjusteAviso]) => {
-      onGuardar({
-        ...ajustes,
-        [tipo]: { ...ajustes[tipo], [campo]: valor },
-      });
+      onGuardar((actuales) => ({
+        ...actuales,
+        [tipo]: { ...actuales[tipo], [campo]: valor },
+      }));
     },
-    [ajustes, onGuardar],
+    [onGuardar],
   );
 
   /**
@@ -337,12 +343,12 @@ export function Alertas({
    */
   const cambiarVarios = useCallback(
     (tipo: TipoAviso, parche: Partial<AjusteAviso>) => {
-      onGuardar({
-        ...ajustes,
-        [tipo]: { ...ajustes[tipo], ...parche },
-      });
+      onGuardar((actuales) => ({
+        ...actuales,
+        [tipo]: { ...actuales[tipo], ...parche },
+      }));
     },
-    [ajustes, onGuardar],
+    [onGuardar],
   );
 
   /**
@@ -354,9 +360,15 @@ export function Alertas({
    */
   const cambiarMensaje = useCallback(
     (parche: Partial<MensajeAviso>) => {
-      cambiarVarios(elegido, { mensaje: { ...mensajeDe(ajustes[elegido]), ...parche } });
+      onGuardar((actuales) => ({
+        ...actuales,
+        [elegido]: {
+          ...actuales[elegido],
+          mensaje: { ...mensajeDe(actuales[elegido]), ...parche },
+        },
+      }));
     },
-    [ajustes, cambiarVarios, elegido],
+    [elegido, onGuardar],
   );
 
   // Arrastrar un fichero a la ventana. Tauri da la **ruta**, que es justo lo que
