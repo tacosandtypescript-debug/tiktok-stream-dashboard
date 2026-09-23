@@ -90,6 +90,13 @@ export function Tts({ initial, urlOverlay }: Props) {
   const [altaClave, setAltaClave] = useState(false);
   /** La tarjeta de las claves, para poder llevarle el foco desde la biblioteca. */
   const clavesRef = useRef<HTMLDivElement | null>(null);
+  /** Evita que dos consultas de estado se solapen. */
+  const estadoEnVuelo = useRef(false);
+  /** Invalida respuestas que empezaron antes de una mutacion mas reciente. */
+  const versionEstado = useRef(0);
+  /** Las mutaciones esperan en orden y mantienen el polling fuera de la carrera. */
+  const mutacionesEnCurso = useRef(0);
+  const colaMutaciones = useRef(Promise.resolve());
 
   /**
    * Qué mitad de la página se está mirando.
@@ -214,12 +221,24 @@ export function Tts({ initial, urlOverlay }: Props) {
   useEffect(() => {
     let active = true;
     const tick = () => {
+      if (mutacionesEnCurso.current > 0 || estadoEnVuelo.current) return;
+      const version = ++versionEstado.current;
+      estadoEnVuelo.current = true;
       void api
         .ttsStatus()
         .then((nuevo) => {
-          if (active) setStatus(nuevo);
+          if (active && version === versionEstado.current && mutacionesEnCurso.current === 0) {
+            setStatus(nuevo);
+          }
         })
-        .catch((cause: unknown) => setError(String(cause)));
+        .catch((cause: unknown) => {
+          if (active && version === versionEstado.current && mutacionesEnCurso.current === 0) {
+            setError(String(cause));
+          }
+        })
+        .finally(() => {
+          estadoEnVuelo.current = false;
+        });
     };
     tick();
     const timer = window.setInterval(tick, 1000);
@@ -229,20 +248,49 @@ export function Tts({ initial, urlOverlay }: Props) {
     };
   }, []);
 
+  /**
+   * Ejecuta una orden que cambia el estado TTS y trae una confirmacion despues.
+   *
+   * El polling de un segundo puede alcanzar a una orden en vuelo. Todas las
+   * mutaciones pasan por esta cola, y cada respuesta lleva una version: si otra
+   * mutacion comenzo despues, la respuesta anterior ya no puede pintar el estado.
+   */
+  const encolarMutacion = (
+    comando: () => Promise<unknown>,
+    callbacks: {
+      ok?: () => void;
+      fallo?: (cause: unknown) => void;
+    } = {},
+  ) => {
+    mutacionesEnCurso.current += 1;
+    // Invalida cualquier tick que ya estuviera esperando antes de la orden.
+    versionEstado.current += 1;
+
+    const trabajo = colaMutaciones.current
+      .then(async () => {
+        await comando();
+        const version = ++versionEstado.current;
+        const nuevo = await api.ttsStatus();
+        if (version === versionEstado.current) setStatus(nuevo);
+        callbacks.ok?.();
+      })
+      .catch((cause: unknown) => {
+        (callbacks.fallo ?? ((error) => setError(String(error))))(cause);
+      })
+      .finally(() => {
+        mutacionesEnCurso.current -= 1;
+      });
+
+    colaMutaciones.current = trabajo;
+    void trabajo;
+  };
+
   const update = (patch: Parameters<typeof api.ttsUpdate>[0]) => {
-    void api
-      .ttsUpdate(patch)
-      .then(() => api.ttsStatus())
-      .then(setStatus)
-      .catch((cause: unknown) => setError(String(cause)));
+    encolarMutacion(() => api.ttsUpdate(patch));
   };
 
   const action = (name: string, value?: string) => {
-    void api
-      .ttsAction(name, value)
-      .then(() => api.ttsStatus())
-      .then(setStatus)
-      .catch((cause: unknown) => setError(String(cause)));
+    encolarMutacion(() => api.ttsAction(name, value));
   };
 
   /** Cambia de motor de voz. Lo que estaba en cola se descarta (lo explica Rust). */
@@ -265,27 +313,29 @@ export function Tts({ initial, urlOverlay }: Props) {
       return;
     }
     setErrorClave(null);
-    void api
-      .ttsKeyAdd(nombre, valor)
-      .then((nuevo) => {
-        setStatus(nuevo);
-        // El campo se vacía: la clave ya está guardada y no se puede volver a leer.
-        setClaveNombre("");
-        setClaveValor("");
-      })
-      .catch((cause: unknown) => setErrorClave(String(cause)));
+    encolarMutacion(
+      () => api.ttsKeyAdd(nombre, valor),
+      {
+        ok: () => {
+          // El campo se vacía: la clave ya está guardada y no se puede volver a leer.
+          setClaveNombre("");
+          setClaveValor("");
+        },
+        fallo: (cause) => setErrorClave(String(cause)),
+      },
+    );
   };
 
   const accionClave = (accion: "quitar" | "reintentar" | "apagar", id: number) => {
-    const llamada =
-      accion === "quitar"
-        ? api.ttsKeyRemove(id)
-        : accion === "apagar"
-          ? api.ttsKeyDisable(id)
-          : api.ttsKeyReset(id);
-    void llamada
-      .then(setStatus)
-      .catch((cause: unknown) => setErrorClave(String(cause)));
+    encolarMutacion(
+      () =>
+        accion === "quitar"
+          ? api.ttsKeyRemove(id)
+          : accion === "apagar"
+            ? api.ttsKeyDisable(id)
+            : api.ttsKeyReset(id),
+      { fallo: (cause) => setErrorClave(String(cause)) },
+    );
   };
 
   /**
@@ -306,10 +356,10 @@ export function Tts({ initial, urlOverlay }: Props) {
   const renombrarClave = (id: number, actual: string) => {
     const propuesto = window.prompt(t.tts.keyRenombrarAviso, actual);
     if (propuesto === null) return;
-    void api
-      .ttsKeyRename(id, propuesto)
-      .then(setStatus)
-      .catch((cause: unknown) => setErrorClave(String(cause)));
+    encolarMutacion(
+      () => api.ttsKeyRename(id, propuesto),
+      { fallo: (cause) => setErrorClave(String(cause)) },
+    );
   };
 
   /**
@@ -380,16 +430,14 @@ export function Tts({ initial, urlOverlay }: Props) {
           ? { gift_template: valor }
           : { follow_template: valor };
 
-    void api
-      .ttsUpdate(patch)
-      .then(() => api.ttsStatus())
-      .then(setStatus)
-      .catch((cause: unknown) => {
+    encolarMutacion(() => api.ttsUpdate(patch), {
+      fallo: (cause) => {
         if (plantillasPendientes.current[cual] === valor) {
           delete plantillasPendientes.current[cual];
         }
         setError(String(cause));
-      });
+      },
+    });
   };
 
   /**
@@ -1118,12 +1166,10 @@ export function Tts({ initial, urlOverlay }: Props) {
                   <select
                     value={status.settings.audio_device ?? ""}
                     onChange={(event) => {
-                      void api
-                        .ttsSelectDevice(event.target.value || null)
-                        .then(setStatus)
-                        .catch((cause: unknown) =>
+                      encolarMutacion(() => api.ttsSelectDevice(event.target.value || null), {
+                        fallo: (cause) =>
                           setError(`${t.tts.deviceSelectError} ${String(cause)}`),
-                        );
+                      });
                     }}
                   >
                     <option value="">{t.tts.deviceDefault}</option>
