@@ -23,8 +23,8 @@ use super::metrics::Metrics;
 const DEDUPE_CAPACITY: usize = 8192;
 
 struct Dedupe {
-    order: VecDeque<String>,
-    seen: HashSet<String>,
+    order: VecDeque<Arc<str>>,
+    seen: HashSet<Arc<str>>,
 }
 
 impl Dedupe {
@@ -45,8 +45,12 @@ impl Dedupe {
                 self.seen.remove(&oldest);
             }
         }
-        self.order.push_back(id.to_string());
-        self.seen.insert(id.to_string());
+        // La clave vive una sola vez en el heap. El orden y el conjunto
+        // comparten el mismo bloque mediante `Arc`, evitando dos
+        // asignaciones por evento deduplicado en el hot path.
+        let owned: Arc<str> = Arc::from(id);
+        self.order.push_back(owned.clone());
+        self.seen.insert(owned);
         true
     }
 }
